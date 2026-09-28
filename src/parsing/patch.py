@@ -19,6 +19,7 @@ File patch:
     data/patches/<doc_id_bat_ky_phan_nao_cua_ten>.json
     {
       "note": "vi sao phai va",
+      "vlm_pages": [15, 31, 41],
       "pages": {
         "15": {
           "note": "docling bo sot code + bang mau",
@@ -35,6 +36,12 @@ File patch:
 `fix_images` thay mô tả VLM tả SAI (vd ảnh Tết bị tả thành "mâm cỗ Trung Thu"). Key là
 `block_id` — lấy bằng `python src/parsing/cli.py out/parsed/<ten>.json --page N --full`.
 Chuỗi rỗng "" = ảnh trang trí, bỏ khỏi index. Ảnh sửa xong mang `provenance: "manual"`.
+
+`vlm_pages` = NGƯỜI chọn trang nào được gọi VLM tả ảnh. Deck ảnh nền trang trí (Onboarding
+Kit: gần như trang nào cũng có một ảnh phủ 100% trang) mà để docling tả hết thì tốn tiền và
+nhét mô tả nền vào index. `scripts/parse_api.py` đọc CÙNG key này để chỉ gửi ảnh các trang đó
+cho VLM; ở đây ảnh trang ngoài danh sách đổi `not_described` -> `skipped`, không bắn cờ đỏ.
+Không có key = như cũ, tả mọi ảnh.
 """
 
 from __future__ import annotations
@@ -87,6 +94,17 @@ def apply_patch(doc: ParsedDocument, patch: dict[str, Any]) -> ParsedDocument:
             page.blocks = [b for b in page.blocks if ".m" not in b.id]
             page.page_hash = page.compute_hash()
 
+    n_skip = 0
+    if patch.get("vlm_pages") is not None:
+        keep = {int(p) for p in patch["vlm_pages"]}
+        for page in doc.pages:
+            if page.page_no in keep:
+                continue
+            for im in page.images:
+                if im.why_empty == "not_described":
+                    im.why_empty = "skipped"
+                    n_skip += 1
+
     for raw_no, spec in pages.items():
         page = doc.page(int(raw_no))
         if page is None:
@@ -119,6 +137,6 @@ def apply_patch(doc: ParsedDocument, patch: dict[str, Any]) -> ParsedDocument:
 
         page.page_hash = page.compute_hash()   # vá xong hash đổi -> S4 biết trang này khác
 
-    log.info("  patch: them %d block, sua %d mo ta anh, tren %d trang",
-             n_block, n_fix, len(pages))
+    log.info("  patch: them %d block, sua %d mo ta anh, tren %d trang, %d anh ngoai vlm_pages",
+             n_block, n_fix, len(pages), n_skip)
     return doc

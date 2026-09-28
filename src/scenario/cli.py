@@ -23,7 +23,8 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from parsing.models import ParsedDocument
-from scenario.generate import DEFAULT_MODEL, load_prompt, render_prompt, run_deck
+from llm import DEFAULT_MODEL
+from scenario.generate import load_prompt, render_prompt, run_deck
 from scenario.models import Scenario
 from scenario.syllables import Pronunciation
 

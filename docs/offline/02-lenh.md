@@ -52,6 +52,9 @@ Ghi chú:
 - File `.pdf` thì ở ① thay `.pptx` bằng `.pdf`. Tên file có dấu cách thì bọc trong ngoặc kép:
   `"out\parse_api\3_DataVisualization (1).json"`.
 - ② tự áp file vá tay `data\patches\<ten>.json` nếu có.
+- Deck ảnh chỉ để trang trí: ghi `"vlm_pages": [15, 31, 41]` vào file vá **trước khi chạy ①**
+  → ① chỉ gửi ảnh các trang đó cho VLM, ② ghi ảnh trang khác là `skipped` (không bắn cờ đỏ).
+  Không có key = tả mọi ảnh. Ví dụ: `data\patches\onboarding_kit.json`.
 - ② thoát mã `1` khi có cờ mức `error` — vẫn ghi file bình thường, mã lỗi để CI bắt.
 - ③ chữ không đổi thì lấy vector từ cache, không gọi API.
 - ③b chạy lại **không mất** mục người đã duyệt (`by: "nguoi"`), chỉ ghi đè mục `auto`.

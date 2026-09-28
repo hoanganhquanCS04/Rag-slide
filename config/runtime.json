@@ -1,0 +1,12 @@
+{
+  "_note": "calibrated=false: cổng tin cậy đang dùng biên RRF, CHƯA fit trên bộ eval có nhãn (CLAUDE.md §6). Có reranker + bộ 50 câu thì fit lại.",
+  "calibrated": false,
+  "gate_min_margin": 0.002,
+  "top_k": 5,
+  "max_contexts": 3,
+  "history_turns": 3,
+  "max_answer_sentences": 4,
+  "llm_timeout_s": 30,
+  "llm_retry": 1,
+  "llm_extra": {}
+}

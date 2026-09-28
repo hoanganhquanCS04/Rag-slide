@@ -68,7 +68,7 @@ class Searcher:
     """Nạp một lần, hỏi nhiều lần. Dựng bảng BM25 lúc khởi tạo (~10ms cho 52 chunk)."""
 
     def __init__(self, chunks_path: str | Path, *, vectors_path: str | Path | None = None,
-                 model_id: str = MODEL_ID):
+                 model_id: str = MODEL_ID, embed_retry: int = 4):
         from rank_bm25 import BM25Okapi
 
         cp = Path(chunks_path)
@@ -88,6 +88,7 @@ class Searcher:
         # KHÔNG dùng text_raw (§10) — index phải khớp đúng thứ đã đem đi nhúng.
         self.bm25 = BM25Okapi([tokenize(c.text_enriched) for c in self.chunks])
         self.model_id = model_id
+        self.embed_retry = embed_retry
         self._emb: Embedder | None = None
         log.info("nap %d chunk + vector %s | model %s",
                  len(self.chunks), tuple(self.M.shape), model_id)
@@ -96,7 +97,7 @@ class Searcher:
     def embedder(self) -> Embedder:
         """Nạp lười: chạy --sparse-only thì khỏi cần khoá API."""
         if self._emb is None:
-            self._emb = Embedder(self.model_id)
+            self._emb = Embedder(self.model_id, retry=self.embed_retry)
         return self._emb
 
     # ------------------------------------------------------------------ tìm

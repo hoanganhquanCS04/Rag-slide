@@ -10,6 +10,9 @@ default của docling. Delta duy nhất so với `docling convert` là ba dòng:
     python scripts/parse_api.py "data/raw/Chương1.pdf"
     python scripts/parse_api.py "data/raw/Chương1.pdf" --pages 1-4
 
+Có `vlm_pages` trong file vá `data/patches/<ten>.json` thì CHỈ ảnh các trang đó được gửi
+VLM (người chọn — deck ảnh nền trang trí). Không có thì tả mọi ảnh như default.
+
 Xuất ra CẢ .md lẫn .json. File .json là DoclingDocument đầy đủ — giữ `prov`
 (page_no + bbox) của từng item, thứ mà markdown vứt đi và S3/S5 cần để truy nguyên.
 
@@ -20,6 +23,7 @@ import argparse
 import logging
 import os
 import time
+from collections import Counter
 from pathlib import Path
 
 # Phải đặt TRƯỚC khi import huggingface_hub (layout/table model vẫn tải local).
@@ -64,6 +68,44 @@ def page_range(spec: str | None, total: int) -> tuple[int, int]:
         return (int(lo), int(hi))
     p = int(spec)
     return (p, p)
+
+
+def vlm_pages_for(pdf: Path) -> tuple[set[int] | None, Path | None]:
+    """`vlm_pages` trong file vá của tài liệu -> (trang được gọi VLM, file vá).
+
+    Đọc CÙNG file vá mà bước ② (src/parsing/cli.py) tự áp, nên hai bước không lệch nhau.
+    Không có file vá hoặc không có key -> (None, ...) = tả mọi ảnh như cũ.
+    """
+    sys.path.insert(0, str(ROOT / "src"))
+    from parsing.from_docling import slugify_doc_id
+    from parsing.patch import find_patch, load_patch
+
+    pf = find_patch(slugify_doc_id(pdf.stem), ROOT / "data" / "patches")
+    if pf is None:
+        return None, None
+    pages = load_patch(pf).get("vlm_pages")
+    return ({int(p) for p in pages} if pages is not None else None), pf
+
+
+def limit_vlm_to_pages(pages: set[int]) -> None:
+    """Chỉ gửi ảnh của `pages` cho VLM.
+
+    docling chỉ có ngưỡng diện tích (`picture_area_threshold`), không lọc được theo trang.
+    `is_processable` là móc docling hỏi TRƯỚC khi cắt ảnh gửi đi, chặn ở đây thì ảnh ngoài
+    danh sách không tốn request nào. Móc này là code bên trong docling (ghim 2.129.0 trong
+    requirements.txt) — nâng docling mà nó đổi thì `finish` cảnh báo ảnh bị tả ngoài danh sách.
+    """
+    from docling.models.stages.picture_description.picture_description_api_model import (
+        PictureDescriptionApiModel,
+    )
+
+    base = PictureDescriptionApiModel.is_processable
+
+    def is_processable(self, doc, element) -> bool:
+        prov = getattr(element, "prov", None) or []
+        return base(self, doc, element) and bool(prov) and prov[0].page_no in pages
+
+    PictureDescriptionApiModel.is_processable = is_processable
 
 
 def main() -> None:
@@ -113,6 +155,11 @@ def main() -> None:
         provenance=f"{args.model}@api",
     )
 
+    vlm_pages, pf = vlm_pages_for(pdf)
+    if vlm_pages is not None:
+        limit_vlm_to_pages(vlm_pages)
+        log.info("VLM chi chay trang %s — theo %s", sorted(vlm_pages), pf.relative_to(ROOT))
+
     is_pptx = pdf.suffix.lower() == ".pptx"
     if is_pptx:
         # PPTX: docling đọc thẳng XML (SimplePipeline) — KHÔNG có layout model, KHÔNG vẽ
@@ -142,7 +189,7 @@ def main() -> None:
                                          DocumentConverter, PdfFormatOption, InputFormat)
 
     doc = res.document
-    finish(doc, res, dt, total, lo, hi, pdf, args)
+    finish(doc, res, dt, total, lo, hi, pdf, args, vlm_pages)
 
 
 def run_pdf(pdf, args, vlm, PdfPipelineOptions, DocumentConverter, PdfFormatOption, InputFormat):
@@ -174,7 +221,7 @@ def run_pdf(pdf, args, vlm, PdfPipelineOptions, DocumentConverter, PdfFormatOpti
     return res, time.perf_counter() - t0, total, lo, hi
 
 
-def finish(doc, res, dt, total, lo, hi, pdf, args) -> None:
+def finish(doc, res, dt, total, lo, hi, pdf, args, vlm_pages: set[int] | None = None) -> None:
     # docling nhan `provenance` trong options nhung KHONG doc no:
     # PictureDescriptionApiModel.__init__ khong gan self.provenance, nen created_by
     # ket o "not-implemented" cua lop cha. Dong dau vao day de NT2 con truy duoc
@@ -195,9 +242,11 @@ def finish(doc, res, dt, total, lo, hi, pdf, args) -> None:
     (outdir / f"{tag}.md").write_text(md, encoding="utf-8")
     doc.save_as_json(outdir / f"{tag}.json")
 
-    described = sum(
-        1 for p in doc.pictures if getattr(p, "meta", None) and getattr(p.meta, "description", None)
+    described_on = Counter(
+        p.prov[0].page_no for p in doc.pictures
+        if p.prov and getattr(p, "meta", None) and getattr(p.meta, "description", None)
     )
+    described = sum(described_on.values())
 
     n = max(hi - lo + 1, 1)
     per_page = dt / n
@@ -207,6 +256,11 @@ def finish(doc, res, dt, total, lo, hi, pdf, args) -> None:
     if n < total:
         log.info("    -> uoc tinh ca file %d trang: ~%.0fs (~%.1f phut)", total, per_page * total, per_page * total / 60)
     log.info("    markdown %d ky tu | pictures=%d (mo ta %d) tables=%d", len(md), len(doc.pictures), described, len(doc.tables))
+    if vlm_pages is not None:
+        log.info("    vlm_pages: da ta %s", ", ".join(f"p{k}={v}" for k, v in sorted(described_on.items())) or "0 anh")
+        outside = sorted(set(described_on) - vlm_pages)
+        if outside:
+            log.warning("    anh bi ta NGOAI vlm_pages, trang %s — bo loc khong an (docling doi?)", outside)
     log.info("ghi -> %s.{md,json}", outdir / tag)
 
 

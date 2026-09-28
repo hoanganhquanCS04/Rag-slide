@@ -200,12 +200,16 @@ class ParsedImage(Block):
 
         decorative             logo, hoạ tiết — VLM xem rồi, không có nội dung. Hợp lệ.
         area_below_threshold   ảnh nhỏ quá, không gọi VLM. Hợp lệ.
+        skipped                trang nằm ngoài `vlm_pages` của file vá — NGƯỜI chọn không gọi.
+                               Hợp lệ. Deck ảnh nền trang trí: phần lớn ảnh sẽ mang lý do này.
         not_described          ảnh ĐỦ TO mà không có mô tả -> mất nội dung thật, CẦN XEM.
         api_error              gọi VLM mà lỗi -> chạy lại là có thể được, CẦN XEM.
     """
 
     kind: Literal["image"] = "image"
-    why_empty: Literal["decorative", "area_below_threshold", "not_described", "api_error"] | None = None
+    why_empty: Literal[
+        "decorative", "area_below_threshold", "skipped", "not_described", "api_error"
+    ] | None = None
 
     @property
     def needs_review(self) -> bool:

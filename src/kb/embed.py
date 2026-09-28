@@ -51,11 +51,19 @@ def _key(text: str, model_id: str) -> str:
     return hashlib.sha1(f"{model_id}\x00{text}".encode()).hexdigest()
 
 
+class EmbedError(SystemExit):
+    """Gọi API nhúng thất bại. Là SystemExit để CLI thoát gọn như cũ; runtime bắt riêng lỗi
+    này để lùi về chỉ BM25 thay vì làm khán giả chờ."""
+
+
 class Embedder:
-    """Gọi /v1/embeddings. Có cache trên đĩa theo hash nội dung."""
+    """Gọi /v1/embeddings. Có cache trên đĩa theo hash nội dung.
+
+    `retry`: offline để 4 (đợi 1+2+4+8s); runtime để 1 — khán giả đang chờ.
+    """
 
     def __init__(self, model_id: str = MODEL_ID, *,
-                 cache_dir: str | Path = "out/kb/.embed_cache"):
+                 cache_dir: str | Path = "out/kb/.embed_cache", retry: int = RETRY):
         import httpx   # KHÔNG dùng urllib: Cloudflare chặn User-Agent Python-urllib (lỗi 1010)
 
         try:    # cùng cách scripts/parse_api.py lấy khoá
@@ -71,6 +79,7 @@ class Embedder:
         base = (os.environ.get("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
 
         self.model_id = model_id
+        self.retry = retry
         self.url = f"{base}/embeddings"
         self.client = httpx.Client(
             timeout=TIMEOUT,
@@ -87,7 +96,7 @@ class Embedder:
     def _post(self, batch: list[str]) -> np.ndarray:
         payload = {"model": self.model_id, "input": batch}
         last = ""
-        for attempt in range(RETRY):
+        for attempt in range(self.retry):
             try:
                 r = self.client.post(self.url, json=payload)
                 if r.status_code == 200:
@@ -100,10 +109,12 @@ class Embedder:
                 last = f"HTTP {r.status_code}: {r.text[:200]}"
             except Exception as e:                      # mạng rớt, timeout
                 last = f"{type(e).__name__}: {e}"
-            wait = 2 ** attempt                          # backoff luỹ thừa (§9)
-            log.warning("  goi API hong (%d/%d) %s -> doi %ds", attempt + 1, RETRY, last, wait)
-            time.sleep(wait)
-        raise SystemExit(f"API embedding that bai sau {RETRY} lan: {last}")
+            if attempt + 1 < self.retry:                 # lần cuối thì khỏi đợi
+                wait = 2 ** attempt                      # backoff luỹ thừa (§9)
+                log.warning("  goi API hong (%d/%d) %s -> doi %ds",
+                            attempt + 1, self.retry, last, wait)
+                time.sleep(wait)
+        raise EmbedError(f"API embedding that bai sau {self.retry} lan: {last}")
 
     def embed(self, texts: list[str], *, use_cache: bool = True) -> np.ndarray:
         """-> ma trận (len(texts), dim), đã chuẩn hoá L2."""
