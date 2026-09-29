@@ -14,35 +14,9 @@ from __future__ import annotations
 
 import logging
 
-from parsing.models import Flag, ParsedDocument, header_differs
+from parsing.models import Flag, ParsedDocument
 
 log = logging.getLogger(__name__)
-
-
-def _header_title_mismatch(doc: ParsedDocument) -> list[Flag]:
-    """Thanh header nói một đằng, tiêu đề trang nói một nẻo.
-
-    Thường là lỗi thật của bộ slide (tác giả quên đổi thanh header khi sang mục
-    mới). §5 S2: lỗi của bộ slide thì BÁO, KHÔNG tự sửa.
-
-    Trang `exercise` KHÔNG bắn: lệch header ở đó là tín hiệu đã dùng để phân loại, bắn nữa
-    là cờ oan (kéo tụt Flag precision §11).
-    """
-    out: list[Flag] = []
-    for page in doc.pages:
-        hdr, title = page.running_header, page.title
-        if not hdr or not title or page.slide_type == "exercise":
-            continue
-        if header_differs(hdr, title):
-            out.append(
-                Flag(
-                    kind="header_title_mismatch",
-                    page_no=page.page_no,
-                    detail=f"header={hdr!r} vs title={title!r}",
-                    severity="warn",
-                )
-            )
-    return out
 
 
 def _empty_page(doc: ParsedDocument) -> list[Flag]:
@@ -89,24 +63,38 @@ def _image_not_described(doc: ParsedDocument) -> list[Flag]:
     return out
 
 
-def _page_label_mismatch(doc: ParsedDocument) -> list[Flag]:
-    """Số trang IN TRÊN GIẤY lệch số trang docling gán -> parse sót/lệch trang.
+def _table_empty(doc: ParsedDocument) -> list[Flag]:
+    """Docling khoanh được vùng bảng mà không đọc ra chữ nào -> mất nội dung thật.
 
-    `furniture.page_number` chỉ được ghi khi đã lệch (from_docling), nên có là bắn.
+    Đo trên Onboarding Kit: cả 3 bảng rỗng (p20 hệ số OT, p33 mã giảm giá Vinpearl, p38 quy
+    định XLVP) là ẢNH CHỤP bảng dán vào slide — không có text layer, OCR tắt. VLM cũng không
+    chạm tới vì docling gán nhãn `table` chứ không phải `picture`. Chỉ vá tay được.
     """
-    out: list[Flag] = []
-    for page in doc.pages:
-        label = page.furniture.page_number
-        if label:
-            out.append(
-                Flag(
-                    kind="page_label_mismatch",
-                    page_no=page.page_no,
-                    detail=f"tren giay ghi {label!r} nhung docling gan p{page.page_no}",
-                    severity="warn",
-                )
-            )
-    return out
+    return [
+        Flag(
+            kind="table_empty",
+            page_no=page.page_no,
+            block_id=t.id,
+            detail=f"chiem {t.area:.1%} trang, 0 o co chu — co the la anh chup bang",
+            severity="error",
+        )
+        for page in doc.pages
+        for t in page.tables
+        if not t.content
+    ]
+
+
+def _layout_failed(doc: ParsedDocument) -> list[Flag]:
+    """VLM sắp bố cục mà trượt kiểm tra (sót chữ, bịa id, bỏ quên vùng) -> trang dùng docling.
+
+    Docling có thể trộn cột, băm vụn chữ (Onboarding p10: đảo nghĩa quy định xe xăng) —
+    trang này cần người xem lại, hoặc gọi lại VLM: `cli.py run <file> --pages N`.
+    """
+    return [
+        Flag(kind="layout_failed", page_no=p.page_no, detail=p.layout_error, severity="warn")
+        for p in doc.pages
+        if p.layout_error
+    ]
 
 
 def _no_sections(doc: ParsedDocument) -> list[Flag]:
@@ -115,7 +103,7 @@ def _no_sections(doc: ParsedDocument) -> list[Flag]:
     return [
         Flag(
             kind="no_sections",
-            detail="khong dung duoc page_header -> moi trang la mot don vi doc lap",
+            detail="khong tim thay trang muc luc khop -> moi trang la mot don vi doc lap",
             severity="info",
         )
     ]
@@ -123,10 +111,10 @@ def _no_sections(doc: ParsedDocument) -> list[Flag]:
 
 def build_flags(doc: ParsedDocument) -> list[Flag]:
     flags = (
-        _header_title_mismatch(doc)
-        + _empty_page(doc)
+        _empty_page(doc)
         + _image_not_described(doc)
-        + _page_label_mismatch(doc)
+        + _table_empty(doc)
+        + _layout_failed(doc)
         + _no_sections(doc)
     )
     order = {"error": 0, "warn": 1, "info": 2}

@@ -30,6 +30,15 @@ except ImportError:
 DEFAULT_MODEL = os.environ.get("LLM_MODEL", "gpt-5-mini")     # sửa trong .env, không sửa ở đây
 
 
+def _unfence(s: str) -> str:
+    """Gemini qua cổng OpenAI vẫn bọc JSON trong ```json ... ``` dù đã bật JSON mode."""
+    s = s.strip()
+    if s.startswith("```"):
+        s = s.split("\n", 1)[1] if "\n" in s else ""
+        s = s.rsplit("```", 1)[0]
+    return s
+
+
 class LLM:
     def __init__(self, model: str, log_dir: Path, *, retry: int = 4, timeout: float = 180.0,
                  extra: dict[str, Any] | None = None):
@@ -65,7 +74,7 @@ class LLM:
                         {"model": self.model, "sec": round(dt, 1),
                          "messages": messages, "response": content},
                         ensure_ascii=False, indent=2), encoding="utf-8")
-                    return json.loads(content)
+                    return json.loads(_unfence(content))
                 last = f"HTTP {r.status_code}: {r.text[:200]}"
             except Exception as e:                         # mạng, timeout, JSON hỏng
                 last = f"{type(e).__name__}: {e}"

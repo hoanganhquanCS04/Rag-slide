@@ -122,7 +122,7 @@ S0 → S5 (chunk+embed) ─┬─► S6a deck_map + audit ──┐
     → S2 (luật)        └─► S4 kịch bản → S6b TTS ──┴─► S7
 ```
 
-- **S0 làm hết phần hiểu trang**: mô tả ảnh (VLM), `sections` (từ `page_header`),
+- **S0 làm hết phần hiểu trang**: bố cục + ảnh (VLM cả trang), `sections` (từ trang mục lục),
   `slide_type` (luật). Không còn stage S1 riêng.
 - **S2 không gọi model**: `sections` đã có từ S0, `time_budget` chia theo số trang.
 - **S4 đọc từng trang một** — không nhồi cả deck vào prompt.
@@ -155,14 +155,18 @@ Xem [docs/spec/parsed-document.md](docs/spec/parsed-document.md) cho schema đ�
 - Thứ tự đọc đi theo `body.children` của docling, **KHÔNG** đọc tuần tự mảng `texts[]`
 - Chuẩn hoá toạ độ: gốc DƯỚI-TRÁI của docling → **TRÊN-TRÁI**, `[0,1]`, lưu thành `polygon`
   4 góc. **Ngoại lệ `.pptx`**: docling gắn nhãn `BOTTOMLEFT` nhưng số đo từ ĐỈNH — không lật
-- **GIỮ `furniture`** (header/footer), tách rổ riêng. Thanh header chạy là nguồn
-  duy nhất dựng được section — docling cho `level=1` trên mọi tiêu đề
-- Mô tả ảnh gọi VLM **qua API**, mỗi ảnh một request, prompt ở `prompts/*.md`
+- **Bỏ header/footer/số trang lặp** (nhãn `page_header`/`page_footer` của docling) — không phải
+  nội dung, không lưu. Chương lấy từ **trang mục lục** (`sections.py`), không từ thanh header
+- VLM **qua API**, mỗi **TRANG** một request (`src/parsing/layout.py`, `prompts/s0_page_layout.md`):
+  nhìn ảnh CẢ trang, **chỉ trỏ id** mẩu chữ docling để sắp thành khối — chữ vẫn là `text_layer`.
+  Chỉ ô bảng / mô tả hình đọc từ ảnh mới là `vlm`. Code kiểm sót id / id bịa / bỏ quên vùng →
+  trượt thì trang dùng docling + cờ `layout_failed`. Mô tả TỪNG ảnh cắt rời đã bỏ: không biết
+  ảnh nào chỉ để trang trí, và docling băm vụn chữ trong sơ đồ, trộn dòng hai cột (Onboarding)
 - Ảnh không có mô tả phải ghi `why_empty` — phân biệt *chưa gọi* (`area_below_threshold`)
   với *gọi mà fail* (`api_error`) và *đủ to mà không có* (`not_described`)
 - Tắt OCR: PDF export từ PowerPoint đã có text layer. Đo được: bật OCR chậm 8.4×,
   markdown **giống hệt**
-- `page_hash` = SHA(nội dung + polygon từng block + furniture), cho incremental build
+- `page_hash` = SHA(nội dung + polygon từng block), cho incremental build
 - Mỗi block có `content` · `polygon` · `provenance`. MỘT file, vừa để người đọc vừa để
   pipeline chạy — trường rỗng không ghi, không lưu thứ suy ra được
 
@@ -197,23 +201,22 @@ title            trang số 1                                           ⬜ chư
 agenda           có mẩu chữ mở đầu bằng "1 " và >= 3 dòng             ⬜ chưa code
 section_divider  đúng 1 tiêu đề, tâm giữa trang                       ✅ ĐÃ CÓ
                  (cy >= 0.30, cx trong [0.35, 0.65])
-exercise         title LỆCH header chạy + "bài tập|yêu cầu|deadline"   ✅ ĐÃ CÓ
+exercise         tiêu đề mở đầu bằng "Bài tập"                       ✅ ĐÃ CÓ
 content          còn lại                                              ✅ ĐÃ CÓ
                  -> ParsedPage.slide_type (src/parsing/models.py)
 ```
 
-**Luật nằm ở MỘT chỗ: `ParsedPage.slide_type`** (`computed_field` — tính lại mỗi lần nạp,
-ghi ra JSON để đọc). `flags.py`, `kb/chunk.py`, S4 đều chỉ đọc field đó. Đo trên
-`3_datavisualization`: 7 section_divider + 3 exercise (p38–40), đúng hết.
+**Luật nằm ở MỘT chỗ: `ParsedPage.slide_type`** (property — tính lại mỗi lần nạp, KHÔNG ghi
+ra JSON: deck mới gần như toàn `content`, ghi ra là nhiễu). `flags.py`, `kb/chunk.py`, S4 đều
+chỉ đọc property đó.
 
-- `flags.py` không bắn `empty_page` ở trang phân mục, không bắn `header_title_mismatch` ở
-  trang bài tập → 10 cờ oan về 0, CLI thoát mã 0, CI hết đỏ giả.
+- `flags.py` không bắn `empty_page` ở trang phân mục.
 - KB coi trang bài tập là `content` (có nội dung thật, phải tìm được).
 - S4 viết lại trang khi `slide_type` đổi. Trang `exercise`: 2–4 câu, ĐỌC yêu cầu, không giảng.
 - `title` và `agenda` chỉ 2 trang trong 40, lợi ích nhỏ — chưa làm.
 
-Luật `exercise` dùng lại chính tín hiệu header lệch tiêu đề — cái tưởng là cảnh báo lỗi
-hoá ra là tín hiệu phân loại.
+`exercise` chỉ xét TIÊU ĐỀ: dò "yêu cầu" trong cả trang là bắt nhầm deck nhân sự
+(Onboarding p26 "Chấm công: Quản lý yêu cầu của CBNV").
 
 > Nhược điểm phải nhận: luật fit trên MỘT deck, deck khác bố cục khác là gãy. Nhưng gãy
 > thì nhìn bảng phân loại là thấy ngay, còn LLM gán sai thì im lặng. §2 NT2 ưu tiên
@@ -229,8 +232,10 @@ hoá ra là tín hiệu phân loại.
 
 ### S2 — co lại, phần lớn đã deterministic
 
-- **`sections` KHÔNG cần LLM.** Dựng từ `page_header` ngay ở S0 — đo được: 7 section,
-  confidence 0.95, đối chiếu mục lục khớp 7/7.
+- **`sections` KHÔNG cần LLM.** Dựng từ **trang mục lục** ngay ở S0 (`sections.py`): đọc tên
+  chương, trang ĐẦU TIÊN có tiêu đề khớp một mục là trang mở chương, kéo tới trước trang mở
+  chương kế tiếp. Đo: Onboarding 5/5, Thời gian làm việc 5/5 mục khớp. Không có mục lục → 0
+  chương, KHÔNG đoán.
 - **`time_budget`**: chia theo số trang `content` của từng section. Không cần model.
 - **`concept_map` / `dependencies` / `arc`: BỎ.** Chúng sinh ra để bơm ngữ cảnh toàn cục
   vào prompt. Thiết kế này không làm thế — S4 đọc nội dung CHÍNH TRANG ĐÓ.
@@ -404,23 +409,29 @@ input → regex fast-path ──(khớp)──→ goto_slide()          [~5ms]
 
 ## 7. Cấu trúc lưu trữ
 
-### 7.0 HIỆN TRẠNG v0 — file JSON trên đĩa, chưa có DB ★
+### 7.0 HIỆN TRẠNG v0 — file JSON trên đĩa + kho vector (inmem | chroma) ★
 
-Chưa dựng Qdrant, chưa có tầng shared/per-deck. Mọi thứ là file JSON để mở ra xem:
+Chưa có tầng shared/per-deck. Nguồn là file JSON + `.npy` để mở ra xem; kho vector chỉ là
+BẢN SAO để tìm, xoá đi thì tự dựng lại từ `.npy`, không tốn API:
 
 ```
-data/raw/<ten>.pdf                        file gốc — VỪA là deck VỪA là KB
-data/patches/<ten>.json                   nội dung gõ tay cho trang parser bỏ sót
+data/raw/<file>.pdf                       file gốc — VỪA là deck VỪA là KB (.pptx cần .pdf cùng tên)
+data/patches/<doc_id>.json                nội dung gõ tay cho trang parser vẫn sai
 data/eval/queries.json                    câu hỏi có nhãn để đo retrieval
-out/parse_api/<ten>.{md,json}             docling thô  (scripts/parse_api.py, .pdf hoặc .pptx)
-.env  VLM_MODEL · LLM_MODEL               tên model dùng — sửa ở đây, KHÔNG sửa trong code
-out/parsed/<doc_id>.json                  ParsedDocument (src/parsing/cli.py) — MỘT định dạng gọn,
-                                          vừa để người đọc vừa để pipeline chạy
+.env  VLM_MODEL · LLM_MODEL · EMBED_MODEL tên model dùng — sửa ở đây, KHÔNG sửa trong code
+.env  VECTOR_DB=inmem|chroma · CHROMA_PATH kho vector (src/kb/store/) — đổi kho không sửa code
+
+out/parsed/<doc_id>/                      S0 — MỘT lệnh: python src/parsing/cli.py run <file>
+├── docling.json                          ① docling thô: chữ + toạ độ + vùng ảnh/bảng
+├── layout.json                           ② bố cục VLM từng trang (cache, chỉ trỏ id)
+└── document.json                         ③ ParsedDocument — vừa để người đọc vừa để pipeline chạy
+
 out/kb/<doc_id>.chunks.json               KBChunk[]     (src/kb/cli.py)
 out/kb/<doc_id>__<model_id>.vectors.npy   ma trận vector + .vectors.json (thứ tự hàng)
 out/kb/.embed_cache/<model>/<sha1>.npy    cache theo hash nội dung
+out/kb/chroma/                            kho Chroma: MỘT collection kb__<model_id> cho mọi
+                                          tài liệu, tách bằng metadata doc_id (VECTOR_DB=chroma)
 out/kb/audit/{self_retrieval,eval}.json   kết quả đo
-out/pages/<ten>_pNNN.png                  ảnh có khung bbox, để soi mắt
 ```
 
 **Kịch bản sẽ nằm ở đây** (chưa có code):
@@ -436,9 +447,12 @@ out/deck/<doc_id>/
 **Kịch bản KHÔNG để chung với `ParsedDocument`** (parse lại là mất, đúng bẫy đã dính với
 trang 15) **và KHÔNG để chung với `KBChunk`** (sửa một câu thoại không được làm bẩn index).
 
-Chưa dựng Qdrant và **chưa cần**: 52 vector, quét vét cạn hết **0.01ms**; ngay cả
-100.000 vector cũng chỉ 25ms, trong khi gọi API nhúng câu hỏi đã mất ~700ms. Qdrant mua về
-metadata filter và nhiều deck, không phải tốc độ. Sơ đồ §7.1 là đích, chưa áp dụng.
+Kho vector KHÔNG mua tốc độ: 52 vector, quét vét cạn hết **0.01ms**; ngay cả 100.000 vector
+cũng chỉ 25ms, trong khi gọi API nhúng câu hỏi đã mất ~700ms. Chroma mua về **lưu đĩa +
+metadata filter + nhiều tài liệu chung một chỗ**. Kho chỉ làm nhánh dense — BM25 + RRF vẫn ở
+`search.py`. `Searcher` khởi tạo gọi `store.sync`: kho lệch `chunks.json` thì nạp lại từ `.npy`.
+Khung inmem/chroma/factory lấy từ `minhbtrc/chatbot-template` (MIT) — chỗ khác bản gốc ghi ở
+`src/kb/store/base.py`. Sơ đồ §7.1 là đích, chưa áp dụng.
 
 ### 7.1 Đích (nhiều deck)
 
@@ -501,14 +515,14 @@ synth lại câu chứa từ đó; lệch timing > 15% thì chạy lại pass 2 
 
 | Việc            | Dùng                                                            |
 | ---------------- | ---------------------------------------------------------------- |
-| Parse PDF (v0)   | `docling` (layout + TableFormer local, VLM mô tả ảnh qua API)  |
+| Parse PDF (v0)   | `docling` (layout + TableFormer local) + VLM sắp bố cục cả trang qua API |
 | Render PNG (v0)  | `pypdfium2`                                                    |
 | Parse pptx (v1)  | `python-pptx` + đọc XML thô cho animation timing            |
 | Render PNG (v1)  | LibreOffice headless → PDF →`PyMuPDF` rasterize              |
 | Parse PDF nguồn | `PyMuPDF`, `unstructured` hoặc `docling` cho cây heading |
 | Embedding        | **v0: `text-embedding-3-small` qua API** (dense-only, 1536 chiều) · đích: `bge-m3` (dense + sparse 1 forward) |
 | Rerank           | **QUA API** — `bge-reranker-v2-m3` local đã loại (2.2 GB). Endpoint có `/rerank` nhưng key CHƯA được bật quyền — xem §6 |
-| Vector DB        | Qdrant (cần metadata filter tốt)                               |
+| Vector DB        | **v0: `chromadb` hoặc RAM** — chọn bằng `VECTOR_DB` (`src/kb/store/`). Tắt embedding có sẵn, cosine, tắt telemetry |
 | Schema           | Pydantic v2                                                      |
 
 **Cảnh báo:** LibreOffice render pptx không khớp 100% với PowerPoint (font thay thế,
@@ -591,7 +605,7 @@ Xem [docs/spec/search.md §10](docs/spec/search.md).
 **Trong phạm vi:** **một file `.pdf` duy nhất, vừa làm deck vừa làm KB** · parse bằng
 docling, VLM mô tả ảnh gọi **qua API** · nhúng vector cũng **qua API**
 (`text-embedding-3-small`) — **không chạy model local nào** · lưu **file JSON trên đĩa**,
-chưa có vector DB · tiếng Việt, thuật ngữ giữ gốc tiếng Anh
+kho vector Chroma hoặc RAM (`VECTOR_DB`) · tiếng Việt, thuật ngữ giữ gốc tiếng Anh
 
 **Chấp nhận đánh đổi** (xem §3.0): không có `chart_data` / `tables` / `build_steps` từ
 XML · S3 Alignment suy biến nên bỏ qua · độ sâu trả lời giới hạn ở mức **mô tả slide** ·

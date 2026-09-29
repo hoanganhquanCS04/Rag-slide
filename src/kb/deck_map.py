@@ -4,7 +4,7 @@ Runtime KHÔNG nhồi cả deck vào prompt (§10). Nhưng LLM cần biết bộ
 nào để hiểu "quay lại phần đồ thị ba chiều" hay "phần bài tập". deck_map là TRẠNG THÁI
 gọn (danh sách chương + khoảng trang), không phải tri thức — tri thức vẫn phải tìm.
 
-    python src/kb/deck_map.py out/parsed/<ten>.json      -> out/deck/<ten>/deck_map.txt
+    python src/kb/deck_map.py out/parsed/<ten>/document.json      -> out/deck/<ten>/deck_map.txt
 
 Dựng bằng LUẬT từ `sections` + `slide_type`, không gọi model:
     có chương   -> mỗi chương một dòng, kèm khoảng trang; trang ngoài chương gom "Mở đầu"
@@ -64,7 +64,7 @@ def build(doc: ParsedDocument) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="deck_map")
-    ap.add_argument("parsed", help="out/parsed/<ten>.json")
+    ap.add_argument("parsed", help="out/parsed/<ten>/document.json")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     for s in (sys.stdout, sys.stderr):

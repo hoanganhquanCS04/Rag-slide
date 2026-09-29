@@ -1,6 +1,6 @@
 # Scenario — kịch bản robot nói cho từng trang (S4)
 
-**Vào:** `out/kb/<doc_id>.chunks.json` + `out/parsed/<doc_id>.json` + `out/deck/<doc_id>/pronunciation.json`
+**Vào:** `out/kb/<doc_id>.chunks.json` + `out/parsed/<doc_id>/document.json` + `out/deck/<doc_id>/pronunciation.json`
 · **Ra:** `out/deck/<doc_id>/scenario.json` · **Code:** `src/scenario/` · **LLM:** `gpt-5-mini`
 · **Prompt:** `prompts/s4_scenario.md`
 

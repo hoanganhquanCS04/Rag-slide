@@ -1,9 +1,9 @@
 """S4 — sinh kịch bản robot nói cho từng trang (§9: chạy riêng được qua CLI).
 
-    python src/scenario/cli.py out/parsed/<doc_id>.json                  # cả deck
-    python src/scenario/cli.py out/parsed/<doc_id>.json --page 9,11,20   # vài trang
-    python src/scenario/cli.py out/parsed/<doc_id>.json --dry-run --page 11
-    python src/scenario/cli.py out/parsed/<doc_id>.json --show           # xem, không gọi API
+    python src/scenario/cli.py out/parsed/<doc_id>/document.json                  # cả deck
+    python src/scenario/cli.py out/parsed/<doc_id>/document.json --page 9,11,20   # vài trang
+    python src/scenario/cli.py out/parsed/<doc_id>/document.json --dry-run --page 11
+    python src/scenario/cli.py out/parsed/<doc_id>/document.json --show           # xem, không gọi API
 
 Chạy lại là INCREMENTAL: trang có page_hash + prompt + model không đổi thì giữ nguyên,
 không tốn tiền. Đổi pronunciation.json thì chỉ đếm lại âm tiết, không gọi LLM.
@@ -113,7 +113,7 @@ def report(sc: Scenario) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="scenario")
-    ap.add_argument("parsed", help="out/parsed/<doc_id>.json")
+    ap.add_argument("parsed", help="out/parsed/<doc_id>/document.json")
     ap.add_argument("--pron", default=None, help="mặc định out/deck/<doc_id>/pronunciation.json")
     ap.add_argument("-o", "--out", default=None, help="mặc định out/deck/<doc_id>/scenario.json")
     ap.add_argument("--page", default=None, help="'11' | '9,11,20' | '9-15'")

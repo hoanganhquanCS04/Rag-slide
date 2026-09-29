@@ -30,8 +30,9 @@ import numpy as np
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from kb.embed import MODEL_ID, Embedder, model_slug
+from kb.embed import MODEL_ID, Embedder, vectors_file
 from kb.models import ChunkSet, KBChunk, SearchHit
+from kb.store import VectorStore, create_store
 
 log = logging.getLogger(__name__)
 
@@ -59,39 +60,42 @@ def tokenize(text: str) -> list[str]:
 
 
 def _ranks(scores: np.ndarray, idx: list[int], pool: int) -> dict[int, int]:
-    """-> {chỉ số chunk: hạng bắt đầu từ 1}, chỉ lấy `pool` cái đầu."""
+    """-> {chỉ số chunk: hạng bắt đầu từ 1}, chỉ lấy `pool` cái đầu. Nhánh BM25 dùng —
+    nhánh dense lấy hạng thẳng từ kho."""
     order = sorted(idx, key=lambda i: -scores[i])[:pool]
     return {i: r for r, i in enumerate(order, 1)}
 
 
 class Searcher:
-    """Nạp một lần, hỏi nhiều lần. Dựng bảng BM25 lúc khởi tạo (~10ms cho 52 chunk)."""
+    """Nạp một lần, hỏi nhiều lần.
+
+    Nhánh dense hỏi KHO VECTOR (`VECTOR_DB` trong .env: inmem | chroma, xem kb/store/).
+    Nhánh BM25 dựng trong RAM lúc khởi tạo (~10ms cho 52 chunk) — kho không làm BM25.
+    Khởi tạo gọi `store.sync`: kho lệch `chunks.json` thì nạp lại từ .npy, khớp thì thôi.
+    """
 
     def __init__(self, chunks_path: str | Path, *, vectors_path: str | Path | None = None,
-                 model_id: str = MODEL_ID, embed_retry: int = 4):
+                 model_id: str = MODEL_ID, embed_retry: int = 4,
+                 store: VectorStore | None = None):
         from rank_bm25 import BM25Okapi
 
         cp = Path(chunks_path)
         self.cs = ChunkSet.model_validate(json.loads(cp.read_text(encoding="utf-8")))
         self.chunks: list[KBChunk] = self.cs.chunks
+        self._pos = {c.chunk_id: i for i, c in enumerate(self.chunks)}
 
-        vp = Path(vectors_path) if vectors_path else (
-            cp.parent / f"{self.cs.doc_id}__{model_slug(model_id)}.vectors.npy")
-        if not vp.exists():
-            raise SystemExit(f"khong thay vector: {vp}\nchay `--embed` truoc da")
-        self.M = np.load(vp)
-        if len(self.M) != len(self.chunks):
-            raise SystemExit(
-                f"lech so luong: {len(self.M)} vector vs {len(self.chunks)} chunk. "
-                "chunk da doi ma chua nhung lai?")
+        self.vectors_path = Path(vectors_path) if vectors_path else vectors_file(
+            cp.parent, self.cs.doc_id, model_id)
+        self.store = store or create_store(model_id=model_id)
+        n_sync = self.store.sync(self.cs, self.vectors_path)
 
         # KHÔNG dùng text_raw (§10) — index phải khớp đúng thứ đã đem đi nhúng.
         self.bm25 = BM25Okapi([tokenize(c.text_enriched) for c in self.chunks])
         self.model_id = model_id
         self.embed_retry = embed_retry
         self._emb: Embedder | None = None
-        log.info("nap %d chunk + vector %s | model %s",
-                 len(self.chunks), tuple(self.M.shape), model_id)
+        log.info("nap %d chunk | kho %s%s | model %s", len(self.chunks), self.store.kind,
+                 f" (nap lai {n_sync} vector)" if n_sync else "", model_id)
 
     @property
     def embedder(self) -> Embedder:
@@ -118,8 +122,13 @@ class Searcher:
 
         if mode in ("hybrid", "dense"):
             qv = self.embedder.embed([query], use_cache=True)[0]
-            s_dense = self.M @ qv            # vector đã chuẩn hoá L2 -> đây là cosine
-            r_dense = _ranks(s_dense, cand, POOL)
+            # Cùng tập ứng viên với `cand`: đúng tài liệu này, lọc phân mục nếu được yêu cầu.
+            # Chunk ngoài pool dense thì score_dense = 0 — chỉ để debug, RRF không dùng điểm.
+            where = {"doc_id": self.cs.doc_id, **({"is_searchable": True} if filter_dividers else {})}
+            for r, (cid, s) in enumerate(self.store.query(qv, POOL, where), 1):
+                if (i := self._pos.get(cid)) is not None:
+                    s_dense[i] = s
+                    r_dense[i] = r
 
         if mode in ("hybrid", "sparse"):
             s_sparse = np.asarray(self.bm25.get_scores(tokenize(query)), dtype=np.float32)

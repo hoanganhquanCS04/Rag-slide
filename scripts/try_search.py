@@ -48,7 +48,7 @@ def main() -> None:
     args = ap.parse_args()
 
     s = Searcher(f"out/kb/{args.doc}.chunks.json")
-    doc = ParsedDocument.load(f"out/parsed/{args.doc}.json")
+    doc = ParsedDocument.load(f"out/parsed/{args.doc}/document.json")
     mode = "sparse" if args.bm25 else "hybrid"
 
     if args.query:

@@ -273,7 +273,7 @@ tiền tố `· trang N/40` tách được bao nhiêu phần?
 
 ```bash
 # cần OPENAI_API_KEY (và OPENAI_BASE_URL nếu đi qua proxy)
-.venv/Scripts/python.exe src/kb/cli.py out/parsed/3_DataVisualization.json \
+.venv/Scripts/python.exe src/kb/cli.py out/parsed/3_datavisualization/document.json \
     -o out/kb/3_DataVisualization.chunks.json --embed --stats
 ```
 

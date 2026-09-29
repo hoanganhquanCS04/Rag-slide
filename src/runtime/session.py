@@ -40,9 +40,9 @@ class Session:
         for f, how in [(deck / "scenario.json", "src/scenario/cli.py"),
                        (deck / "deck_map.txt", "src/kb/deck_map.py")]:
             if not f.exists():
-                raise SystemExit(f"thieu {f} — chay: python {how} out/parsed/{doc_id}.json")
+                raise SystemExit(f"thieu {f} — chay: python {how} out/parsed/{doc_id}/document.json")
 
-        self.doc = ParsedDocument.load(f"out/parsed/{doc_id}.json")
+        self.doc = ParsedDocument.load(f"out/parsed/{doc_id}/document.json")
         sc = Scenario.model_validate_json((deck / "scenario.json").read_text(encoding="utf-8"))
         self.scripts = {s.page_no: s for s in sc.slides}
         self.retriever = Retriever(doc_id, cfg.top_k)

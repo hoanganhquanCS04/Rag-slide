@@ -1,9 +1,10 @@
 """Cắt chunk từ ParsedDocument (§9: chạy riêng được qua CLI).
 
-    python src/kb/cli.py out/parsed/<ten>.json -o out/kb/<ten>.chunks.json
-    python src/kb/cli.py out/parsed/<ten>.json --page 19        # xem chunk của 1 trang
-    python src/kb/cli.py out/parsed/<ten>.json --stats          # phân bố token
-    python src/kb/cli.py out/parsed/<ten>.json --embed          # nhúng vector qua API
+    python src/kb/cli.py out/parsed/<ten>/document.json -o out/kb/<ten>.chunks.json
+    python src/kb/cli.py out/parsed/<ten>/document.json --page 19        # xem chunk của 1 trang
+    python src/kb/cli.py out/parsed/<ten>/document.json --stats          # phân bố token
+    python src/kb/cli.py out/parsed/<ten>/document.json -o out/kb/<ten>.chunks.json --embed
+                                                    # nhúng qua API + nạp kho (VECTOR_DB)
 """
 
 from __future__ import annotations
@@ -62,7 +63,7 @@ def stats(cs: ChunkSet) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="kb")
-    ap.add_argument("parsed", help="out/parsed/<ten>.json")
+    ap.add_argument("parsed", help="out/parsed/<ten>/document.json")
     ap.add_argument("-o", "--out", default=None)
     ap.add_argument("--page", default=None, help="chi xem chunk cua trang: '19' | '19,20'")
     ap.add_argument("--stats", action="store_true", help="chi in thong ke")
@@ -70,10 +71,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-tokens", type=int, default=500)
     ap.add_argument("--embed", action="store_true",
                     help="nhung vector qua API OpenAI (can OPENAI_API_KEY)")
-    ap.add_argument("--embed-model", default=None, help="mac dinh text-embedding-3-small")
+    ap.add_argument("--embed-model", default=None, help="mac dinh EMBED_MODEL trong .env")
     ap.add_argument("--vector-dir", default="out/kb", help="noi ghi .vectors.npy")
     ap.add_argument("--no-cache", action="store_true", help="bo qua cache tren dia")
     args = ap.parse_args(argv)
+    if args.embed and not args.out:
+        # vector ghi theo thứ tự chunk — chunk không được lưu thì vector không khớp file nào
+        ap.error("--embed can -o <chunks.json>: vector phai di cung bo chunk da luu")
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
@@ -99,11 +103,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.embed:
         # Nhúng CẢ BỘ, kể cả trang phân mục — lọc là việc của lúc truy vấn.
         from kb.embed import MODEL_ID, embed_chunkset
+        from kb.store import create_store
 
+        model_id = args.embed_model or MODEL_ID
         log.info("")
-        embed_chunkset(cs, args.vector_dir,
-                       model_id=args.embed_model or MODEL_ID,
-                       use_cache=not args.no_cache)
+        p_npy, _ = embed_chunkset(cs, args.vector_dir, model_id=model_id,
+                                  use_cache=not args.no_cache)
+        # Kho ghi đĩa (chroma) nạp luôn ở offline (§2 NT1). inmem thì lúc chạy mới nạp.
+        store = create_store(model_id=model_id)
+        if store.persistent:
+            n = store.sync(cs, p_npy)
+            log.info("kho %s (%s): %s", store.kind, store.name,
+                     f"nap {n} vector" if n else "da khop, khong doi")
     return 0
 
 

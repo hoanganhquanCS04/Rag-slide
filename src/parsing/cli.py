@@ -1,85 +1,103 @@
-"""Chạy riêng qua dòng lệnh (§9: mỗi stage phải chạy độc lập được).
+"""S0 — một lệnh cho cả luồng: file gốc (.pdf / .pptx) -> `out/parsed/<doc_id>/`.
 
-Nhận CẢ HAI loại file, tự nhận biết:
+    ① docling.json    docling đọc file: chữ + toạ độ + vùng ảnh/bảng          docling_run.py
+    ② layout.json     VLM nhìn cả trang, sắp chữ thành khối — TỐN API         layout.py
+    ③ document.json   ParsedDocument chuẩn — KB, kịch bản, runtime đọc file này build.py
 
-    .json thô của docling   -> parse thành ParsedDocument
-    .json của ParsedDocument -> nạp lại để xem
+    python src/parsing/cli.py run "data/raw/Onboarding Kit.pdf"                # đủ 3 bước
+    python src/parsing/cli.py run "data/raw/Onboarding Kit.pdf" --pages 7,10   # chỉ gọi VLM 2 trang
+    python src/parsing/cli.py run "data/raw/Onboarding Kit.pdf" --no-vlm       # không gọi API
+    python src/parsing/cli.py run "data/raw/Onboarding Kit.pdf" --redo         # chạy lại docling
+    python src/parsing/cli.py show onboarding_kit --page 7 --full
 
-    # parse rồi ghi ra
-    python src/parsing/cli.py "out/parse_api/<ten>.json" -o out/parsed/<ten>.json
-
-    # xem một trang
-    python src/parsing/cli.py out/parsed/<ten>.json --page 11
-    python src/parsing/cli.py out/parsed/<ten>.json --page 9,11 --full
-    python src/parsing/cli.py out/parsed/<ten>.json --page 9-15
+Bước nào có sẵn thì bỏ qua: docling.json có rồi thì không chạy lại docling (trừ --redo);
+trang có trong layout.json mà không đổi gì thì không gọi VLM lại (trừ khi nêu trong --pages).
+③ luôn dựng lại. Trang chưa có bố cục VLM dùng block docling.
+Thoát mã 1 khi có cờ mức error (CI bắt được) — file vẫn ghi bình thường.
 """
 
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 
 if __package__ in (None, ""):  # chạy thẳng file, không qua -m
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from parsing.flags import apply_flags
-from parsing.from_docling import from_docling_json
+from parsing.build import build_document
+from parsing.docling_run import run_docling
+from parsing.from_docling import slugify_doc_id
+from parsing.layout import page_pdf, run_layout
 from parsing.models import ParsedDocument, ParsedParagraph
-from parsing.patch import apply_patch, find_patch, load_patch
-from parsing.sections import apply_sections
 
 for _s in (sys.stdout, sys.stderr):
     if hasattr(_s, "reconfigure"):
         _s.reconfigure(encoding="utf-8", errors="replace")
 
-try:
-    import os
+ROOT = Path(__file__).resolve().parents[2]
+OUT = ROOT / "out" / "parsed"          # out/parsed/<doc_id>/{docling,layout,document}.json
 
+try:
     from dotenv import load_dotenv
 
-    load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+    load_dotenv(ROOT / ".env")          # VLM_MODEL, OPENAI_API_KEY, OPENAI_BASE_URL
 except ImportError:
     pass
 
 log = logging.getLogger("parsing")
 
 
-# ------------------------------------------------------------------------- nạp
+# ------------------------------------------------------------------------- chạy
 
 
-def load(
-    path: str | Path,
-    *,
-    do_ocr: bool = False,
-    vlm_model: str | None = None,
-    area_threshold: float = 0.05,
-    source_pdf: str | None = None,
-) -> tuple[ParsedDocument, bool]:
-    """-> (doc, vua_parse). `vua_parse=False` nghĩa là nạp lại file đã parse sẵn."""
-    p = Path(path)
-    if not p.exists():
-        raise SystemExit(f"khong thay file: {p}")
-    try:
-        raw = json.loads(p.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as e:
-        raise SystemExit(f"{p} khong phai JSON hop le: {e}") from None
+def cmd_run(args: argparse.Namespace) -> int:
+    src = Path(args.file)
+    if not src.exists():
+        raise SystemExit(f"khong thay file: {src}")
+    doc_id = slugify_doc_id(src.stem)
+    d = OUT / doc_id
+    docling_json, layout_json, document_json = d / "docling.json", d / "layout.json", d / "document.json"
 
-    if raw.get("schema_name") == "DoclingDocument":
-        doc = from_docling_json(
-            path,
-            do_ocr=do_ocr,
-            vlm_model=vlm_model,
-            picture_area_threshold=area_threshold,
-            source_pdf=source_pdf,
-        )
-        apply_sections(doc)
-        apply_flags(doc)
-        return doc, True
+    if args.redo or not docling_json.exists():
+        run_docling(src, docling_json)
+    else:
+        log.info("① docling.json co san (--redo de chay lai)")
 
-    return ParsedDocument.load(p), False
+    if args.no_vlm:
+        log.info("② bo qua VLM (--no-vlm), dung bo cuc co san trong layout.json")
+    elif (pdf := page_pdf(src)) is None:
+        log.warning("② khong co PDF cung ten de ve anh trang (%s) -> bo qua, dung docling",
+                    src.with_suffix(".pdf").name)
+    else:
+        raw = json.loads(docling_json.read_text(encoding="utf-8"))
+        asyncio.run(run_layout(raw, pdf, layout_json, tag=doc_id, model=args.model,
+                               pages=parse_pages(args.pages) if args.pages else None,
+                               concurrency=args.concurrency))
+
+    doc = build_document(src, docling_json, layout_json)
+    document_json.write_text(doc.to_json(), encoding="utf-8")
+    report(doc)
+    log.info("ghi -> %s (%d KB)", document_json, document_json.stat().st_size // 1024)
+
+    n_err = sum(1 for f in doc.flags if f.severity == "error")
+    if n_err:
+        log.info("exit 1: co %d co muc error (de CI bat duoc). File van ghi binh thuong.", n_err)
+    return 1 if n_err else 0
+
+
+def cmd_show(args: argparse.Namespace) -> int:
+    p = Path(args.doc)
+    doc = ParsedDocument.load(p if p.suffix == ".json" else OUT / args.doc / "document.json")
+    if args.page:
+        show_pages(doc, parse_pages(args.page), args.full)
+    else:
+        report(doc)
+    return 0
 
 
 # ------------------------------------------------------------------------ hiện
@@ -113,18 +131,15 @@ def show_pages(doc: ParsedDocument, pages: list[int], full: bool) -> None:
         where = f"{sec.id} ({sec.title}, p{sec.start_page}-{sec.end_page})" if sec else "—"
         log.info("")
         log.info("--- trang %d | %s | chuong: %s", pg, page.title or "(khong tieu de)", where)
-        log.info("    hash=%s  starved=%s", page.page_hash, page.is_text_starved)
+        log.info("    hash=%s  slide_type=%s", page.page_hash, page.slide_type)
 
         for b in page.blocks:
             kind = f"para/{b.role}" if isinstance(b, ParsedParagraph) else b.kind
             body = b.content or f"(rong — {getattr(b, 'why_empty', None)})"
             log.info("    %-10s %-12s %6.2f%% %-10s %s",
                      b.id, kind, b.area * 100, b.provenance.value, _cut(body, full))
-
-        f = page.furniture
-        if f.header or f.footer or f.page_number:
-            log.info("    furniture: header=%s | footer=%s%s", f.header, " · ".join(f.footer),
-                     f" | so trang in LECH: {f.page_number}" if f.page_number else "")
+            for h in b.hrefs:
+                log.info("    %-10s ↳ link %s -> %s", "", h.text, h.url)
 
         for f in doc.flags:
             if f.page_no == pg:
@@ -132,13 +147,14 @@ def show_pages(doc: ParsedDocument, pages: list[int], full: bool) -> None:
 
 
 def report(doc: ParsedDocument) -> None:
-    n_body = sum(len(p.blocks) for p in doc.pages)
-    n_hdr = sum(1 for p in doc.pages if p.furniture.header)
+    n_vlm = sum(1 for p in doc.pages if any(".v" in b.id for b in p.blocks))
     log.info("")
     log.info("=== %s", doc.doc_id)
-    log.info("    %d trang | %d block | %d trang co thanh header", doc.n_pages, n_body, n_hdr)
-    log.info("    anh %d, mo ta duoc %d | bang %d",
-             doc.n_images, doc.n_described_images, sum(len(p.tables) for p in doc.pages))
+    log.info("    %d trang (bo cuc VLM %d, docling %d) | %d block | %d link an",
+             doc.n_pages, n_vlm, doc.n_pages - n_vlm, sum(len(p.blocks) for p in doc.pages),
+             sum(len(b.hrefs) for p in doc.pages for b in p.blocks))
+    log.info("    anh co mo ta %d | bang %d", doc.n_described_images,
+             sum(len(p.tables) for p in doc.pages))
 
     if doc.sections:
         log.info("    %d section:", len(doc.sections))
@@ -161,61 +177,30 @@ def report(doc: ParsedDocument) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="parsing")
-    ap.add_argument("json", help=".json cua docling HOAC .json cua ParsedDocument")
-    ap.add_argument("-o", "--out", default=None, help="ghi ParsedDocument ra file")
-    ap.add_argument("--page", default=None, help="xem trang: '11' | '9,11' | '9-15'")
-    ap.add_argument("--full", action="store_true", help="in du, khong cat chu")
-    ap.add_argument("--ocr", action="store_true",
-                    help="file nay parse voi OCR bat -> chu khai la provenance=ocr")
-    ap.add_argument("--vlm-model", default=os.environ.get("VLM_MODEL"),
-                    help="mac dinh VLM_MODEL trong .env — ghi vao ParsedDocument.parser")
-    ap.add_argument("--area-threshold", type=float, default=0.05)
-    ap.add_argument("--source-pdf", default=None)
-    ap.add_argument("--patch", default=None,
-                    help="file va tay; bo trong = tu tim trong data/patches/")
-    ap.add_argument("--no-patch", action="store_true", help="bo qua patch du co file")
-    ap.add_argument("--quiet", action="store_true")
+    ap = argparse.ArgumentParser(prog="parsing", description="S0: file goc -> out/parsed/<doc_id>/")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    run = sub.add_parser("run", help="chay ①②③")
+    run.add_argument("file", help="data/raw/<ten>.pdf | .pptx")
+    run.add_argument("--pages", default=None,
+                     help="chi goi VLM cac trang nay, ke ca da co: '7' | '7,10' | '5-9'")
+    run.add_argument("--no-vlm", action="store_true", help="khong goi API, dung layout.json co san")
+    run.add_argument("--redo", action="store_true", help="chay lai docling du da co docling.json")
+    run.add_argument("--model", default=os.environ.get("VLM_MODEL", "gemini-3.5-flash-lite"),
+                     help="mac dinh VLM_MODEL trong .env")
+    run.add_argument("--concurrency", type=int, default=4)
+    run.set_defaults(fn=cmd_run)
+
+    show = sub.add_parser("show", help="xem document.json")
+    show.add_argument("doc", help="doc_id (vd onboarding_kit) hoac duong dan .json")
+    show.add_argument("--page", default=None, help="'11' | '9,11' | '9-15'")
+    show.add_argument("--full", action="store_true", help="in du, khong cat chu")
+    show.set_defaults(fn=cmd_show)
+
     args = ap.parse_args(argv)
-
-    logging.basicConfig(
-        level=logging.WARNING if args.quiet else logging.INFO, format="%(message)s"
-    )
-
-    doc, just_parsed = load(
-        args.json,
-        do_ocr=args.ocr,
-        vlm_model=args.vlm_model,
-        area_threshold=args.area_threshold,
-        source_pdf=args.source_pdf,
-    )
-    if not just_parsed:
-        log.info("nap lai ParsedDocument co san (khong parse lai)")
-
-    # Vá tay: áp SAU khi parse/nạp, rồi tính lại cờ vì trang được vá có thể hết rỗng.
-    if not args.no_patch:
-        pf = Path(args.patch) if args.patch else find_patch(doc.doc_id)
-        if pf:
-            log.info("va tay tu %s", pf)
-            apply_patch(doc, load_patch(pf))
-            apply_flags(doc)
-
-    if args.page:
-        show_pages(doc, parse_pages(args.page), args.full)
-    else:
-        report(doc)
-
-    if args.out:
-        out = Path(args.out)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(doc.to_json(), encoding="utf-8")
-        log.info("")
-        log.info("ghi -> %s (%d KB)", out, out.stat().st_size // 1024)
-
-    n_err = sum(1 for f in doc.flags if f.severity == "error")
-    if n_err and not args.page:
-        log.info("exit 1: co %d co muc error (de CI bat duoc). Parse van THANH CONG.", n_err)
-    return 1 if (n_err and not args.page) else 0
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    return args.fn(args)
 
 
 if __name__ == "__main__":

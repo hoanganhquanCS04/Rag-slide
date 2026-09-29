@@ -20,3 +20,4 @@ python-dotenv==1.2.3      # đọc .env: OPENAI_API_KEY, OPENAI_BASE_URL, VLM_MO
 numpy==2.5.3
 rank-bm25==0.2.2
 tiktoken==0.14.0          # đếm token đúng tokenizer của text-embedding-3-*
+chromadb==1.5.9           # kho vector khi VECTOR_DB=chroma — KHÔNG dùng embedding có sẵn của nó

@@ -34,7 +34,7 @@ from pydantic import BaseModel, Field
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from kb.embed import MODEL_ID
+from kb.embed import MODEL_ID, load_vectors
 from kb.search import Mode, Searcher
 
 log = logging.getLogger(__name__)
@@ -146,8 +146,11 @@ def self_retrieval(se: Searcher, *, mode: Mode = "hybrid",
 
 def find_duplicates(se: Searcher, threshold: float = DUP_THRESHOLD
                     ) -> list[tuple[str, str, float]]:
-    """So từng cặp vector. Vector đã chuẩn hoá L2 nên tích vô hướng CHÍNH LÀ cosine."""
-    M = se.M
+    """So từng cặp vector. Vector đã chuẩn hoá L2 nên tích vô hướng CHÍNH LÀ cosine.
+
+    Đọc thẳng .npy chứ không hỏi kho: cần CẢ ma trận, kho chỉ trả top-k.
+    """
+    M = load_vectors(se.cs, se.vectors_path, se.model_id)
     sim = M @ M.T
     out: list[tuple[str, str, float]] = []
     for i, j in itertools.combinations(range(len(M)), 2):

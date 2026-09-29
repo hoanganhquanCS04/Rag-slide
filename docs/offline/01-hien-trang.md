@@ -12,19 +12,22 @@ thời gian, nên mọi thứ tính trước được đều làm ở đây.
 ## 1. Luồng
 
 ```
-data/raw/<ten>.pptx | .pdf                 MỘT file vừa là DECK vừa là KB
+data/raw/<ten>.pdf  (| .pptx + .pdf cùng tên)   MỘT file vừa là DECK vừa là KB
         │
-        │ ① docling + VLM mô tả ảnh                  💰 gọi API VLM
+        │ ① docling: chữ + toạ độ + vùng ảnh/bảng     miễn phí (~2s/trang CPU)
         ▼
-out/parse_api/<ten>.json                   docling thô — không ai đọc trực tiếp
+out/parsed/<ten>/docling.json                     docling thô — không ai đọc trực tiếp
         │
-        │ ② chuyển sang cấu trúc của mình            miễn phí
-        │    + vá tay data/patches/<ten>.json (nếu có)
-        │    + dựng chương từ thanh header, soi cờ
+        │ ② VLM nhìn CẢ trang, sắp chữ thành khối     💰 1 lần gọi/trang, có cache
         ▼
-out/parsed/<ten>.json            ★ ParsedDocument — NGUỒN của mọi bước sau, mở ra đọc được luôn
+out/parsed/<ten>/layout.json                      bố cục từng trang (chỉ trỏ id, không chép chữ)
         │
-        ├──③ chunk + nhúng vector ───────────────── 💰 embedding (có cache)
+        │ ③ ghép chữ docling theo bố cục + kiểm       miễn phí
+        │    + link ẩn trong PDF + chương + vá tay data/patches/<ten>.json + cờ
+        ▼
+out/parsed/<ten>/document.json            ★ ParsedDocument — NGUỒN của mọi bước sau, mở ra đọc được luôn
+        │
+        ├──④ chunk + nhúng vector ───────────────── 💰 embedding (có cache)
         │      ▼
         │   out/kb/<ten>.chunks.json               KBChunk[]      → để TÌM
         │   out/kb/<ten>__<model>.vectors.{npy,json}
@@ -33,15 +36,15 @@ out/parsed/<ten>.json            ★ ParsedDocument — NGUỒN của mọi bư�
         │      │                                  máy ĐỀ XUẤT, NGƯỜI chốt
         │      └─ audit.py / eval.py ──────► out/kb/audit/*.json   đo chất lượng tìm
         │
-        └──④ viết kịch bản từng trang ─────────────── 💰 LLM
+        └──⑤ viết kịch bản từng trang ─────────────── 💰 LLM
                đọc: block của trang + pronunciation.json
                ▼
             out/deck/<ten>/scenario.json            Scenario       → robot NÓI
             out/deck/<ten>/scenario.md              bản đọc cho người
 ```
 
-Hai nhánh từ `ParsedDocument` **độc lập nhau**: KB (③) để trả lời câu hỏi, kịch bản (④)
-để tự thuyết trình. ④ không đọc chunk — nó đọc thẳng block của trang, vì mỗi câu phải trỏ
+Hai nhánh từ `ParsedDocument` **độc lập nhau**: KB (④) để trả lời câu hỏi, kịch bản (⑤)
+để tự thuyết trình. ⑤ không đọc chunk — nó đọc thẳng block của trang, vì mỗi câu phải trỏ
 về đúng một block.
 
 ---
@@ -51,28 +54,28 @@ về đúng một block.
 Đủ lệnh chạy, đọc kết quả, chạy lại một phần: [02-lenh.md](./02-lenh.md).
 
 ```powershell
-.venv\Scripts\python.exe scripts\parse_api.py data\raw\<ten>.pptx                                    # ①
-.venv\Scripts\python.exe src\parsing\cli.py "out\parse_api\<ten>.json" -o out\parsed\<ten>.json        # ②
-.venv\Scripts\python.exe src\kb\cli.py out\parsed\<ten>.json -o out\kb\<ten>.chunks.json --embed       # ③
-.venv\Scripts\python.exe scripts\extract_terms.py out\kb\<ten>.chunks.json                            # bảng phát âm (nháp)
-.venv\Scripts\python.exe src\scenario\cli.py out\parsed\<ten>.json                                     # ④
-.venv\Scripts\python.exe src\scenario\cli.py out\parsed\<ten>.json --md                                # ④ bản đọc
+.venv\Scripts\python.exe src\parsing\cli.py run "data\raw\<file>.pdf"                              # ①②③
+.venv\Scripts\python.exe src\kb\cli.py out\parsed\<ten>\document.json -o out\kb\<ten>.chunks.json --embed  # ④
+.venv\Scripts\python.exe scripts\extract_terms.py out\kb\<ten>.chunks.json                          # ④b phát âm (nháp)
+.venv\Scripts\python.exe src\scenario\cli.py out\parsed\<ten>\document.json                                # ⑤
+.venv\Scripts\python.exe src\scenario\cli.py out\parsed\<ten>\document.json --md                           # ⑤ bản đọc
 ```
 
 Thử tìm kiếm: `.venv\Scripts\python.exe scripts\try_search.py <ten> "câu hỏi"`
 
 | Bước | Tốn | Chạy lại khi nào |
 |---|---|---|
-| ① docling + VLM | ~1 phút + mỗi ảnh một lần gọi VLM | đổi file gốc, đổi model VLM |
-| ② parse | vài giây, miễn phí | đổi luật parse, sửa patch tay |
-| ③ chunk + embed | vài giây; chữ không đổi → 0 lần gọi API | sau ② |
-| ④ kịch bản | ~1 lần gọi LLM mỗi trang | trang có `page_hash` đổi |
+| ① docling | ~2s/trang CPU, miễn phí | đổi file gốc (`--redo`) |
+| ② bố cục VLM | 1 lần gọi/trang; trang không đổi → 0 lần | đổi file gốc, prompt, `VLM_MODEL` |
+| ③ dựng document.json | vài giây, miễn phí | luôn chạy lại trong `run` |
+| ④ chunk + embed | vài giây; chữ không đổi → 0 lần gọi API | sau ③ |
+| ⑤ kịch bản | ~1 lần gọi LLM mỗi trang | trang có `page_hash` đổi |
 
 ---
 
 ## 3. Dữ liệu từng tầng
 
-### ② `ParsedDocument` — tài liệu → trang → block
+### ③ `ParsedDocument` — tài liệu → trang → block
 
 Chi tiết: [spec/parsed-document.md](../spec/parsed-document.md)
 
@@ -80,9 +83,8 @@ Chi tiết: [spec/parsed-document.md](../spec/parsed-document.md)
 ParsedDocument   doc_id · source · parser · sections[] · flags[]
  └─ pages[]      page_no · title · section_id · page_hash
      ├─ slide_type    section_divider · exercise · content — luật, S4 viết theo loại trang
-     ├─ blocks[]      NỘI DUNG, theo thứ tự đọc
-     │    └─ id · kind · role · content · polygon · provenance
-     └─ furniture     {header, footer[]} — không vào KB; header là nguồn dựng chương
+     └─ blocks[]      NỘI DUNG, theo thứ tự đọc
+          └─ id · kind · role · content · hrefs · polygon · provenance
 ```
 
 Mỗi block trả lời ba câu, loại nào cũng vậy:
@@ -99,7 +101,7 @@ Mỗi block trả lời ba câu, loại nào cũng vậy:
  "provenance": "text_layer"}
 ```
 
-### ③ `KBChunk` + vector — để TÌM
+### ④ `KBChunk` + vector — để TÌM
 
 Chi tiết: [spec/kb-chunk.md](../spec/kb-chunk.md) · [spec/embedding.md](../spec/embedding.md) ·
 [spec/search.md](../spec/search.md)
@@ -139,10 +141,10 @@ Chi tiết: [spec/pronunciation.md](../spec/pronunciation.md)
  "terms": {"LED": {"say": "led", "syllables": 4, "mode": "english", "by": "auto"}}}
 ```
 
-Robot đọc thuật ngữ thế nào, và ④ **đếm âm tiết theo đúng bảng này**. `by: "auto"` = máy
+Robot đọc thuật ngữ thế nào, và ⑤ **đếm âm tiết theo đúng bảng này**. `by: "auto"` = máy
 đề xuất, chưa ai duyệt. Rebuild **không xoá** file này.
 
-### ④ `Scenario` — robot NÓI gì
+### ⑤ `Scenario` — robot NÓI gì
 
 Chi tiết: [spec/scenario.md](../spec/scenario.md)
 
@@ -185,13 +187,13 @@ slide: nó là chữ thật (`text_layer`) hay máy tả (`vlm`), nằm ở đâ
 
 | Cơ chế | Nằm ở | Tác dụng |
 |---|---|---|
-| `page_hash` = hash(nội dung + vị trí mọi block của trang) | `ParsedPage` | ④ chỉ viết lại trang có hash đổi |
+| `page_hash` = hash(nội dung + vị trí mọi block của trang) | `ParsedPage` | ⑤ chỉ viết lại trang có hash đổi |
 | cache vector theo hash của `text_enriched` | `out/kb/.embed_cache/` | chữ không đổi → 0 lần gọi API |
 | `edited_by: "nguoi"` | `SlideScript` | câu người sửa không bị máy ghi đè |
 | `pronunciation_hash` | `Scenario` | đổi bảng phát âm → biết timing đã lệch |
 
-Đo được: build lại `tetnguyendan` sau khi sửa toạ độ → ③ **10/10 vector từ cache, 0 lần
-gọi API**; ④ viết lại cả 10 trang vì toạ độ nằm trong `page_hash`.
+Đo được: build lại `tetnguyendan` sau khi sửa toạ độ → ④ **10/10 vector từ cache, 0 lần
+gọi API**; ⑤ viết lại cả 10 trang vì toạ độ nằm trong `page_hash`.
 
 ---
 

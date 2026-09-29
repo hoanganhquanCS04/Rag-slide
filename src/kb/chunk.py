@@ -2,138 +2,161 @@
 
 Luật (chi tiết ở docs/spec/kb-chunk.md):
 
-    đơn vị    1 trang = 1 chunk chính           <- vì R2 nhảy tới TRANG
-    + phụ     mỗi mô tả ảnh = 1 vector phụ      <- chống loãng khi trang nhiều ảnh
-    tiền tố   [<tên chương> · trang N/M]        <- contextual enrichment, KHÔNG gọi LLM
-    bỏ qua    furniture (header/footer)
-    đánh dấu  trang phân mục -> section_divider, lọc khỏi tìm kiếm (KHÔNG xoá)
-    cắt thêm  chỉ khi > 500 token, cắt theo ranh giới block
+    đơn vị    1 trang = 1 chunk chính                    <- vì R2 nhảy tới TRANG
+    + phụ     trang >= 2 ảnh có mô tả -> mỗi ảnh 1 vector phụ, cùng trỏ về trang
+    tiền tố   [<chương> · <tiêu đề trang> · trang N/M]   <- KHÔNG gọi LLM, thiếu phần nào bỏ phần đó
+    cắt thêm  chunk > 500 token -> cắt ở ranh giới block
+              MỘT block đã > 500 -> bảng theo hàng (mảnh nào cũng lặp hàng tiêu đề),
+                                    chữ theo dòng, dòng vẫn dài thì theo câu
+    đánh dấu  trang phân mục -> section_divider, lọc lúc tìm (KHÔNG xoá)
 
-KHÔNG có overlap. Luật `overlap 50` của §5 S5 sinh ra cho văn xuôi liên tục — cắt ở
-điểm tuỳ tiện thì câu vắt qua ranh giới mất cả hai bên. Ở đây ranh giới là ranh giới
-TRANG, do chính tác giả slide chia. Không câu nào bị cắt đôi. Thứ overlap định phục vụ
-(ngữ cảnh vắt qua ranh giới) thì tiền tố `[chương · trang N/M]` làm tốt hơn, mà không
-nhân đôi dữ liệu.
+Đầu vào chỉ là `document.json`: `blocks[].content` là chữ, `id` + `provenance` để truy ngược.
+Header/footer lặp S0 đã bỏ, ảnh không có mô tả thì `content` rỗng -> tự rơi.
+
+KHÔNG overlap. Overlap sinh ra cho văn xuôi cắt ở điểm tuỳ tiện — ở đây ranh giới luôn là
+trang / block / dòng / câu, không câu nào bị cắt đôi. Ngữ cảnh vắt qua ranh giới thì tiền tố
+lo: mảnh `.2` của trang dài vẫn biết mình thuộc chương nào, trang nào, nói về gì.
 """
 
 from __future__ import annotations
 
 import logging
+import re
+from collections import Counter
 from functools import lru_cache
+from typing import Callable, TypeVar
 
 from kb.models import ChunkSet, KBChunk
-from parsing.models import ParsedDocument, ParsedPage
+from parsing.models import Block, ParsedDocument, ParsedPage, ParsedTable
 
 log = logging.getLogger(__name__)
 
 TOKENIZER_ID = "cl100k_base"   # tokenizer THẬT của text-embedding-3-*
 MAX_TOKENS = 500
-CHARS_PER_TOKEN = 3.2          # đường lui khi máy không có tiktoken (tiếng Việt, đo thô)
+SENTENCE_END = re.compile(r"(?<=[.!?;])\s+")
+
+T = TypeVar("T")
 
 
 @lru_cache(maxsize=1)
-def _tokenizer():
-    """Tokenizer của CHÍNH model nhúng đang dùng (text-embedding-3-* -> cl100k_base).
+def _encoding():
+    import tiktoken
 
-    Trước đếm bằng bge-m3 và code cũ đã tự ghi đó chỉ là PROXY. Bỏ bge-m3 rồi thì đếm
-    bằng đúng bộ của model luôn — tiktoken chỉ ~2 MB chứ không phải 4.3 GB.
-
-    Máy không có tiktoken thì lui về ước theo số ký tự. Con số này chỉ dùng để quyết
-    có cắt nhỏ chunk hay không (ngưỡng 500) và để báo cáo, nên sai ±15% vẫn an toàn:
-    chunk to nhất đo được mới 353 token.
-    """
-    try:
-        import tiktoken
-
-        return tiktoken.get_encoding(TOKENIZER_ID)
-    except Exception:
-        log.warning("khong co tiktoken -> uoc token theo so ky tu (sai ~15%%)")
-        return None
-
-
-def tokenizer_name() -> str:
-    """Ghi vào ChunkSet để sau khỏi lẫn số đếm đúng với số ước."""
-    return TOKENIZER_ID if _tokenizer() is not None else f"uoc_{CHARS_PER_TOKEN}_ky_tu"
+    return tiktoken.get_encoding(TOKENIZER_ID)
 
 
 def count_tokens(text: str) -> int:
-    enc = _tokenizer()
-    if enc is None:
-        return round(len(text) / CHARS_PER_TOKEN)
-    return len(enc.encode(text))
+    return len(_encoding().encode(text))
 
 
 def prefix_for(doc: ParsedDocument, page: ParsedPage) -> str:
-    """'[Đồ thị dạng đường · trang 11/40] ' — ngữ cảnh, khỏi phải gọi LLM sinh."""
+    """'[Nhân sự · Thuế và đăng ký giảm trừ gia cảnh · trang 18/51] '.
+
+    Tiêu đề trang nằm ở TIỀN TỐ chứ không chỉ trong thân: trang dài bị cắt thì mảnh sau vẫn
+    mang nó (Onboarding p9 mảnh 2 mở bằng "Chỉ gửi email cho đúng người…" — thiếu tiêu đề là
+    không biết đang nói chuyện email). Trang phân mục có tiêu đề trùng tên chương -> ghi một lần.
+    """
     sec = doc.section_of(page.page_no)
-    head = f"{sec.title} · " if sec else ""
-    return f"[{head}trang {page.page_no}/{doc.n_pages}] "
+    heads = [h for h in dict.fromkeys([sec.title if sec else None, page.title]) if h]
+    return "[" + " · ".join([*heads, f"trang {page.page_no}/{doc.n_pages}"]) + "] "
 
 
-def _provenance(blocks) -> dict[str, int]:
-    out: dict[str, int] = {}
-    for b in blocks:
-        k = b.provenance.value
-        out[k] = out.get(k, 0) + 1
-    return out
+def _pack(items: list[T], budget: int, size: Callable[[T], int]) -> list[list[T]]:
+    """Gom liên tiếp cho tới khi chạm `budget`. Một món đã vượt budget thì đứng riêng một nhóm.
+
+    Mỗi món cộng 1 token cho dấu `\\n` nối — không tính thì đo ra chunk 511 token.
+    """
+    groups: list[list[T]] = []
+    cur: list[T] = []
+    used = 0
+    for it in items:
+        n = size(it) + 1
+        if cur and used + n > budget:
+            groups.append(cur)
+            cur, used = [], 0
+        cur.append(it)
+        used += n
+    if cur:
+        groups.append(cur)
+    return groups
+
+
+def _split_block(b: Block, budget: int) -> list[str]:
+    """Chữ của một block — vừa `budget` thì nguyên khối, không thì cắt ở ranh giới tự nhiên.
+
+    Đo trên Onboarding: 7 block một mình đã > 500 token (bảng chấm công p21: 1570, list thuế
+    p19: 848). Cắt ở ranh giới block thì không đụng được chúng -> một vector bình quân cả
+    bảng 13 hàng, hỏi một dòng quy định là loãng.
+
+        bảng   theo hàng, mảnh nào cũng lặp hàng tiêu đề + |---| — không có nó mảnh sau chỉ
+               còn số, không biết cột nào là gì
+        chữ    theo dòng (list là mỗi gạch đầu dòng một dòng); dòng vẫn dài thì theo câu
+
+    Một câu đơn lẻ dài hơn budget thì để nguyên — cắt giữa câu còn tệ hơn chunk to.
+    """
+    text = b.content or ""
+    if count_tokens(text) <= budget:
+        return [text]
+
+    lines = [ln for ln in text.split("\n") if ln.strip()]
+    if isinstance(b, ParsedTable) and len(lines) > 3:
+        head = "\n".join(lines[:2])                    # hàng tiêu đề + dòng |---|
+        groups = _pack(lines[2:], budget - count_tokens(head), count_tokens)
+        return [head + "\n" + "\n".join(g) for g in groups]
+
+    units = [u for ln in lines
+             for u in ([ln] if count_tokens(ln) <= budget else SENTENCE_END.split(ln))]
+    return ["\n".join(g) for g in _pack(units, budget, count_tokens)]
+
+
+def _chunk(doc: ParsedDocument, page: ParsedPage, key: str, *, role: str, ctype: str,
+           prefix: str, raw: str, blocks: list[Block]) -> KBChunk:
+    sec = doc.section_of(page.page_no)
+    enriched = prefix + raw
+    return KBChunk(
+        chunk_id=f"{doc.doc_id}#{key}",
+        doc_id=doc.doc_id,
+        page_no=page.page_no,
+        page_hash=page.page_hash,
+        section_id=sec.id if sec else None,
+        section_title=sec.title if sec else None,
+        vector_role=role,
+        content_type=ctype,
+        text_raw=raw,
+        text_enriched=enriched,
+        token_count=count_tokens(enriched),
+        block_ids=[b.id for b in blocks],
+        provenance=dict(Counter(b.provenance.value for b in blocks)),
+    )
 
 
 def _page_chunks(doc: ParsedDocument, page: ParsedPage, max_tokens: int) -> list[KBChunk]:
-    """Chunk chính của trang. Quá dài thì cắt theo ranh giới block."""
-    blocks = [b for b in page.blocks if b.content]
-    if not blocks:
+    """Chunk chính của trang: mọi block có chữ, đúng thứ tự trong `page.blocks`."""
+    prefix = prefix_for(doc, page)
+    budget = max_tokens - count_tokens(prefix)
+    # (block, mảnh chữ) — block to quá thành nhiều mảnh, cùng trỏ về block đó
+    parts = [(b, piece) for b in page.blocks if b.content for piece in _split_block(b, budget)]
+    if not parts:
         return []
 
-    prefix = prefix_for(doc, page)
     # Luật phân loại nằm ở ParsedPage.slide_type — ở đây chỉ đọc. Trang bài tập vẫn là
     # "content" với KB: nó có nội dung thật, phải tìm được.
     ctype = "section_divider" if page.slide_type == "section_divider" else "content"
-
-    def make(idx: int | None, bs) -> KBChunk:
-        raw = "\n".join(b.content or "" for b in bs)
-        enriched = prefix + raw
-        suffix = "" if idx is None else f".{idx}"
-        return KBChunk(
-            chunk_id=f"{doc.doc_id}#p{page.page_no:03d}{suffix}",
-            doc_id=doc.doc_id,
-            page_no=page.page_no,
-            section_id=page.section_id,
-            section_title=(s.title if (s := doc.section_of(page.page_no)) else None),
-            vector_role="page",
-            content_type=ctype,
-            text_raw=raw,
-            text_enriched=enriched,
-            token_count=count_tokens(enriched),
-            block_ids=[b.id for b in bs],
-            provenance=_provenance(bs),
-        )
-
-    whole = make(None, blocks)
-    if whole.token_count <= max_tokens or len(blocks) == 1:
-        return [whole]
-
-    # Quá dài -> gom block cho tới khi chạm ngưỡng, CẮT Ở RANH GIỚI BLOCK.
-    # Mỗi mảnh giữ nguyên tiền tố, nên mảnh nào cũng tự biết mình ở trang nào.
-    out: list[KBChunk] = []
-    cur: list = []
-    cur_tok = count_tokens(prefix)
-    for b in blocks:
-        t = count_tokens(b.content or "")
-        if cur and cur_tok + t > max_tokens:
-            out.append(make(len(out) + 1, cur))
-            cur, cur_tok = [], count_tokens(prefix)
-        cur.append(b)
-        cur_tok += t
-    if cur:
-        out.append(make(len(out) + 1, cur))
-    log.info("    p%d dai %d token -> cat thanh %d manh", page.page_no, whole.token_count, len(out))
-    return out
+    groups = _pack(parts, budget, lambda p: count_tokens(p[1]))
+    base = f"p{page.page_no:03d}"
+    return [
+        _chunk(doc, page, base if len(groups) == 1 else f"{base}.{i}",
+               role="page", ctype=ctype, prefix=prefix,
+               raw="\n".join(piece for _, piece in g),
+               blocks=list({b.id: b for b, _ in g}.values()))   # block cắt nhiều mảnh chỉ tính 1 lần
+        for i, g in enumerate(groups, 1)
+    ]
 
 
-def _image_chunks(doc: ParsedDocument, page: ParsedPage) -> list[KBChunk]:
+def _image_chunks(doc: ParsedDocument, page: ParsedPage, max_tokens: int) -> list[KBChunk]:
     """Mỗi mô tả ảnh một vector phụ — chống loãng khi trang có nhiều ảnh.
 
-    Đo được 5/40 trang có >=2 ảnh được mô tả, và chúng thường là cặp
+    Đo trên 3_datavisualization: 5/40 trang có >= 2 ảnh được mô tả, thường là cặp
     'code + biểu đồ kết quả'. Gộp một vector thì bình quân hai chủ đề, loãng.
     Tách vector nhưng CÙNG trỏ về page_no nên điều hướng không đổi.
     """
@@ -142,48 +165,27 @@ def _image_chunks(doc: ParsedDocument, page: ParsedPage) -> list[KBChunk]:
         return []
 
     prefix = prefix_for(doc, page)
-    title = page.title or ""
-    sec = doc.section_of(page.page_no)
+    budget = max_tokens - count_tokens(prefix)
     out: list[KBChunk] = []
     for im in imgs:
-        raw = f"{title}\n{im.content}" if title else (im.content or "")
-        enriched = prefix + raw
-        out.append(
-            KBChunk(
-                chunk_id=f"{doc.doc_id}#{im.id}",
-                doc_id=doc.doc_id,
-                page_no=page.page_no,
-                section_id=page.section_id,
-                section_title=sec.title if sec else None,
-                vector_role="image",
-                content_type="content",
-                text_raw=raw,
-                text_enriched=enriched,
-                token_count=count_tokens(enriched),
-                block_ids=[im.id],
-                provenance={im.provenance.value: 1},   # ảnh người sửa -> "manual"
-            )
-        )
+        pieces = _split_block(im, budget)
+        for j, piece in enumerate(pieces, 1):
+            out.append(_chunk(doc, page, im.id if len(pieces) == 1 else f"{im.id}.{j}",
+                              role="image", ctype="content", prefix=prefix,
+                              raw=piece, blocks=[im]))
     return out
 
 
 def chunk_document(doc: ParsedDocument, *, max_tokens: int = MAX_TOKENS) -> ChunkSet:
-    chunks: list[KBChunk] = []
-    for page in doc.pages:
-        chunks.extend(_page_chunks(doc, page, max_tokens))
-        chunks.extend(_image_chunks(doc, page))
+    chunks = [c for page in doc.pages
+              for c in (*_page_chunks(doc, page, max_tokens), *_image_chunks(doc, page, max_tokens))]
+    cs = ChunkSet(doc_id=doc.doc_id, max_tokens=max_tokens, tokenizer=TOKENIZER_ID, chunks=chunks)
 
-    cs = ChunkSet(
-        doc_id=doc.doc_id,
-        source_path=doc.source.path,
-        max_tokens=max_tokens,
-        tokenizer=tokenizer_name(),
-        chunks=chunks,
-    )
-    n_div = sum(1 for c in chunks if c.content_type == "section_divider")
     n_img = sum(1 for c in chunks if c.vector_role == "image")
+    n_split = len({c.page_no for c in chunks if c.vector_role == "page" and "." in c.chunk_id.rsplit("#", 1)[1]})
     log.info(
-        "%s -> %d chunk (%d trang + %d anh) | %d phan muc | tim duoc %d",
-        doc.doc_id, len(chunks), len(chunks) - n_img, n_img, n_div, len(cs.searchable),
+        "%s -> %d chunk (%d trang + %d anh) | %d trang bi cat | %d phan muc | tim duoc %d",
+        doc.doc_id, len(chunks), len(chunks) - n_img, n_img, n_split,
+        sum(1 for c in chunks if c.content_type == "section_divider"), len(cs.searchable),
     )
     return cs

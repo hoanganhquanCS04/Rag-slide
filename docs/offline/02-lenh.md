@@ -24,41 +24,47 @@ Trong các lệnh dưới, thay `<ten>` bằng tên deck, ví dụ `tetnguyendan
 
 ## A. Xử lý file raw — chạy theo thứ tự
 
-Đặt file vào `data/raw/<ten>.pptx` (hoặc `.pdf`), rồi:
+Đặt file vào `data/raw/` (`.pdf`, hoặc `.pptx` kèm bản `.pdf` CÙNG TÊN để có ảnh trang), rồi:
 
 ```powershell
-# ① docling + VLM mô tả ảnh                                  -> out\parse_api\<ten>.json      [tốn API]
-.venv\Scripts\python.exe scripts\parse_api.py data\raw\<ten>.pptx
+# ①②③ đọc file -> out\parsed\<ten>\{docling.json, layout.json, document.json}      [② tốn API]
+.venv\Scripts\python.exe src\parsing\cli.py run "data\raw\<file>.pdf"
 
-# ② ra cấu trúc của mình                                     -> out\parsed\<ten>.json
-.venv\Scripts\python.exe src\parsing\cli.py out\parse_api\<ten>.json -o out\parsed\<ten>.json
+# ④ chunk + nhúng vector                                     -> out\kb\<ten>.chunks.json + .vectors.npy
+.venv\Scripts\python.exe src\kb\cli.py out\parsed\<ten>\document.json -o out\kb\<ten>.chunks.json --embed
 
-# ③ chunk + nhúng vector                                     -> out\kb\<ten>.chunks.json + .vectors.npy
-.venv\Scripts\python.exe src\kb\cli.py out\parsed\<ten>.json -o out\kb\<ten>.chunks.json --embed
-
-# ③b bảng phát âm (nháp)                                     -> out\deck\<ten>\pronunciation.json
+# ④b bảng phát âm (nháp)                                     -> out\deck\<ten>\pronunciation.json
 .venv\Scripts\python.exe scripts\extract_terms.py out\kb\<ten>.chunks.json
 #     MỞ FILE RA SỬA: xoá từ robot không nói ra miệng, sửa "say", đổi by "auto" -> "nguoi"
 
-# ④ viết kịch bản                                            -> out\deck\<ten>\scenario.json  [tốn API]
-.venv\Scripts\python.exe src\scenario\cli.py out\parsed\<ten>.json
+# ⑤ viết kịch bản                                            -> out\deck\<ten>\scenario.json  [tốn API]
+.venv\Scripts\python.exe src\scenario\cli.py out\parsed\<ten>\document.json
 
-# ④b xuất kịch bản ra markdown để đọc                        -> out\deck\<ten>\scenario.md
-.venv\Scripts\python.exe src\scenario\cli.py out\parsed\<ten>.json --md
+# ⑤b xuất kịch bản ra markdown để đọc                        -> out\deck\<ten>\scenario.md
+.venv\Scripts\python.exe src\scenario\cli.py out\parsed\<ten>\document.json --md
 ```
 
 Ghi chú:
 
-- File `.pdf` thì ở ① thay `.pptx` bằng `.pdf`. Tên file có dấu cách thì bọc trong ngoặc kép:
-  `"out\parse_api\3_DataVisualization (1).json"`.
-- ② tự áp file vá tay `data\patches\<ten>.json` nếu có.
-- Deck ảnh chỉ để trang trí: ghi `"vlm_pages": [15, 31, 41]` vào file vá **trước khi chạy ①**
-  → ① chỉ gửi ảnh các trang đó cho VLM, ② ghi ảnh trang khác là `skipped` (không bắn cờ đỏ).
-  Không có key = tả mọi ảnh. Ví dụ: `data\patches\onboarding_kit.json`.
-- ② thoát mã `1` khi có cờ mức `error` — vẫn ghi file bình thường, mã lỗi để CI bắt.
-- ③ chữ không đổi thì lấy vector từ cache, không gọi API.
-- ③b chạy lại **không mất** mục người đã duyệt (`by: "nguoi"`), chỉ ghi đè mục `auto`.
-- ④ chỉ viết lại trang có `page_hash` đổi. Câu người đã sửa tay (`edited_by: "nguoi"`)
+- `<ten>` = tên file bỏ dấu, viết thường: `Thời gian làm việc….pdf` -> `thoi_gian_lam_viec_…`.
+  Tên file có dấu cách thì bọc trong ngoặc kép.
+- Bên trong `run`:
+
+  | Bước | Ra | Tốn | Bỏ qua khi |
+  |---|---|---|---|
+  | ① docling: chữ + toạ độ + vùng ảnh/bảng | `docling.json` | ~2s/trang CPU | đã có file (trừ `--redo`) |
+  | ② VLM nhìn cả trang, sắp chữ thành khối | `layout.json` | 1 lần gọi/trang | trang đã có và không đổi gì |
+  | ③ ghép + kiểm + link + vá tay + cờ | `document.json` | không | không bao giờ — luôn dựng lại |
+
+- Thử trước vài trang cho đỡ tốn: `run "<file>" --pages 7,10` — CHỈ gọi VLM các trang đó,
+  trang khác dùng block docling. `--no-vlm` = không gọi API, dùng `layout.json` sẵn có.
+- VLM chỉ SẮP XẾP, chữ vẫn lấy nguyên văn từ docling. Trang VLM sắp sai (sót chữ, bịa id, bỏ
+  quên vùng) tự quay về docling + cờ `layout_failed`. Gọi lại: `run "<file>" --pages N`.
+- ③ tự áp file vá tay `data\patches\<ten>.json` nếu có.
+- `run` thoát mã `1` khi có cờ mức `error` — vẫn ghi file bình thường, mã lỗi để CI bắt.
+- ④ chữ không đổi thì lấy vector từ cache, không gọi API.
+- ④b chạy lại **không mất** mục người đã duyệt (`by: "nguoi"`), chỉ ghi đè mục `auto`.
+- ⑤ chỉ viết lại trang có `page_hash` đổi. Câu người đã sửa tay (`edited_by: "nguoi"`)
   không bao giờ bị ghi đè.
 
 ---
@@ -68,28 +74,31 @@ Ghi chú:
 ### Nội dung một trang
 
 ```powershell
-.venv\Scripts\python.exe src\parsing\cli.py out\parsed\<ten>.json --page 2           # một trang
-.venv\Scripts\python.exe src\parsing\cli.py out\parsed\<ten>.json --page 2-5 --full  # nhiều trang, không cắt chữ
+.venv\Scripts\python.exe src\parsing\cli.py show <ten>                       # tổng quan + cờ
+.venv\Scripts\python.exe src\parsing\cli.py show <ten> --page 2              # một trang
+.venv\Scripts\python.exe src\parsing\cli.py show <ten> --page 2-5 --full     # nhiều trang, không cắt chữ
 ```
 
 ```
---- trang 2 | (khong tieu de) | chuong: —
-    hash=2adf6b0331dbcc89  starved=False
-    p002.b00   para/body      5.35% text_layer Khởi Nguồn Nam Mới
-    p002.b01   para/body     11.90% text_layer Mùng 1
-    ...
+--- trang 10 | Chuyển đổi xanh | chuong: —
+    hash=af7f323b820c6106  slide_type=content
+    p010.v01   para/title     0.94% text_layer CBNV KÝ HĐLĐ CHÍNH THỨC
+    p010.v02   para/list     20.33% text_layer CBNV không sử dụng xe xăng … ⏎ Nếu sử dụng ô tô/xe máy…
+    p020.v05   table          4.63% vlm        | CÁCH TÍNH: | GIỜ LÀM THÊM BAN NGÀY | …
+               ↳ link Cẩm nang phân quyền -> https://camnangtt.vingroup.net/…
 ```
 
-Mỗi dòng: `id` · loại · % diện tích trang · nguồn · nội dung.
+Mỗi dòng: `id` · loại · % diện tích trang · nguồn · nội dung. `vNN` = khối VLM sắp, `bNN` =
+khối docling (trang chưa có bố cục VLM). Nguồn `vlm` = chữ VLM tự đọc từ ảnh — chỗ cần soi.
 `--page` nhận `11` · `9,11` · `9-15`.
 
-Xem cả deck bằng mắt: mở thẳng `out\parsed\<ten>.json` trong VS Code — file đã gọn, đọc được.
+Xem cả deck bằng mắt: mở thẳng `out\parsed\<ten>\document.json` trong VS Code — file đã gọn, đọc được.
 
 ### Kịch bản
 
 ```powershell
-.venv\Scripts\python.exe src\scenario\cli.py out\parsed\<ten>.json --show            # cả deck
-.venv\Scripts\python.exe src\scenario\cli.py out\parsed\<ten>.json --show --page 2   # một trang
+.venv\Scripts\python.exe src\scenario\cli.py out\parsed\<ten>\document.json --show            # cả deck
+.venv\Scripts\python.exe src\scenario\cli.py out\parsed\<ten>\document.json --show --page 2   # một trang
 ```
 
 ```
@@ -103,13 +112,13 @@ Xem cả deck bằng mắt: mở thẳng `out\parsed\<ten>.json` trong VS Code �
 - `pass2` = lần đầu viết bị trượt kiểm tra, đã sửa một lần — đáng soi
 - `CỜ:` = lỗi cần xem. Cuối bảng có tổng: thời lượng, tỉ lệ câu thiếu nguồn, cờ đỏ
 
-Đọc cho dễ: mở `out\deck\<ten>\scenario.md` (sinh bằng lệnh ④b).
+Đọc cho dễ: mở `out\deck\<ten>\scenario.md` (sinh bằng lệnh ⑤b).
 
 ### Chunk trong KB
 
 ```powershell
-.venv\Scripts\python.exe src\kb\cli.py out\parsed\<ten>.json --page 2 --full   # chunk của trang 2
-.venv\Scripts\python.exe src\kb\cli.py out\parsed\<ten>.json --stats           # thống kê cả KB
+.venv\Scripts\python.exe src\kb\cli.py out\parsed\<ten>\document.json --page 2 --full   # chunk của trang 2
+.venv\Scripts\python.exe src\kb\cli.py out\parsed\<ten>\document.json --stats           # thống kê cả KB
 ```
 
 > Không thêm `-o` khi chỉ muốn xem — có `-o` là ghi đè file KB.
@@ -147,18 +156,18 @@ nào kéo lên.
 
 ```powershell
 # viết lại kịch bản vài trang, kể cả khi trang không đổi
-.venv\Scripts\python.exe src\scenario\cli.py out\parsed\<ten>.json --page 2,5 --force
+.venv\Scripts\python.exe src\scenario\cli.py out\parsed\<ten>\document.json --page 2,5 --force
 
 # xem prompt sẽ gửi LLM, không gọi API
-.venv\Scripts\python.exe src\scenario\cli.py out\parsed\<ten>.json --page 2 --dry-run
+.venv\Scripts\python.exe src\scenario\cli.py out\parsed\<ten>\document.json --page 2 --dry-run
 
 ```
 
 | Vừa sửa | Chạy lại từ |
 |---|---|
-| file slide gốc | ① |
-| `data\patches\<ten>.json` (vá tay) | ② → ③ → ④ |
-| `pronunciation.json` | ④ — trang không đổi chỉ được đếm lại âm tiết, không gọi LLM |
-| `prompts\s4_scenario.md` hoặc `LLM_MODEL` | ④ — tự nhận ra prompt/model đổi, viết lại mọi trang |
+| file slide gốc | `run --redo` rồi ④ → ⑤ |
+| `data\patches\<ten>.json` (vá tay) | `run --no-vlm` → ④ → ⑤ |
+| `pronunciation.json` | ⑤ — trang không đổi chỉ được đếm lại âm tiết, không gọi LLM |
+| `prompts\s4_scenario.md` hoặc `LLM_MODEL` | ⑤ — tự nhận ra prompt/model đổi, viết lại mọi trang |
 
 `--force` chỉ cần khi muốn viết lại dù không có gì đổi (ví dụ thử lại cho câu hay hơn).

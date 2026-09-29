@@ -1,6 +1,12 @@
 # KBChunk — cắt tài liệu thành mẩu để tìm
 
-**Vào:** `out/parsed/*.json` (`ParsedDocument`) · **Ra:** `out/kb/*.json` · **Code:** `src/kb/` *(chưa viết)*
+**Vào:** `out/parsed/<doc_id>/document.json` (`ParsedDocument`) — file DUY NHẤT, không đọc
+`docling.json` / `layout.json` / `data/patches/` (đã gộp vào đó ở S0) · **Ra:**
+`out/kb/<doc_id>.chunks.json` · **Code:** [src/kb/chunk.py](../../src/kb/chunk.py)
+
+```
+python src/kb/cli.py out/parsed/<doc_id>/document.json -o out/kb/<doc_id>.chunks.json [--embed]
+```
 
 ---
 
@@ -56,22 +62,33 @@ Ba lý do, xếp theo sức nặng:
 ## 3. Hình dạng một chunk
 
 ```
-[Đồ thị dạng đường · trang 11/40]          ← tiền tố ngữ cảnh (text_enriched)
-Đồ thị dạng đường                           ← tiêu đề trang
-Đoạn mã Python và biểu đồ đường hiển thị    ← paragraph + mô tả ảnh, theo thứ tự đọc
-các câu lệnh `x = [1,2,3,4]`, `y = [1,4,9,16]`,
-`plt.plot(x,y)`, `plt.savefig('line_graph.png')`...
+[Nhân sự · Thuế và đăng ký giảm trừ gia cảnh · trang 18/51]   ← tiền tố (text_enriched)
+Thuế và đăng ký giảm trừ gia cảnh             ← block đầu trang (tiêu đề)
+...                                           ← mọi block có `content`, đúng thứ tự `page.blocks`
 ```
 
-**Tiền tố là phần contextual enrichment** mà §5 S5 gọi là "bước quan trọng nhất". Ta có
-sẵn `sections` + `page_no` nên **không phải gọi LLM** — rẻ hơn hẳn cách gốc (sinh câu
-bối cảnh bằng LLM cho từng chunk).
+Thân chunk lấy từ `page.blocks[].content` — loại nào cũng vậy:
 
-Với bộ deck này thì nó không phải trang trí: 7 trang `p9–p15` có tiêu đề **giống hệt
-nhau**. Không có `· trang 11/40` thì càng khó tách.
+| block | `content` là gì | `provenance` |
+|---|---|---|
+| `paragraph` | chữ từ text layer | `text_layer` — đúng 100% |
+| `table` | markdown SINH từ `cells` mỗi lần nạp | chữ ô đúng, lưới hàng/cột có thể sai |
+| `image` | mô tả của VLM | `vlm` — có thể sai. `content: null` (`why_empty`) thì tự rơi |
 
-Bỏ `furniture` (header/footer) — 152/252 mẩu chữ của deck là loại này, vào KB là 40 bản
-sao của cùng một dòng.
+**Tiền tố là phần contextual enrichment** mà §5 S5 gọi là "bước quan trọng nhất":
+`[<chương> · <tiêu đề trang> · trang N/M]`, thiếu phần nào bỏ phần đó, tiêu đề trùng tên
+chương (trang phân mục) thì ghi một lần. Lấy từ `sections` + `page.title` + `page_no` nên
+**không phải gọi LLM**.
+
+- **Chương** — 7 trang `p9–p15` của 3_datavisualization có tiêu đề **giống hệt nhau**,
+  `· trang 11/40` mới tách được.
+- **Tiêu đề trang** — trang dài bị cắt thì mảnh sau vẫn mang nó. Onboarding `p9.2` mở bằng
+  *"Chỉ gửi email cho đúng người…"* — thiếu *"Trao đổi thông tin qua email"* là không biết
+  đang nói chuyện gì. Mảnh đầu có tiêu đề hai lần (tiền tố + block tiêu đề) — cố ý giữ
+  `text_enriched = tiền tố + text_raw`, `text_raw` = đúng nội dung trang, không đặc cách.
+- `tetnguyendan` không có mục lục lẫn tiêu đề → tiền tố chỉ còn `[trang 4/10]`.
+
+Header/footer lặp không có trong `ParsedDocument` — S0 đã bỏ.
 
 ---
 
@@ -124,8 +141,9 @@ khỏi parse lại (parse lại **tốn tiền API**).
 ## 6. Metadata
 
 ```python
-chunk_id       "3_datavisualization#p011"
+chunk_id       "3_datavisualization#p011"    ← "#p011.2" mảnh cắt · "#p019.b02" ảnh
 page_no        11
+page_hash      "ed0af3583bd451dc"            ← copy từ ParsedPage: trang đổi -> chỉ nạp lại trang đó (§8)
 section_id     "sec_00"
 section_title  "Đồ thị dạng đường"
 block_ids      ["p011.b00", "p011.b01"]      ← truy ngược về đúng mẩu
@@ -146,10 +164,31 @@ nhưng chunk **trộn** hai loại: tiêu đề từ text layer (đúng 100%), m
 
 ## 7. Khi nào cắt thêm
 
-Chỉ khi chunk **vượt 500 token**. Lúc đó cắt theo **ranh giới block**, không cắt giữa
-mẩu. Mỗi mảnh giữ nguyên tiền tố ngữ cảnh, thêm hậu tố `#p011.1`, `#p011.2`.
+Chỉ khi chunk **vượt 500 token** (đếm bằng `tiktoken` `cl100k_base` — tokenizer thật của
+`text-embedding-3-*`, kể cả tiền tố). Mỗi mảnh giữ nguyên tiền tố, thêm hậu tố `#p011.1`,
+`#p011.2`. Cắt ở ranh giới **to nhất còn vừa**:
 
-File hiện tại chưa có ca nào (max 353).
+```
+trang   -> ranh giới block
+block   -> bảng: theo hàng, mảnh nào cũng LẶP hàng tiêu đề + |---|
+           chữ : theo dòng (list = mỗi gạch đầu dòng một dòng)
+dòng    -> theo câu
+câu     -> KHÔNG cắt — một câu dài hơn 500 thì để nguyên
+```
+
+3_datavisualization không cần (max 478). **Onboarding thì cần** — deck nhân sự nhiều chữ,
+ngược hẳn giả định "ít chữ nhiều hình":
+
+```
+7 block MỘT MÌNH đã > 500 token     bảng chấm công p21: 1570 · list thuế p19: 848
+cắt theo block thôi                 -> 9 chunk > 500, max 1583 — một vector bình quân
+                                       cả bảng 13 hàng, hỏi một dòng quy định là loãng
+cắt thêm trong block                -> 0 chunk > 500, max 498 · 25/51 trang bị cắt
+                                       "xin phép vắng mặt trên ILVG" -> trúng p21 (BM25)
+```
+
+Hàng tiêu đề phải lặp: không có nó mảnh `p021.3` chỉ còn các ô chữ, không biết cột nào là
+"cấp T3 trở lên", cột nào là "còn lại".
 
 ---
 
@@ -193,14 +232,14 @@ File hiện tại chưa có ca nào (max 353).
 ## 9. Luật chốt
 
 ```
+vào           out/parsed/<doc_id>/document.json — file duy nhất
 đơn vị        1 trang = 1 chunk chính
-+ phụ         mỗi mô tả ảnh = 1 vector phụ, cùng trỏ về page_no
-tiền tố       [<tên chương> · trang N/M]
-nội dung      tiêu đề + paragraph + mô tả ảnh, theo thứ tự đọc
-bỏ qua        furniture (header/footer)
-đánh dấu      trang phân mục -> content_type=section_divider, lọc khỏi tìm kiếm
-cắt thêm      chỉ khi > 500 token, cắt theo ranh giới block
-nhúng         text-embedding-3-small (API) + BM25 (rank-bm25)
++ phụ         trang >= 2 ảnh có mô tả -> mỗi ảnh 1 vector phụ, cùng trỏ về page_no
+tiền tố       [<chương> · <tiêu đề trang> · trang N/M], thiếu phần nào bỏ phần đó
+nội dung      mọi block có content, đúng thứ tự page.blocks
+đánh dấu      trang phân mục (slide_type) -> section_divider, lọc lúc tìm, KHÔNG xoá
+cắt thêm      > 500 token: trang -> block -> hàng bảng (lặp tiêu đề) / dòng -> câu
+nhúng         text_enriched · EMBED_MODEL trong .env (text-embedding-3-small) + BM25
 ```
 
 ---

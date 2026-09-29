@@ -3,7 +3,7 @@
 Xem docs/spec/embedding.md. Bốn điểm dễ sai:
 
   1. Embed `text_enriched`, KHÔNG phải `text_raw` (§10 cấm).
-  2. Nhúng CẢ 51 chunk, kể cả trang phân mục. Lọc là việc của lúc TRUY VẤN.
+  2. Nhúng CẢ bộ chunk, kể cả trang phân mục. Lọc là việc của lúc TRUY VẤN.
      Lọc sớm thì audit không đo được hiện tượng trang phân mục cướp kết quả.
   3. `model_id` nằm trong TÊN FILE. Đổi model mà không sinh lại thì truy vấn index cũ
      bằng vector mới -> trả rác mà không báo lỗi (§5 S6a).
@@ -34,7 +34,14 @@ from kb.models import ChunkSet
 
 log = logging.getLogger(__name__)
 
-MODEL_ID = "text-embedding-3-small"
+try:    # cùng cách src/llm.py lấy khoá — phải nạp TRƯỚC khi đọc EMBED_MODEL
+    from dotenv import load_dotenv
+
+    load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+except ImportError:
+    pass
+
+MODEL_ID = os.environ.get("EMBED_MODEL", "text-embedding-3-small")   # sửa trong .env, không sửa ở đây
 DIM = {"text-embedding-3-small": 1536,
        "text-embedding-3-large": 3072,
        "text-embedding-ada-002": 1536}
@@ -47,8 +54,34 @@ def model_slug(model_id: str) -> str:
     return model_id.split("/")[-1].lower()
 
 
-def _key(text: str, model_id: str) -> str:
+def text_key(text: str, model_id: str) -> str:
+    """Vân tay 'chữ này nhúng bằng model này'. Tên file cache, và kho vector dùng để biết
+    vector đang giữ có còn khớp chunk không (store/base.py)."""
     return hashlib.sha1(f"{model_id}\x00{text}".encode()).hexdigest()
+
+
+def vectors_file(out_dir: str | Path, doc_id: str, model_id: str) -> Path:
+    """out/kb/<doc_id>__<model>.vectors.npy — MỘT chỗ đặt tên, ghi và đọc cùng dùng."""
+    return Path(out_dir) / f"{doc_id}__{model_slug(model_id)}.vectors.npy"
+
+
+def load_vectors(cs: ChunkSet, path: str | Path, model_id: str) -> np.ndarray:
+    """Đọc .npy, kiểm hàng i ĐÚNG là chunk i của `cs` (theo `rows` trong .vectors.json).
+
+    Chỉ so số lượng là không đủ: đổi luật cắt có thể giữ nguyên số chunk mà xê dịch nội
+    dung — vector lệch chunk, tìm ra trang sai mà không báo lỗi.
+    """
+    p = Path(path)
+    if not p.exists():
+        raise SystemExit(f"khong thay vector: {p}\n"
+                         "chay `python src/kb/cli.py <document.json> -o <chunks.json> --embed` truoc da")
+    info = json.loads(p.with_suffix(".json").read_text(encoding="utf-8"))
+    if info.get("model") != model_id:
+        raise SystemExit(f"{p.name}: nhung bang '{info.get('model')}', dang can '{model_id}'")
+    if info.get("rows") != [c.chunk_id for c in cs.chunks]:
+        raise SystemExit(f"{p.name}: vector khong khop bo chunk — chunk da doi ma chua nhung lai? "
+                         "chay lai --embed")
+    return np.load(p)
 
 
 class EmbedError(SystemExit):
@@ -66,14 +99,7 @@ class Embedder:
                  cache_dir: str | Path = "out/kb/.embed_cache", retry: int = RETRY):
         import httpx   # KHÔNG dùng urllib: Cloudflare chặn User-Agent Python-urllib (lỗi 1010)
 
-        try:    # cùng cách scripts/parse_api.py lấy khoá
-            from dotenv import load_dotenv
-
-            load_dotenv(Path(__file__).resolve().parents[2] / ".env")
-        except ImportError:
-            pass
-
-        key = os.environ.get("OPENAI_API_KEY")
+        key =os.environ.get("OPENAI_API_KEY")
         if not key:
             raise SystemExit("thieu OPENAI_API_KEY")
         base = (os.environ.get("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
@@ -122,7 +148,7 @@ class Embedder:
         todo: list[int] = []
 
         for i, t in enumerate(texts):
-            f = self.cache_dir / f"{_key(t, self.model_id)}.npy"
+            f = self.cache_dir / f"{text_key(t, self.model_id)}.npy"
             if use_cache and f.exists():
                 out[i] = np.load(f)
             else:
@@ -138,7 +164,7 @@ class Embedder:
             for i, v in zip(idx, vecs):
                 out[i] = v
                 if use_cache:
-                    np.save(self.cache_dir / f"{_key(texts[i], self.model_id)}.npy", v)
+                    np.save(self.cache_dir / f"{text_key(texts[i], self.model_id)}.npy", v)
             log.info("  nhung %d/%d", min(s + BATCH, len(todo)), len(todo))
 
         return out
@@ -159,11 +185,9 @@ def embed_chunkset(
     mat = emb.embed(texts, use_cache=use_cache)
     dt = time.perf_counter() - t0
 
-    out_dir = Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    stem = f"{cs.doc_id}__{model_slug(model_id)}"
-    p_npy = out_dir / f"{stem}.vectors.npy"
-    p_json = out_dir / f"{stem}.vectors.json"
+    p_npy = vectors_file(out_dir, cs.doc_id, model_id)
+    p_npy.parent.mkdir(parents=True, exist_ok=True)
+    p_json = p_npy.with_suffix(".json")
 
     np.save(p_npy, mat)
     p_json.write_text(json.dumps({

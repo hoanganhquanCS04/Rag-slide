@@ -5,15 +5,15 @@ Năm việc:
   1. Đi theo `body.children` -> ĐÚNG THỨ TỰ ĐỌC. Mảng `texts[]` trong file KHÔNG
      theo thứ tự này, đọc tuần tự mảng là loạn.
   2. Đổi toạ độ: gốc DƯỚI-TRÁI của docling -> gốc TRÊN-TRÁI, chuẩn hoá [0,1], ra `polygon`.
-  3. Tách furniture (header/footer/số trang) khỏi nội dung, gom thành `page.furniture`.
-     KHÔNG vứt — thanh header chạy là nguồn duy nhất dựng được chương.
+  3. Bỏ header/footer/số trang lặp ở mọi trang (docling gắn `page_header` / `page_footer` /
+     `content_layer: furniture`) — không phải nội dung; chương đã lấy từ trang mục lục.
   4. Gắn `provenance` cho từng mẩu: chữ -> text_layer, mô tả ảnh -> vlm.
   5. Tính `page_hash` để incremental build biết trang nào đổi.
 
 LƯU Ý về provenance của chữ: docling KHÔNG đánh dấu từng item là đọc từ text layer
 hay từ OCR. Nên khi `do_ocr=True` ta không phân biệt được, và hàm này hạ toàn bộ
 chữ xuống `Provenance.OCR` cho an toàn. Chạy với `do_ocr=False` (mặc định của
-`scripts/parse_api.py`) thì mới khai được `text_layer`.
+`parsing/docling_run.py`) thì mới khai được `text_layer`.
 """
 
 from __future__ import annotations
@@ -22,13 +22,12 @@ import hashlib
 import json
 import logging
 import re
+import unicodedata
 from pathlib import Path
 from typing import Any, Iterator
 
 from parsing.models import (
-    PAGE_NUMBER,
     AnyBlock,
-    Furniture,
     ParsedDocument,
     ParsedImage,
     ParsedPage,
@@ -157,32 +156,6 @@ def _vlm_model(raw: dict[str, Any]) -> str | None:
     return None
 
 
-def _furniture(items: list[tuple[str, str, float]], page_no: int) -> Furniture:
-    """(nhãn docling, chữ, tâm y) -> Furniture.
-
-    header       mẩu `page_header` ĐẦU TIÊN; không có nhãn thì mẩu đầu tiên sát đỉnh (y < 0.15).
-                 Chỉ lấy MỘT — gộp thêm mẩu khác vào là tên chương lệch giữa các trang, luật
-                 dựng chương thấy "cắt rời" và trả 0 chương.
-    page_number  "11 / 40" — docling gộp nó vào page_footer. CHỈ giữ khi LỆCH page_no.
-    footer       mọi chữ lặp còn lại (tác giả, tên môn…).
-    """
-    items = [x for x in items if x[1]]
-    labeled = [x for x in items if x[0] == "page_header"]
-    top = [x for x in items if x[0] != "page_footer" and x[2] < 0.15]
-    head = (labeled or top or [None])[0]
-
-    furn = Furniture(header=head[1] if head else None)
-    for x in items:
-        if x is head:
-            continue
-        if m := PAGE_NUMBER.fullmatch(x[1]):
-            if int(m.group(1)) != page_no:
-                furn.page_number = x[1].strip()
-        else:
-            furn.footer.append(x[1])
-    return furn
-
-
 def slugify_doc_id(stem: str) -> str:
     """Tên file docling -> doc_id sạch.
 
@@ -193,12 +166,14 @@ def slugify_doc_id(stem: str) -> str:
     Qdrant. Để nguyên tên file thô thì nó mang theo dấu cách, "(1)", và tên model VLM —
     ba thứ không liên quan gì tới danh tính tài liệu.
 
-    Bản cũ của scripts/parse_api.py gắn `__<model>` vào tên file; giờ đã bỏ, nhưng vẫn cắt
-    để file cũ ra đúng doc_id. Tên model thuộc về CÁCH parse chứ
+    Bản cũ gắn `__<model>` vào tên file; giờ đã bỏ, nhưng vẫn cắt để file cũ ra đúng doc_id. Tên model thuộc về CÁCH parse chứ
     không thuộc về TÀI LIỆU. Đổi model VLM mà doc_id đổi theo thì chunk cũ thành mồ côi.
     """
     stem = stem.split("__", 1)[0]                       # bỏ dấu model VLM
     stem = re.sub(r"\s*\(\d+\)\s*$", "", stem)         # bỏ "(1)" của bản tải trùng
+    # bỏ dấu TRƯỚC khi lọc ký tự: không thì "Thời gian" -> "th_i_gian"
+    stem = unicodedata.normalize("NFD", stem.replace("đ", "d").replace("Đ", "D"))
+    stem = "".join(c for c in stem if not unicodedata.combining(c))
     stem = re.sub(r"[^0-9A-Za-z]+", "_", stem).strip("_")
     return stem.lower() or "doc"
 
@@ -222,7 +197,6 @@ def from_docling_json(
 
     sizes = {int(k): (v["size"]["width"], v["size"]["height"]) for k, v in raw["pages"].items()}
     pages = {no: ParsedPage(page_no=no) for no in sorted(sizes)}
-    furniture: dict[int, list[tuple[str, str, float]]] = {no: [] for no in pages}
     counters: dict[int, int] = {no: 0 for no in pages}
 
     def next_id(pg: int) -> str:
@@ -231,7 +205,7 @@ def from_docling_json(
         return f"p{pg:03d}.b{n:02d}"
 
     seen: set[str] = set()
-    roots = [raw.get("body") or {}, raw.get("furniture") or {}]
+    roots = [raw.get("body") or {}]           # cây `furniture` của docling = header/footer lặp
 
     for root in roots:
         for item in _walk(raw, root, seen):
@@ -275,8 +249,7 @@ def from_docling_json(
             box = _box(prov[0], *sizes[pg], is_pptx=is_pptx)
 
             if item.get("content_layer") == "furniture" or label in _FURNITURE_LABELS:
-                furniture[pg].append((label, _norm(item.get("text")), (box[1] + box[3]) / 2))
-                continue
+                continue                         # header/footer lặp — không phải nội dung
 
             block: AnyBlock
             if sref.startswith("#/pictures/"):
@@ -296,15 +269,15 @@ def from_docling_json(
             pages[pg].blocks.append(block)
 
     for page in pages.values():
-        page.furniture = _furniture(furniture[page.page_no], page.page_no)
         page.title = next(
             (b.content for b in page.paragraphs if b.role == "title" and b.content), None
         )
         page.page_hash = page.compute_hash()
 
-    # Model ĐÃ mô tả ảnh (ghi trong output docling) thắng model khai trong .env —
-    # và hash phải tính từ đúng model được ghi, không thì hai thứ lệch nhau.
-    vlm_model = _vlm_model(raw) or vlm_model
+    # Model đã sắp bố cục trang (build.py truyền vào, đọc từ layout.json) thắng; không có thì
+    # model tả ảnh ghi trong docling.json cũ (luồng tả từng ảnh đã bỏ). KHÔNG lấy từ .env —
+    # .env có thể đã đổi sau lần gọi.
+    vlm_model = vlm_model or _vlm_model(raw)
     doc = ParsedDocument(
         doc_id=doc_id or slugify_doc_id(path.stem),
         source=SourceInfo(

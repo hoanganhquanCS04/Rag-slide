@@ -102,7 +102,7 @@ vô nghĩa, đã bỏ. Xem [CLAUDE.md §3.0](../../CLAUDE.md).
 data/raw/<ten>.pdf   ← VỪA là deck VỪA là KB
       |
    S0 Ingest  (docling + VLM mô tả ảnh qua API)
-      |  ├─ sections   từ page_header      ← luật, không gọi model
+      |  ├─ sections   từ trang mục lục    ← luật, không gọi model
       |  ├─ slide_type từ bbox + tiêu đề   ← luật, 40/40 đúng
       |  └─ entities                        → pronunciation.json
       v
@@ -203,16 +203,17 @@ VÀO  data/raw/<ten>.pdf
   ├─> [docling]  layout + TableFormer chạy local
   │              thứ tự đọc theo body.children   <- KHÔNG đọc tuần tự texts[]
   │              bbox gốc DƯỚI-TRÁI ──> TRÊN-TRÁI, [0,1]
-  │              tách body / furniture (header, footer, số trang)
+  │              bỏ header / footer / số trang lặp (không phải nội dung)
   │              OCR TẮT: đo được bật chậm 8.4×, markdown GIỐNG HỆT
   │
-  ├─> [VLM qua API]  mỗi ảnh một request, prompt ở prompts/s5_picture_desc.md
-  │                  ảnh < 5% diện tích ─> skip, ghi why_empty
-  │                  ảnh trang trí ─> VLM tự trả DECORATIVE
-  │                  provenance = vlm    <- CÓ THỂ BỊA (NT2)
+  ├─> [VLM qua API]  mỗi TRANG một request, nhìn ảnh CẢ trang, prompt s0_page_layout.md
+  │                  VLM chỉ TRỎ ID mẩu chữ docling -> chữ vẫn là text_layer
+  │                  ảnh trang trí ─> VLM xếp vào decorative, không thành block
+  │                  chỉ ô bảng / mô tả hình đọc từ ảnh là vlm   <- CÓ THỂ BỊA (NT2)
+  │                  code kiểm: sót id / id bịa / bỏ quên vùng ─> dùng docling + cờ
   │
-  ├─> [luật] sections   từ page_header chạy ─> 7 section, conf 0.95
-  │          slide_type từ bbox tiêu đề + lệch header ─> 40/40 đúng
+  ├─> [luật] sections   từ trang mục lục: trang đầu tiên có tiêu đề khớp mục = mở chương
+  │          slide_type từ bbox tiêu đề + tiêu đề "Bài tập…"
   │          KHÔNG gọi model cho hai thứ này
   │
   ├─> [patch tay]  data/patches/<ten>.json ─> provenance = manual
@@ -221,9 +222,9 @@ VÀO  data/raw/<ten>.pdf
   └─> [hash]  page_hash = SHA(nội dung + bbox từng mẩu)   <- incremental
                     │
                     v
-              ParsedDocument ─> [cờ]  empty_page · image_not_described
-                                      header_title_mismatch · page_label_mismatch
-RA   out/parsed/<doc_id>.json  ──> S5
+              ParsedDocument ─> [cờ]  empty_page · image_not_described · table_empty
+                                      layout_failed · no_sections
+RA   out/parsed/<doc_id>/document.json  ──> S5
 ```
 
 > **S1 cũ nằm ở đây.** Bản trước có một stage riêng gọi LLM sinh `message` / `relations`.
@@ -236,7 +237,7 @@ RA   out/parsed/<doc_id>.json  ──> S5
 [search.md](../spec/search.md)
 
 ```
-VÀO  out/parsed/<doc_id>.json
+VÀO  out/parsed/<doc_id>/document.json
   │
   ├─> [chunk]  1 trang = 1 chunk chính            <- vì R2 nhảy tới TRANG
   │            mỗi mô tả ảnh = 1 vector phụ
@@ -350,7 +351,7 @@ VÀO  mọi artifact + flags.json + BẢN NGHE THỬ    <- CHỈ duyệt phần 
   │     2  S0 image_not_described       <- mất nội dung thật của trang
   │     3  S0 empty_page                <- trang rỗng mà KHÔNG phải section_divider
   │     4  S6a chunk trùng / self_retrieval_fail
-  │     5  S0 header_title_mismatch     <- thường là lỗi bộ slide, chỉ ghi nhận
+  │     5  S0 no_sections / layout_failed  <- dựng chương / bố cục trượt, chỉ ghi nhận
   │     6  S6b                          <- kỹ thuật
   │           │
   │           ├─ accept / whitelist ─> review.json   (BỀN qua các lần build)
@@ -535,7 +536,7 @@ Mọi flag từ mọi stage đổ về một file, S7 đọc file đó. Chi ti�
 
 | Stage | Flag tiêu biểu                                                                                                                                                                  |
 | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| S0    | `empty_page`, `image_not_described`, `header_title_mismatch`, `page_label_mismatch`, `no_sections` |
+| S0    | `empty_page`, `image_not_described`, `table_empty`, `layout_failed`, `no_sections` |
 | S5    | chunk trùng nhau (cosine >= 0.94), chunk vượt 500 token                                              |
 | S2    | `sections` không phủ kín / chồng nhau / đứt quãng                                                    |
 | S4    | `ungrounded_content_sentence` ← **cờ đỏ**, `timing_overflow`, **`delivery_below_floor`**, **`written_register_hit`**, **`monotone_rhythm`** |

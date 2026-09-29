@@ -17,6 +17,7 @@ block nào không có nội dung. Nạp lại thì trường vắng lấy giá t
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 import json
 import re
@@ -28,7 +29,6 @@ from pydantic import (
     BaseModel,
     Field,
     ValidationError,
-    computed_field,
     field_validator,
     model_serializer,
     model_validator,
@@ -36,20 +36,14 @@ from pydantic import (
 
 # Một dòng chỉ gồm một URL — "https://moso.vn/" · "www.abc.com/x"
 URL_LINE = re.compile(r"(?:https?://|www\.)\S+")
-# Số trang in trên slide — "11 / 40" · "11 of 40". Nhóm 1 = số trang.
-PAGE_NUMBER = re.compile(r"\s*(\d+)\s*(?:/|of)\s*\d+\s*")
 
 # slide_type — luật, không gọi model. Đo trên 3_datavisualization, tách bạch không vùng xám:
 #   phân mục  tiêu đề cx=0.50 cy=0.47 (7 trang)   ·   nội dung  cx=0.20 cy=0.11
 DIVIDER_MIN_CY = 0.30
 DIVIDER_CX_RANGE = (0.35, 0.65)
-EXERCISE_WORDS = re.compile(r"bài tập|yêu cầu|deadline", re.I)
-
-
-def header_differs(header: str, title: str) -> bool:
-    """Thanh header và tiêu đề trang nói hai chuyện khác nhau (khớp lỏng 10 ký tự đầu)."""
-    a, b = header.lower().strip(), title.lower().strip()
-    return a[:10] not in b and b[:10] not in a
+# CHỈ tiêu đề mở đầu bằng "Bài tập" — dò "yêu cầu" trong cả trang là bắt nhầm deck nhân sự
+# (Onboarding p26 "Chấm công: Quản lý yêu cầu của CBNV")
+EXERCISE_TITLE = re.compile(r"^\s*bài tập", re.I)
 
 Point = tuple[float, float]
 
@@ -81,16 +75,27 @@ class Provenance(str, Enum):
 # --------------------------------------------------------------------------- Block
 
 
+class Href(_Base):
+    """Một link ẩn: `text` = chữ nằm dưới vùng link ("Cẩm nang phân quyền"), `url` = đích.
+
+    Một block list có thể mang nhiều link (p3 Onboarding: 7) — `text` mới chọn được đúng cái.
+    """
+
+    text: str
+    url: str
+
+
 class Block(_Base):
     """Lớp cha của mọi mẩu nội dung trên trang.
 
     Không có `page_no` / `reading_order` / `layer`: block nằm trong `page.blocks` là đã nói
-    lên trang nào, thứ tự đọc là thứ tự trong mảng, furniture tách riêng ở `page.furniture`.
+    lên trang nào, thứ tự đọc là thứ tự trong mảng. Header/footer lặp của docling bị bỏ ở
+    from_docling — không phải nội dung, chương đã lấy từ mục lục.
     """
 
     _KEEP_EMPTY: ClassVar[set[str]] = {"content"}
     _ORDER: ClassVar[tuple[str, ...]] = (
-        "id", "kind", "role", "content", "urls", "cells", "caption",
+        "id", "kind", "role", "content", "urls", "hrefs", "cells", "caption",
         "polygon", "provenance", "structure_provenance", "why_empty",
     )
 
@@ -98,6 +103,9 @@ class Block(_Base):
     content: str | None = None
     polygon: list[Point]
     provenance: Provenance
+    # Link ẨN sau chữ (annotation PDF, parsing/links.py) — khác `urls` là URL IN RA thành chữ.
+    # Không vào hash / KB: robot không đọc URL, runtime chỉ hiện ra khi được hỏi.
+    hrefs: list[Href] = Field(default_factory=list)
 
     @field_validator("polygon")
     @classmethod
@@ -130,6 +138,18 @@ def polygon_from_box(l: float, t: float, r: float, b: float) -> list[Point]:
     return [(l, t), (r, t), (r, b), (l, b)]
 
 
+def _is_anchor(line: str, hrefs: list[Href]) -> bool:
+    """Dòng này là chữ của một link ẩn? So sau khi bỏ khoảng trắng: docling chèn cách lung tung
+    ("q u y chế"), chữ dưới vùng link lại lẫn mảnh chữ bên cạnh ("quy định, h, quy chế")."""
+    a = re.sub(r"\s+", "", line).lower()
+    for h in hrefs:
+        b = re.sub(r"\s+", "", h.text).lower()
+        if b and (b in a and 2 * len(b) >= len(a) or len(a) >= 4 and a in b
+                  or difflib.SequenceMatcher(None, a, b).ratio() >= 0.8):
+            return True
+    return False
+
+
 class ParsedParagraph(Block):
     """Mọi thứ là CHỮ: tiêu đề, đoạn văn, bó gạch đầu dòng, danh sách link.
 
@@ -139,8 +159,13 @@ class ParsedParagraph(Block):
         title     tiêu đề trang
         list      bó gạch đầu dòng, một block, các dòng ngăn bằng xuống dòng
                   -> S4 diễn đạt lại, không đọc bullet nguyên văn (§5 S4)
-        links     >= nửa số dòng là URL -> KHÔNG đọc URL thành tiếng. Luật, tự gán.
+        links     >= nửa số dòng là LINK — URL in ra chữ, hoặc chữ có link ẩn (`hrefs`)
+                  -> KHÔNG đọc URL thành tiếng. Luật, tự gán.
         caption   chú thích
+
+    Chỉ body/list mới đổi sang `links`. Nửa số dòng chứ không phải "có link là đổi": p18/p19
+    Onboarding là list quy định > 1000 chữ, link chỉ 1 dòng — đổi là robot bỏ qua nội dung.
+    Title có link vẫn là title (tên trang lấy từ title).
     """
 
     kind: Literal["paragraph"] = "paragraph"
@@ -151,11 +176,16 @@ class ParsedParagraph(Block):
     @model_validator(mode="after")
     def _links(self) -> ParsedParagraph:
         """Suy `role="links"` + tách `urls` từ chữ. Chạy cả lúc nạp lại -> không lệch được."""
+        self.refresh_role()
+        return self
+
+    def refresh_role(self) -> None:
+        """Gọi lại sau khi gắn `hrefs` (parsing/links.py) — validator chạy lúc tạo, trước khi có link."""
         found = [ln for ln in self.lines if URL_LINE.fullmatch(ln)]
-        if self.role in ("body", "list") and found and 2 * len(found) >= len(self.lines):
+        n_link = sum(1 for ln in self.lines if URL_LINE.fullmatch(ln) or _is_anchor(ln, self.hrefs))
+        if self.role in ("body", "list") and n_link and 2 * n_link >= len(self.lines):
             self.role = "links"
         self.urls = found if self.role == "links" else []
-        return self
 
     @property
     def lines(self) -> list[str]:
@@ -200,16 +230,12 @@ class ParsedImage(Block):
 
         decorative             logo, hoạ tiết — VLM xem rồi, không có nội dung. Hợp lệ.
         area_below_threshold   ảnh nhỏ quá, không gọi VLM. Hợp lệ.
-        skipped                trang nằm ngoài `vlm_pages` của file vá — NGƯỜI chọn không gọi.
-                               Hợp lệ. Deck ảnh nền trang trí: phần lớn ảnh sẽ mang lý do này.
         not_described          ảnh ĐỦ TO mà không có mô tả -> mất nội dung thật, CẦN XEM.
         api_error              gọi VLM mà lỗi -> chạy lại là có thể được, CẦN XEM.
     """
 
     kind: Literal["image"] = "image"
-    why_empty: Literal[
-        "decorative", "area_below_threshold", "skipped", "not_described", "api_error"
-    ] | None = None
+    why_empty: Literal["decorative", "area_below_threshold", "not_described", "api_error"] | None = None
 
     @property
     def needs_review(self) -> bool:
@@ -225,30 +251,18 @@ AnyBlock = Annotated[
 # ------------------------------------------------------------------ tầng trang
 
 
-class Furniture(_Base):
-    """Chữ lặp ở mọi trang. KHÔNG vào KB, nhưng là nguồn dựng chương và bắt lỗi bộ slide.
-
-    `page_number` ("11 / 40") CHỈ ghi khi số in trên slide LỆCH `page_no` — trùng thì thừa.
-    """
-
-    _ORDER: ClassVar[tuple[str, ...]] = ("header", "footer", "page_number")
-
-    header: str | None = None             # thanh tiêu đề chạy — nguồn DUY NHẤT dựng chương
-    footer: list[str] = Field(default_factory=list)
-    page_number: str | None = None
-
-
 class ParsedPage(_Base):
     _ORDER: ClassVar[tuple[str, ...]] = (
-        "page_no", "title", "slide_type", "section_id", "page_hash", "blocks", "furniture",
+        "page_no", "title", "section_id", "page_hash", "layout_error", "blocks",
     )
 
     page_no: int
     title: str | None = None
     section_id: str | None = None         # trỏ lên ParsedDocument.sections
     page_hash: str = ""                   # đổi nội dung / vị trí -> đổi hash -> S4 viết lại (§8)
+    # VLM sắp bố cục trang mà trượt kiểm tra -> trang dùng block docling, ghi lý do ở đây
+    layout_error: str | None = None
     blocks: list[AnyBlock] = Field(default_factory=list)
-    furniture: Furniture = Field(default_factory=Furniture)
 
     @property
     def images(self) -> list[ParsedImage]:
@@ -263,18 +277,12 @@ class ParsedPage(_Base):
         return [b for b in self.blocks if isinstance(b, ParsedParagraph)]
 
     @property
-    def running_header(self) -> str | None:
-        return self.furniture.header
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
     def slide_type(self) -> Literal["section_divider", "exercise", "content"]:
-        """Luật trên chính trang này — tính lại mỗi lần nạp, ghi ra JSON để đọc.
+        """Luật trên chính trang này — tính lại mỗi lần nạp, KHÔNG ghi ra JSON (deck mới gần như
+        toàn `content`, ghi ra chỉ là nhiễu). Kịch bản, KB, cờ vẫn đọc qua property này.
 
         section_divider  đúng 1 mẩu chữ, là tiêu đề, nằm GIỮA trang -> S4 chỉ nói câu chuyển
-        exercise         header LỆCH tiêu đề + có "bài tập|yêu cầu|deadline"
-                         -> robot ĐỌC yêu cầu, không giảng. Cờ header_title_mismatch hoá
-                            ra là tín hiệu phân loại chứ không phải lỗi (CLAUDE.md §5).
+        exercise         tiêu đề mở đầu bằng "Bài tập" -> robot ĐỌC yêu cầu, không giảng
         content          còn lại
         """
         paras = self.paragraphs
@@ -282,10 +290,8 @@ class ParsedPage(_Base):
             cx, cy = paras[0].center
             if cy >= DIVIDER_MIN_CY and DIVIDER_CX_RANGE[0] <= cx <= DIVIDER_CX_RANGE[1]:
                 return "section_divider"
-        hdr, title = self.furniture.header, self.title
-        if hdr and title and header_differs(hdr, title):
-            if EXERCISE_WORDS.search(" ".join(p.content for p in paras)):
-                return "exercise"
+        if self.title and EXERCISE_TITLE.match(self.title):
+            return "exercise"
         return "content"
 
     @property
@@ -294,12 +300,10 @@ class ParsedPage(_Base):
         return len(self.paragraphs) <= 1
 
     def compute_hash(self) -> str:
-        """Hash nội dung + vị trí + furniture. Đổi chữ HOẶC đổi bố cục đều ra hash mới."""
+        """Hash nội dung + vị trí. Đổi chữ HOẶC đổi bố cục đều ra hash mới."""
         h = hashlib.sha256()
         for b in self.blocks:
             h.update(f"{b.kind}|{b.polygon}|{b.content or ''}".encode("utf-8"))
-        f = self.furniture
-        h.update(f"|{f.header}|{f.footer}|{f.page_number}".encode("utf-8"))
         return h.hexdigest()[:16]
 
 
@@ -312,7 +316,7 @@ class SectionSpan(_Base):
     id: str
     title: str
     pages: tuple[int, int]                # [trang đầu, trang cuối]
-    source: Literal["page_header", "title_bbox", "outline_page", "manual"]
+    source: Literal["outline_page", "manual"]
     confidence: float = Field(ge=0.0, le=1.0)
 
     @property
@@ -331,10 +335,10 @@ class Flag(_Base):
     """Chỗ cần người xem. §10 cấm bắt duyệt cả deck — chỉ duyệt phần bị flag."""
 
     kind: Literal[
-        "header_title_mismatch",
         "empty_page",
         "image_not_described",
-        "page_label_mismatch",
+        "table_empty",
+        "layout_failed",
         "no_sections",
     ]
     severity: Literal["info", "warn", "error"] = "warn"
@@ -351,7 +355,7 @@ class SourceInfo(_Base):
 class ParserInfo(_Base):
     """Đổi model hay option mà không parse lại -> dữ liệu cũ mới lẫn nhau trong im lặng.
 
-    `vlm_model` là model ĐÃ mô tả ảnh (đọc từ output docling), áp cho mọi ảnh của tài liệu.
+    `vlm_model` là model sắp bố cục trang (parsing/layout.py) — mọi khối `vlm` đến từ nó.
     """
 
     docling_version: str = ""
@@ -401,8 +405,7 @@ class ParsedDocument(_Base):
         except ValidationError as e:
             raise SystemExit(
                 f"{path}: khong nap duoc ({e.error_count()} loi) — co the la dinh dang cu.\n"
-                f"Chay lai buoc 2 tu output docling: python src/parsing/cli.py "
-                f"out/parse_api/<ten>.json -o {path}"
+                f"Dung lai (khong ton API): python src/parsing/cli.py run <file raw> --no-vlm"
             ) from None
 
     def to_json(self) -> str:

@@ -5,7 +5,7 @@
     python src/runtime/cli.py tetnguyendan --speed 1                    # đợi đúng thời lượng nói
     python src/runtime/cli.py 3_datavisualization < cau_hoi.txt         # chạy thử bằng file
 
-Cần có sẵn (offline): out/parsed/<ten>.json · out/kb/<ten>.chunks.json + vector
+Cần có sẵn (offline): out/parsed/<ten>/document.json · out/kb/<ten>.chunks.json + vector
                       · out/deck/<ten>/scenario.json · out/deck/<ten>/deck_map.txt
 """
 

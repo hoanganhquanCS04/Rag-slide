@@ -11,7 +11,6 @@ Lớp này chỉ BIỂU DIỄN — không chunk, không enrich, không embed. Đ
 from parsing.models import (
     Block,
     Flag,
-    Furniture,
     ParsedDocument,
     ParsedImage,
     ParsedPage,
@@ -26,7 +25,6 @@ from parsing.models import (
 __all__ = [
     "Block",
     "Flag",
-    "Furniture",
     "ParsedDocument",
     "ParsedImage",
     "ParsedPage",
