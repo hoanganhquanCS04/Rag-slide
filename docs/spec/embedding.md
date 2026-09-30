@@ -1,6 +1,6 @@
 # Embedding — biến chunk thành vector để tìm
 
-**Vào:** `out/kb/*.chunks.json` · **Ra:** `out/kb/*__<model_id>.vectors.{npy,json}` · **Code:** `src/kb/embed.py`
+**Vào:** `out/kb/*/chunks.json` · **Ra:** `out/kb/*/vectors__<model_id>.{npy,json}` · **Code:** `src/kb/embed.py`
 
 ---
 
@@ -178,8 +178,8 @@ nguyên tắc `tts_hash` ở §5 S6b: *"phần tốn tiền nhất, phải reuse
 ## 8. File sinh ra
 
 ```
-out/kb/3_DataVisualization__text-embedding-3-small.vectors.npy    ma trận (51, 1536) float32
-out/kb/3_DataVisualization__text-embedding-3-small.vectors.json   {model, backend, dim, normalized, rows:[chunk_id...]}
+out/kb/3_datavisualization/vectors__text-embedding-3-small.npy   ma trận (51, 1536) float32
+out/kb/3_datavisualization/vectors__text-embedding-3-small.json  {model, backend, dim, normalized, rows:[chunk_id...]}
 ```
 
 **`model_id` nằm trong TÊN FILE.** Đây là luật §5 S6a áp cho file thay vì Qdrant
@@ -274,12 +274,12 @@ tiền tố `· trang N/40` tách được bao nhiêu phần?
 ```bash
 # cần OPENAI_API_KEY (và OPENAI_BASE_URL nếu đi qua proxy)
 .venv/Scripts/python.exe src/kb/cli.py out/parsed/3_datavisualization/document.json \
-    -o out/kb/3_DataVisualization.chunks.json --embed --stats
+    -o out/kb/3_datavisualization/chunks.json --embed --stats
 ```
 
 | cờ | nghĩa |
 |---|---|
 | `--embed` | nhúng qua API sau khi cắt chunk |
 | `--embed-model` | mặc định `text-embedding-3-small` |
-| `--vector-dir` | mặc định `out/kb` |
+| `-o` | `out/kb/<ten>/chunks.json` — vector ghi cùng thư mục, bắt buộc khi `--embed` |
 | `--no-cache` | bỏ qua cache trên đĩa, gọi API lại từ đầu |

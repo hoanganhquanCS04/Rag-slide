@@ -16,7 +16,16 @@ Mỗi terminal mới:
 $env:PYTHONIOENCODING = "utf-8"      # không có thì lỗi in chữ Việt
 ```
 
-`.env` cần có `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `VLM_MODEL`, `LLM_MODEL`.
+`.env` cần có:
+
+| Biến | Ví dụ | Dùng ở |
+|---|---|---|
+| `OPENAI_API_KEY`, `OPENAI_BASE_URL` | `https://api.yescale.io/v1` | mọi lần gọi API (VLM, LLM, embedding) |
+| `VLM_MODEL` | `gemini-3.5-flash-lite` | ② bố cục trang |
+| `LLM_MODEL` | `gpt-5-mini` | ⑤ kịch bản, runtime |
+| `EMBED_MODEL` | `text-embedding-3-small` | ④ nhúng vector, tìm kiếm |
+| `VECTOR_DB` | `chroma` hoặc `inmem` | ④ + tìm kiếm — kho vector (`src\kb\store\`) |
+| `CHROMA_PATH` | `out/kb/chroma` | chỗ Chroma ghi đĩa (bỏ trống = giá trị này) |
 
 Trong các lệnh dưới, thay `<ten>` bằng tên deck, ví dụ `tetnguyendan`.
 
@@ -30,18 +39,18 @@ Trong các lệnh dưới, thay `<ten>` bằng tên deck, ví dụ `tetnguyendan
 # ①②③ đọc file -> out\parsed\<ten>\{docling.json, layout.json, document.json}      [② tốn API]
 .venv\Scripts\python.exe src\parsing\cli.py run "data\raw\<file>.pdf"
 
-# ④ chunk + nhúng vector                                     -> out\kb\<ten>.chunks.json + .vectors.npy
-.venv\Scripts\python.exe src\kb\cli.py out\parsed\<ten>\document.json -o out\kb\<ten>.chunks.json --embed
-
-# ④b bảng phát âm (nháp)                                     -> out\deck\<ten>\pronunciation.json
-.venv\Scripts\python.exe scripts\extract_terms.py out\kb\<ten>.chunks.json
-#     MỞ FILE RA SỬA: xoá từ robot không nói ra miệng, sửa "say", đổi by "auto" -> "nguoi"
+# ④ chunk + nhúng vector + nạp kho      -> out\kb\<ten>\{chunks.json, vectors__<model>.npy} + out\kb\chroma\  [tốn API]
+.venv\Scripts\python.exe src\kb\cli.py out\parsed\<ten>\document.json -o out\kb\<ten>\chunks.json --embed
 
 # ⑤ viết kịch bản                                            -> out\deck\<ten>\scenario.json  [tốn API]
 .venv\Scripts\python.exe src\scenario\cli.py out\parsed\<ten>\document.json
 
 # ⑤b xuất kịch bản ra markdown để đọc                        -> out\deck\<ten>\scenario.md
 .venv\Scripts\python.exe src\scenario\cli.py out\parsed\<ten>\document.json --md
+
+# ⑥ bảng phát âm — gom từ kịch bản NÓI mà kho chưa có        -> data\pronunciation.json (KHO CHUNG)
+.venv\Scripts\python.exe scripts\extract_terms.py out\deck\<ten>\scenario.json
+#     MỞ FILE RA SỬA "say", đổi by "auto" -> "nguoi", rồi chạy lại ⑤ (chỉ đếm lại, không gọi LLM)
 ```
 
 Ghi chú:
@@ -63,6 +72,14 @@ Ghi chú:
 - ③ tự áp file vá tay `data\patches\<ten>.json` nếu có.
 - `run` thoát mã `1` khi có cờ mức `error` — vẫn ghi file bình thường, mã lỗi để CI bắt.
 - ④ chữ không đổi thì lấy vector từ cache, không gọi API.
+- ④ `--embed` BẮT BUỘC đi kèm `-o` — vector ghi theo thứ tự chunk, chunk không lưu thì
+  vector không khớp file nào.
+- ④ nạp kho theo `VECTOR_DB`:
+  - `chroma` — nạp luôn ở bước này. Cuối lệnh in `kho chroma (kb__<model>): nap N vector`.
+    Mọi tài liệu chung MỘT collection, tách bằng `doc_id`.
+  - `inmem` — không ghi gì; mỗi lần tìm kiếm tự nạp từ `.npy` vào RAM (vài ms).
+- Kho chỉ là BẢN SAO. Nguồn là `chunks.json` + `.npy`: xoá `out\kb\chroma\` thì lần tìm kiếm
+  sau tự dựng lại, **không gọi API**.
 - ④b chạy lại **không mất** mục người đã duyệt (`by: "nguoi"`), chỉ ghi đè mục `auto`.
 - ⑤ chỉ viết lại trang có `page_hash` đổi. Câu người đã sửa tay (`edited_by: "nguoi"`)
   không bao giờ bị ghi đè.
@@ -132,11 +149,21 @@ Xem cả deck bằng mắt: mở thẳng `out\parsed\<ten>\document.json` trong 
 .venv\Scripts\python.exe scripts\try_search.py <ten>                    # hỏi liên tục, Enter trống để thoát
 .venv\Scripts\python.exe scripts\try_search.py <ten> "savefig" --bm25   # chỉ BM25, không gọi API
 
-.venv\Scripts\python.exe src\kb\search.py out\kb\<ten>.chunks.json "lì xì" -k 3 --explain
+.venv\Scripts\python.exe src\kb\search.py out\kb\<ten>\chunks.json "lì xì" -k 3 --explain
 ```
 
 `--explain` in hạng của từng nhánh — `dense hang 7 | bm25 hang 2` là biết kết quả do nhánh
-nào kéo lên.
+nào kéo lên. `--sparse-only` = chỉ BM25, không gọi API.
+
+Dòng đầu mỗi lần tìm cho biết kho có khớp không:
+
+```
+nap 88 chunk | kho chroma | model text-embedding-3-small                      <- khớp, dùng luôn
+nap 10 chunk | kho chroma (nap lai 10 vector) | model text-embedding-3-small  <- kho lệch chunks.json,
+                                                                                vừa tự nạp lại từ .npy
+```
+
+`nap lai` lặp lại MỌI lần chạy = `chunks.json` bị đổi mà chưa chạy ④ `--embed`.
 
 ---
 
@@ -144,10 +171,10 @@ nào kéo lên.
 
 ```powershell
 # bộ câu hỏi có nhãn (data\eval\queries.json) — số đo THẬT
-.venv\Scripts\python.exe src\kb\eval.py out\kb\<ten>.chunks.json
+.venv\Scripts\python.exe src\kb\eval.py out\kb\<ten>\chunks.json
 
 # self-retrieval — gần như luôn 100%, chỉ chứng minh không có 2 chunk trùng nhau
-.venv\Scripts\python.exe src\kb\audit.py out\kb\<ten>.chunks.json --mode hybrid
+.venv\Scripts\python.exe src\kb\audit.py out\kb\<ten>\chunks.json --mode hybrid
 ```
 
 ---
@@ -167,7 +194,11 @@ nào kéo lên.
 |---|---|
 | file slide gốc | `run --redo` rồi ④ → ⑤ |
 | `data\patches\<ten>.json` (vá tay) | `run --no-vlm` → ④ → ⑤ |
-| `pronunciation.json` | ⑤ — trang không đổi chỉ được đếm lại âm tiết, không gọi LLM |
+| luật chunk (`src\kb\chunk.py`) | ④ — chỉ chunk có chữ đổi mới gọi API, còn lại lấy cache |
+| `EMBED_MODEL` | ④ — nhúng lại TOÀN BỘ, ra file vector + collection mới mang tên model mới |
+| `VECTOR_DB` | không cần chạy gì — lần tìm sau tự nạp kho mới từ `.npy` |
+| xoá `out\kb\chroma\` | không cần chạy gì — như trên, 0 lần gọi API |
+| `data\pronunciation.json` | ⑤ — trang không đổi chỉ được đếm lại âm tiết, không gọi LLM |
 | `prompts\s4_scenario.md` hoặc `LLM_MODEL` | ⑤ — tự nhận ra prompt/model đổi, viết lại mọi trang |
 
 `--force` chỉ cần khi muốn viết lại dù không có gì đổi (ví dụ thử lại cho câu hay hơn).

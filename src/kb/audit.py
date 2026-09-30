@@ -16,8 +16,8 @@ Xem docs/spec/search.md §10. Hai bài kiểm tra:
 Chạy CẢ BA kiểu (dense / sparse / hybrid) rồi in ra một bảng. Hybrid không hơn dense thì
 phải nói thẳng ra, chứ không giữ BM25 cho đủ lệ.
 
-    python src/kb/audit.py out/kb/<ten>.chunks.json
-    python src/kb/audit.py out/kb/<ten>.chunks.json --query-from raw --show-fail
+    python src/kb/audit.py out/kb/<ten>/chunks.json
+    python src/kb/audit.py out/kb/<ten>/chunks.json --query-from raw --show-fail
 """
 
 from __future__ import annotations
@@ -164,7 +164,7 @@ def find_duplicates(se: Searcher, threshold: float = DUP_THRESHOLD
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="audit")
-    ap.add_argument("chunks", help="out/kb/<ten>.chunks.json")
+    ap.add_argument("chunks", help="out/kb/<ten>/chunks.json")
     ap.add_argument("--vectors", default=None)
     ap.add_argument("--model", default=MODEL_ID)
     ap.add_argument("--query-from", default="enriched", choices=["enriched", "raw", "title"])
@@ -173,7 +173,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--show-fail", action="store_true", help="liet ke tung ca truot")
     ap.add_argument("--dup-threshold", type=float, default=DUP_THRESHOLD)
     ap.add_argument("-o", "--out", default=None,
-                    help="ghi ket qua ra JSON, vd out/kb/audit/self_retrieval.json")
+                    help="ghi ket qua ra JSON, vd out/kb/<ten>/audit/self_retrieval.json")
     args = ap.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")

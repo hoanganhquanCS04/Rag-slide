@@ -2,10 +2,10 @@
 
 **Vào:** `out/parsed/<doc_id>/document.json` (`ParsedDocument`) — file DUY NHẤT, không đọc
 `docling.json` / `layout.json` / `data/patches/` (đã gộp vào đó ở S0) · **Ra:**
-`out/kb/<doc_id>.chunks.json` · **Code:** [src/kb/chunk.py](../../src/kb/chunk.py)
+`out/kb/<doc_id>/chunks.json` · **Code:** [src/kb/chunk.py](../../src/kb/chunk.py)
 
 ```
-python src/kb/cli.py out/parsed/<doc_id>/document.json -o out/kb/<doc_id>.chunks.json [--embed]
+python src/kb/cli.py out/parsed/<doc_id>/document.json -o out/kb/<doc_id>/chunks.json [--embed]
 ```
 
 ---

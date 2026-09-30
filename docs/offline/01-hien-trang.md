@@ -27,20 +27,23 @@ out/parsed/<ten>/layout.json                      bố cục từng trang (chỉ
         ▼
 out/parsed/<ten>/document.json            ★ ParsedDocument — NGUỒN của mọi bước sau, mở ra đọc được luôn
         │
-        ├──④ chunk + nhúng vector ───────────────── 💰 embedding (có cache)
+        ├──④ chunk + nhúng vector + nạp kho ─────── 💰 embedding (có cache)
         │      ▼
-        │   out/kb/<ten>.chunks.json               KBChunk[]      → để TÌM
-        │   out/kb/<ten>__<model>.vectors.{npy,json}
+        │   out/kb/<ten>/chunks.json               KBChunk[]      → để TÌM
+        │   out/kb/<ten>/vectors__<model>.{npy,json}
+        │   out/kb/chroma/                         kho vector (VECTOR_DB=chroma) — bản sao từ .npy
         │      │
-        │      ├─ scripts/extract_terms.py ──► out/deck/<ten>/pronunciation.json
-        │      │                                  máy ĐỀ XUẤT, NGƯỜI chốt
-        │      └─ audit.py / eval.py ──────► out/kb/audit/*.json   đo chất lượng tìm
+        │      └─ audit.py / eval.py ──────► out/kb/<ten>/audit/*.json   đo chất lượng tìm
         │
         └──⑤ viết kịch bản từng trang ─────────────── 💰 LLM
-               đọc: block của trang + pronunciation.json
+               đọc: block của trang  (đếm âm tiết theo data/pronunciation.json)
                ▼
             out/deck/<ten>/scenario.json            Scenario       → robot NÓI
             out/deck/<ten>/scenario.md              bản đọc cho người
+               │
+               └─⑥ scripts/extract_terms.py ──► data/pronunciation.json   KHO CHUNG mọi deck
+                     gom từ Anh/viết tắt kịch bản NÓI mà kho chưa có
+                     máy ĐỀ XUẤT, NGƯỜI chốt → chạy lại ⑤ = chỉ đếm lại, không gọi LLM
 ```
 
 Hai nhánh từ `ParsedDocument` **độc lập nhau**: KB (④) để trả lời câu hỏi, kịch bản (⑤)
@@ -55,10 +58,10 @@ về đúng một block.
 
 ```powershell
 .venv\Scripts\python.exe src\parsing\cli.py run "data\raw\<file>.pdf"                              # ①②③
-.venv\Scripts\python.exe src\kb\cli.py out\parsed\<ten>\document.json -o out\kb\<ten>.chunks.json --embed  # ④
-.venv\Scripts\python.exe scripts\extract_terms.py out\kb\<ten>.chunks.json                          # ④b phát âm (nháp)
+.venv\Scripts\python.exe src\kb\cli.py out\parsed\<ten>\document.json -o out\kb\<ten>\chunks.json --embed  # ④
 .venv\Scripts\python.exe src\scenario\cli.py out\parsed\<ten>\document.json                                # ⑤
 .venv\Scripts\python.exe src\scenario\cli.py out\parsed\<ten>\document.json --md                           # ⑤ bản đọc
+.venv\Scripts\python.exe scripts\extract_terms.py out\deck\<ten>\scenario.json                          # ⑥ phát âm (nháp)
 ```
 
 Thử tìm kiếm: `.venv\Scripts\python.exe scripts\try_search.py <ten> "câu hỏi"`
@@ -68,7 +71,7 @@ Thử tìm kiếm: `.venv\Scripts\python.exe scripts\try_search.py <ten> "câu h
 | ① docling | ~2s/trang CPU, miễn phí | đổi file gốc (`--redo`) |
 | ② bố cục VLM | 1 lần gọi/trang; trang không đổi → 0 lần | đổi file gốc, prompt, `VLM_MODEL` |
 | ③ dựng document.json | vài giây, miễn phí | luôn chạy lại trong `run` |
-| ④ chunk + embed | vài giây; chữ không đổi → 0 lần gọi API | sau ③ |
+| ④ chunk + embed + nạp kho | vài giây; chữ không đổi → 0 lần gọi API | sau ③, đổi luật chunk, đổi `EMBED_MODEL` |
 | ⑤ kịch bản | ~1 lần gọi LLM mỗi trang | trang có `page_hash` đổi |
 
 ---
@@ -108,7 +111,8 @@ Chi tiết: [spec/kb-chunk.md](../spec/kb-chunk.md) · [spec/embedding.md](../sp
 
 ```
 1 trang = 1 chunk   (+ 1 chunk phụ mỗi ảnh nếu trang có ≥2 ảnh được mô tả)
-text_enriched = "[<chương> · trang N/M] " + các block.content nối lại
+text_enriched = "[<chương> · <tiêu đề trang> · trang N/M] " + các block.content nối lại
+> 500 token   -> cắt: trang theo block -> bảng theo hàng (lặp hàng tiêu đề) / chữ theo dòng -> câu
 ```
 
 ```json
@@ -121,13 +125,18 @@ text_enriched = "[<chương> · trang N/M] " + các block.content nối lại
 Chữ và vector ở **hai file riêng**, nối bằng thứ tự hàng:
 
 ```
-<ten>.chunks.json                         chữ + metadata
-<ten>__text-embedding-3-small.vectors.npy ma trận (số chunk × 1536)
-<ten>__text-embedding-3-small.vectors.json rows[i] = chunk_id của hàng i
+out/kb/<ten>/chunks.json                              chữ + metadata
+out/kb/<ten>/vectors__text-embedding-3-small.npy      ma trận (số chunk × 1536)
+out/kb/<ten>/vectors__text-embedding-3-small.json     rows[i] = chunk_id của hàng i
 ```
 
 Tên model nằm trong tên file vector: đổi model mà quên nhúng lại thì tìm kiếm trả rác
 **không báo lỗi** — nhúng tên vào là để không lẫn được.
+
+**Kho vector** (`src/kb/store/`, chọn bằng `VECTOR_DB`): `chroma` ghi đĩa, một collection
+`kb__<model>` cho mọi tài liệu, lọc bằng `doc_id` · `inmem` giữ trong RAM, nạp lại mỗi lần
+chạy. Kho chỉ lo nhánh vector và là BẢN SAO của `.npy` — lệch với `chunks.json` thì tự nạp
+lại, xoá đi thì tự dựng lại, không gọi API.
 
 Tìm = **vector + BM25, gộp bằng RRF**. Trang phân mục (`content_type: section_divider`)
 được đánh dấu, lọc lúc tìm, **không xoá**.
@@ -137,12 +146,13 @@ Tìm = **vector + BM25, gộp bằng RRF**. Trang phân mục (`content_type: se
 Chi tiết: [spec/pronunciation.md](../spec/pronunciation.md)
 
 ```json
-{"hash": "8b67dd411ed1452f",
- "terms": {"LED": {"say": "led", "syllables": 4, "mode": "english", "by": "auto"}}}
+{"terms": {"CBNV": {"say": "xê bê en vê", "mode": "spell", "by": "auto"}}}
 ```
 
-Robot đọc thuật ngữ thế nào, và ⑤ **đếm âm tiết theo đúng bảng này**. `by: "auto"` = máy
-đề xuất, chưa ai duyệt. Rebuild **không xoá** file này.
+`data/pronunciation.json` — **MỘT kho cho mọi deck**. Robot đọc thuật ngữ thế nào, và ⑤
+**đếm âm tiết theo đúng kho này**. Sinh TỪ KỊCH BẢN (⑥), không từ chunk: chỉ từ robot thật
+sự nói mới cần cách đọc. `by: "auto"` = máy đề xuất, chưa ai duyệt; `"nguoi"` = đã chốt,
+chạy lại ⑥ không bao giờ đè.
 
 ### ⑤ `Scenario` — robot NÓI gì
 

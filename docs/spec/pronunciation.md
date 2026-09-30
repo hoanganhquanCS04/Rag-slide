@@ -1,194 +1,136 @@
 # pronunciation.json — robot đọc thuật ngữ thế nào
 
-**Vào:** `out/kb/*.chunks.json` · **Ra:** `out/deck/<doc_id>/pronunciation.json` · **Code:** *(chưa viết)*
+**Vào:** `out/deck/*/scenario.json` (kịch bản S4) · **Ra:** `data/pronunciation.json` — **MỘT kho
+cho mọi deck** · **Code:** `scripts/extract_terms.py` (gom) · `src/scenario/syllables.py` (tra + đếm)
 
 ---
 
 ## 1. Để làm gì — hai việc, không phải một
 
-Ai cũng nghĩ bảng phát âm chỉ để TTS đọc cho đúng. Nó còn một việc thứ hai, và việc đó
-mới là lý do nó phải làm **trước** S4:
-
 ```
-1. TTS đọc đúng          "plt.savefig" -> không đọc thành "pi-eo-ti chấm sa-vê-phích-gờ"
-2. S4 ĐẾM ÂM TIẾT        cùng một chữ, đọc khác nhau thì SỐ ÂM TIẾT khác nhau
+1. TTS đọc đúng          "CBNV" -> "xê bê en vê", không để TTS tự đoán        (S6b — chưa có)
+2. S4 ĐẾM ÂM TIẾT        cùng một chữ, đọc khác nhau thì SỐ ÂM TIẾT khác nhau  (đang chạy)
 ```
 
-CLAUDE.md §5 S4:
-
-> Tiếng Việt: **190–210 âm tiết/phút**. Đếm âm tiết, KHÔNG đếm từ, và đếm
-> **theo `pronunciation.json`** (viết tắt đọc thế nào thì đếm thế ấy).
-
-Ví dụ thật trên deck này:
+CLAUDE.md §5 S4: đếm âm tiết **theo `pronunciation.json`** (viết tắt đọc thế nào thì đếm thế ấy).
 
 ```
-"plt.savefig"   đọc "pi-eo-ti chấm sếp-phích"   ->  6 âm tiết   ->  ~1.8 giây
-                đọc "plot sếp-phai"              ->  3 âm tiết   ->  ~0.9 giây
+"plt.savefig"   đọc "pi-eo-ti chấm sếp-phích"   ->  6 âm tiết
+                đọc "sếp-phích"                  ->  2 âm tiết
+"CBLĐ"          đếm như một chữ Việt             ->  1 âm tiết   ← bản cũ đếm thế này
+                đọc "xê bê e lờ đê"              ->  5 âm tiết
 ```
 
-Một chữ, chênh nhau gấp đôi. Nhân lên vài chục lần trong một buổi thì kịch bản tưởng
-5 phút hoá ra 7 phút — **mà không ai phát hiện cho tới lúc nghe thật**.
-
-Đó là lý do §5 S6b bắt so hash:
-
-> Hash `pronunciation.json` ghi vào `Scenario`; S6b **so hash trước khi synth**.
-> Lệch bảng = S4 đếm một đằng, TTS đọc một nẻo, timing sai mà không ai thấy.
+`CBLĐ` xuất hiện 60 lần trên slide Onboarding. Mỗi lần robot nhắc là hụt 4 âm tiết; nhắc
+chừng ấy lần là kịch bản dài hơn ước tính ~1 phút **mà không ai phát hiện cho tới lúc nghe
+thật**.
 
 ---
 
-## 2. Vì sao máy không tự làm được
+## 2. Sinh TỪ KỊCH BẢN, không từ chunk
 
-Đã thử trích tự động trên 52 chunk. Kết quả chia làm ba nhóm, chất lượng khác hẳn nhau:
-
-| nhóm | số từ | máy tự tin? | ví dụ |
-|---|---|---|---|
-| **Gọi hàm / module** (có dấu chấm) | 41 | ✅ chắc chắn | `plt.savefig` · `np.linspace` · `matplotlib.pyplot` · `ax.plot3D` |
-| **Viết tắt** (toàn hoa) | 18 | ⚠️ lẫn rác | `CSV` `API` `MNIST` `MATLAB` `USD` — nhưng lẫn `FFFF` `A2BE2` (mã màu) |
-| **Từ tiếng Anh thường** | 276 | ❌ không tách nổi | `plot` `sin` `petal` `iris` `alpha` — **lẫn** `quan` `theo` `hoa` `xanh` `sai` `nhau` |
-
-**Nhóm ba là chỗ luật ký tự bó tay.** Tiếng Việt **không dấu** trông y hệt tiếng Anh:
+Chỉ từ robot **thật sự nói** mới cần cách đọc — và thứ robot nói là kịch bản, không phải
+slide. Bản cũ quét `chunks.json` trước S4; đo trên 3_datavisualization:
 
 ```
-quan  theo  hoa  trong  xanh  ba  cho  hai  sai  dao  nhau  khi  ra  gian
+bảng quét từ chunk, người duyệt xong      35 mục
+kịch bản thật sự nói                      25     -> 10 mục duyệt uổng công
+kịch bản CÓ nói mà bảng KHÔNG có          16     -> CSV, Google Maps, John Hunter, Isomap...
 ```
 
-Toàn chữ cái ASCII, không cách nào phân biệt với `plot`, `sin`, `color` bằng regex.
-Muốn tách phải có từ điển tiếng Việt — thêm phụ thuộc, mà vẫn sai ở tên riêng.
+Quét chunk còn vớ rác: chữ Việt viết hoa trong tiêu đề (`NỘI DUNG` -> `DUNG`,
+`KHÔNG MAY` -> `MAY`) bị coi là viết tắt, rồi khớp nhầm "nội dung", "may mắn" trong lời
+nói -> đếm 4 âm tiết thay vì 1, và bắn oan `delivery_has_fact`.
 
-→ **Máy đề xuất, NGƯỜI chốt.** Không có đường tự động hoàn toàn.
+Vậy S4 chạy TRƯỚC khi có cách đọc thì đếm sao? **Ước lượng + báo** — từ lạ đếm theo cách
+đánh vần (viết tắt) hoặc cụm nguyên âm (từ Anh), và gắn cờ `unknown_pronunciation`. Người
+chốt xong, chạy lại S4 **chỉ đếm lại**, không gọi LLM (§5).
 
 ---
 
-## 3. Schema
+## 3. Một kho chung, không có bản per-deck
+
+`CBNV` xuất hiện ở cả hai deck nhân sự (41 + 66 lần). Duyệt một lần là xong cho mọi deck.
+
+Chữ đọc khác nhau tùy ngữ cảnh (`T7` = "thứ bảy" trong "lịch ON/OFF T7", nhưng `T3` là cấp
+bậc) — **chấp nhận MỘT cách đọc**. Viết tắt vốn đã không nhằm cho người ngoài hiểu; đọc
+chưa khớp ngữ cảnh ở vài chỗ rẻ hơn nhiều so với duy trì hai tầng kho + luật ghi đè.
+
+---
+
+## 4. Schema
 
 ```json
 {
-  "version": 1,
-  "doc_id": "3_datavisualization",
-  "hash": "sha1 của phần terms — S4 ghi vào Scenario, S6b so trước khi synth",
+  "_huong_dan": ["..."],
   "terms": {
-    "plt.savefig": {
-      "say": "pi eo ti chấm sếp phích",
-      "syllables": 6,
-      "mode": "spell_prefix",
-      "by": "nguoi"
-    },
-    "matplotlib": {
-      "say": "mát plót líp",
-      "syllables": 3,
-      "mode": "phonetic_vi",
-      "by": "nguoi"
-    },
-    "CSV": {
-      "say": "xê ét vê",
-      "syllables": 3,
-      "mode": "spell",
-      "by": "auto"
-    }
-  },
-  "skip": ["#F0F8FF", "#A9A9A9", "https://..."]
+    "CBNV":       {"say": "xê bê en vê",  "mode": "spell",       "by": "auto"},
+    "matplotlib": {"say": "mát plót líp", "mode": "phonetic_vi", "by": "nguoi"},
+    "Google":     {"say": "Google",       "mode": "as_english",  "by": "auto"}
+  }
 }
 ```
 
 | field | nghĩa |
 |---|---|
+| key | từ như trong kịch bản. Viết tắt (toàn hoa) khớp **đúng hoa-thường**; từ thường khớp không phân biệt (`Python` = `python`) |
 | `say` | cách đọc, viết bằng chữ Việt. **Dùng cho CẢ đếm âm tiết LẪN đưa vào TTS** |
-| `syllables` | **tính tự động** từ `say` (đếm cụm cách nhau bởi khoảng trắng). Người không phải gõ |
-| `mode` | `spell` đọc từng chữ cái · `phonetic_vi` phiên âm Việt · `as_english` đọc nguyên · `spell_prefix` tách phần viết tắt rồi đọc phần sau |
-| `by` | `auto` máy đề xuất chưa ai duyệt · `nguoi` người đã chốt |
+| `mode` | `spell` đánh vần từng chữ · `phonetic_vi` phiên âm Việt · `as_english` để nguyên chữ Anh. Chỉ để người và S6b đọc — code đếm không dùng |
+| `by` | `auto` máy đoán, chưa ai duyệt · `nguoi` đã chốt — chạy lại script **không bao giờ đè** |
 
-**`syllables` tính từ `say`, không gõ tay.** Gõ tay là mở cửa cho lệch: sửa `say` mà quên
-sửa số thì S4 đếm sai mà không báo lỗi.
+**Số âm tiết KHÔNG lưu** — tính từ `say` mỗi lần nạp. Lưu là mở cửa cho sửa `say` mà quên
+sửa số (đã dính: `LED` có `say: "led"` mà `syllables: 4`).
 
-**`skip`**: thứ robot **không được đọc**. Trang 15 đã vá tay chứa ~200 mã màu hex
-(`#F0F8FF`, `#FAEBD7`...). Robot đọc hết chỗ đó là mất 10 phút và vô nghĩa. Phải chặn ở
-đây, đừng trông vào LLM tự biết.
-
----
-
-## 4. Bốn cách đọc — chọn cái nào
-
-```
-spell          CSV        -> "xê ét vê"               từng chữ cái
-phonetic_vi    matplotlib -> "mát plót líp"           phiên âm ra tiếng Việt
-as_english     Python     -> "Python"                 để TTS tự đọc giọng Anh
-spell_prefix   plt.plot   -> "pi eo ti chấm plót"     viết tắt đọc chữ, phần sau phiên âm
-```
-
-**Đề xuất mặc định cho deck này** (giảng bài CNTT tiếng Việt, người nghe là sinh viên):
-
-| loại | mặc định | vì sao |
-|---|---|---|
-| tên thư viện quen (`Python`, `NumPy`, `Matplotlib`) | `as_english` | giảng viên Việt đọc gần như nguyên gốc, sinh viên quen tai |
-| viết tắt 2–4 chữ (`CSV`, `API`, `USD`) | `spell` | đọc từng chữ là cách nói tự nhiên |
-| gọi hàm (`plt.savefig`) | **cân nhắc BỎ HẲN** | xem §5 |
-| mã màu hex, URL | `skip` | không đọc |
+**Không có hash trong file.** Hash ghi vào `Scenario` chỉ tính trên **các mục kịch bản đó
+dùng** (`Pronunciation.hash_for`): kho chung, sửa một từ deck khác nói thì kịch bản deck này
+không bị coi là lệch.
 
 ---
 
-## 5. Điều quan trọng nhất: phần lớn tên hàm KHÔNG NÊN đọc ra miệng
-
-41 tên hàm trong deck. Nhưng người thuyết trình thật **không đọc code thành tiếng**.
-Không ai đứng lớp nói:
-
-> *"Ta gọi pi-eo-ti chấm ép-rờ-bo mở ngoặc ích phẩy i phẩy y-ê-rờ bằng đi-oai..."*
-
-Họ nói:
-
-> *"Ở đây mình gọi errorbar, truyền thêm sai số theo trục y."*
-
-Và CLAUDE.md §5 S4 đã có luật gần giống:
-
-> Không đọc bullet, không đọc bảng theo hàng
-
-**Đề xuất: thêm luật tương tự cho code.** S4 không đọc nguyên đoạn mã, chỉ nói **tên hàm
-và nó làm gì**. Vậy thì bảng phát âm chỉ cần chứa:
+## 5. Quy trình
 
 ```
-tên hàm TRẦN, bỏ tiền tố module:   savefig · errorbar · linspace · scatter · hist
-tên thư viện:                       Matplotlib · NumPy · Cartopy · Python
-viết tắt:                           CSV · API · MNIST · USD
+1. S4 viết kịch bản        src/scenario/cli.py <document.json>
+                           từ lạ đếm ước lượng + cờ unknown_pronunciation
+
+2. gom từ lạ vào kho       scripts/extract_terms.py out/deck/<doc_id>/scenario.json [...]
+                           viết tắt -> đánh vần · từ Anh -> để nguyên · by:"auto"
+
+3. NGƯỜI mở kho            sửa "say" chỗ máy đoán sai, đổi by "auto" -> "nguoi"
+
+4. chạy lại S4             trang không đổi: CHỈ đếm lại âm tiết, không gọi LLM
+                           đếm lại mà trượt luật (câu > 30 âm tiết...) thì viết lại trang đó
 ```
 
-**~25 mục thay vì 335.** Vừa sức ngồi duyệt một lần.
+Từ lạ nằm trong kịch bản mà **không nên nói ra miệng** (`plt`, tên biến) thì sửa **kịch
+bản**, không thêm vào kho.
 
 ---
 
-## 6. Quy trình đề xuất
+## 6. Máy nhận ra từ nào cần cách đọc
+
+Luật ký tự, trong `syllables.py`:
 
 ```
-1. scripts/extract_terms.py  quét chunks.json
-                             -> nhóm chắc chắn (có dấu chấm, toàn hoa)
-                             -> điền "say" mặc định theo bảng §4
-                             -> ghi by:"auto", KHÔNG tự coi là xong
-
-2. NGƯỜI mở file, làm 3 việc:
-                             -> sửa "say" chỗ máy đoán sai
-                             -> xoá mục không bao giờ nói ra miệng
-                             -> thêm từ máy bỏ sót (nhóm ba máy không tách được)
-                             -> đổi by:"auto" thành "nguoi"
-
-3. tính lại syllables + hash tự động
-
-4. S4 đếm âm tiết theo bảng · S6b so hash trước khi synth
+có trong kho                                  -> đọc theo kho
+toàn chữ hoa, >= 2 ký tự                      -> VIẾT TẮT (kể cả có Đ: CBLĐ, HĐLĐ, VNĐ)
+   trừ: có dấu + đúng dạng âm tiết Việt       -> chữ Việt viết hoa (THỜI, LƯƠNG)
+   trừ: nằm trong dải chữ hoa có dấu          -> chữ Việt viết hoa ("THỜI GIAN LÀM VIỆC"
+                                                 -> GIAN không bị đánh vần)
+có dấu, hoặc đúng dạng âm tiết Việt không dấu -> tiếng Việt, 1 âm tiết
+còn lại                                       -> từ Anh
 ```
 
-**Vì sao `by: "auto"` phải khác `by: "nguoi"`:** nhìn file là biết ngay chỗ nào người đã
-duyệt, chỗ nào máy đoán. Không có nó thì vài tuần sau không ai nhớ mục nào đáng tin —
-cùng một lý do `provenance` tồn tại ở `ParsedDocument` (NT2).
-
-Bổ sung thêm deck mới thì **giữ nguyên mục `by: "nguoi"`**, chỉ thêm mục mới với
-`by: "auto"`. Người duyệt không phải làm lại từ đầu.
+**Giới hạn phải nhận:** từ Anh trông như âm tiết Việt (`sin`, `map`, `tin`) lọt thành
+tiếng Việt, trừ khi đã có trong kho. Không tách được bằng luật ký tự — nhưng giờ chỉ phải
+xét vài chục từ robot thật sự nói, không phải 335 từ trong chunk.
 
 ---
 
 ## 7. Đo gì
 
 ```
-số mục by:"nguoi" / tổng số mục     tỉ lệ đã duyệt, dưới 100% thì S4 đang đoán
-từ xuất hiện trong Scenario mà KHÔNG có trong bảng   -> cờ unknown_pronunciation
-hash trong Scenario != hash bảng hiện tại            -> S6b DỪNG, không synth
+số mục by:"nguoi" / tổng số mục                   tỉ lệ đã duyệt
+từ trong kịch bản KHÔNG có trong kho              -> cờ unknown_pronunciation (vàng)
+hash trong Scenario != hash_for(kịch bản) hiện tại -> S6b DỪNG, không synth
 ```
-
-Cờ `unknown_pronunciation` là cái chặn thật: S4 viết ra một thuật ngữ chưa ai quyết cách
-đọc thì **phải báo**, không được lặng lẽ đếm bừa.

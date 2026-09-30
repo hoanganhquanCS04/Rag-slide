@@ -40,7 +40,7 @@ class Sentence(BaseModel):
     kind: Literal["content", "delivery"]
     text: str
     grounding: Grounding | None = None   # content mà None -> CỜ ĐỎ
-    syllables: int = 0                   # CODE tính theo pronunciation.json, không để LLM khai
+    syllables: int = 0                   # CODE tính theo kho phát âm, không để LLM khai
     prosody: Prosody = Field(default_factory=Prosody)
 
 
@@ -85,7 +85,9 @@ class Scenario(BaseModel):
     doc_id: str
     model: str
     prompt_hash: str
-    pronunciation_hash: str              # S6b so trước khi synth — lệch là DỪNG
+    # hash CÁC MỤC KỊCH BẢN NÀY DÙNG trong kho chung (không phải cả kho) — S6b so trước
+    # khi synth, lệch là DỪNG
+    pronunciation_hash: str
     slides: list[SlideScript] = Field(default_factory=list)
 
     @property

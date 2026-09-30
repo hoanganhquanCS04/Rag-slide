@@ -47,7 +47,7 @@ def expand(question: str, page: ParsedPage | None) -> str:
 class Retriever:
     def __init__(self, doc_id: str, top_k: int):
         # embed_retry=1: lỗi là lùi về BM25 ngay, không đợi 1+2+4+8s như offline
-        self.searcher = Searcher(f"out/kb/{doc_id}.chunks.json", embed_retry=1)
+        self.searcher = Searcher(f"out/kb/{doc_id}/chunks.json", embed_retry=1)
         self.top_k = top_k
         self.mode = "hybrid"
 

@@ -4,9 +4,14 @@
     python src/scenario/cli.py out/parsed/<doc_id>/document.json --page 9,11,20   # vài trang
     python src/scenario/cli.py out/parsed/<doc_id>/document.json --dry-run --page 11
     python src/scenario/cli.py out/parsed/<doc_id>/document.json --show           # xem, không gọi API
+    python src/scenario/cli.py out/parsed/<doc_id>/document.json --md             # chỉ ghi lại .md
+
+Mỗi lần lưu scenario.json là ghi luôn scenario.md (bản đọc cả deck) bên cạnh.
 
 Chạy lại là INCREMENTAL: trang có page_hash + prompt + model không đổi thì giữ nguyên,
-không tốn tiền. Đổi pronunciation.json thì chỉ đếm lại âm tiết, không gọi LLM.
+không tốn tiền. Đổi kho phát âm data/pronunciation.json thì chỉ đếm lại âm tiết, không gọi LLM.
+Lưu dần sau MỖI trang: dừng giữa chừng thì trang đã viết vẫn còn, chạy lại là đi tiếp.
+Chạy xong -> scripts/extract_terms.py gom từ chưa có cách đọc vào kho -> người chốt -> chạy lại.
 """
 
 from __future__ import annotations
@@ -25,8 +30,8 @@ if __package__ in (None, ""):
 from parsing.models import ParsedDocument
 from llm import DEFAULT_MODEL
 from scenario.generate import load_prompt, render_prompt, run_deck
-from scenario.models import Scenario
-from scenario.syllables import Pronunciation
+from scenario.models import Scenario, SlideScript
+from scenario.syllables import STORE, Pronunciation
 
 log = logging.getLogger("scenario")
 
@@ -114,7 +119,7 @@ def report(sc: Scenario) -> None:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="scenario")
     ap.add_argument("parsed", help="out/parsed/<doc_id>/document.json")
-    ap.add_argument("--pron", default=None, help="mặc định out/deck/<doc_id>/pronunciation.json")
+    ap.add_argument("--pron", default=str(STORE), help="kho phát âm chung, mặc định data/pronunciation.json")
     ap.add_argument("-o", "--out", default=None, help="mặc định out/deck/<doc_id>/scenario.json")
     ap.add_argument("--page", default=None, help="'11' | '9,11,20' | '9-15'")
     ap.add_argument("--model", default=DEFAULT_MODEL)
@@ -123,7 +128,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--dry-run", action="store_true", help="in prompt, không gọi API")
     ap.add_argument("--show", action="store_true", help="chỉ in kịch bản đã có")
     ap.add_argument("--md", action="store_true",
-                    help="ghi kịch bản đã có ra scenario.md để đọc (không gọi API)")
+                    help="CHỈ ghi lại scenario.md, không gọi API — chạy thường đã tự ghi; "
+                         "dùng sau khi sửa tay scenario.json")
     args = ap.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -135,7 +141,7 @@ def main(argv: list[str] | None = None) -> int:
     doc = ParsedDocument.load(args.parsed)
     deck_dir = Path("out/deck") / doc.doc_id
     out = Path(args.out) if args.out else deck_dir / "scenario.json"
-    pron = Pronunciation.load(args.pron or deck_dir / "pronunciation.json")
+    pron = Pronunciation.load(args.pron)
     pages = parse_pages(args.page)
 
     old: Scenario | None = None
@@ -164,26 +170,42 @@ def main(argv: list[str] | None = None) -> int:
             prev = [s for s in (old.slides if old else [])
                     if s.section_id == p.section_id and s.page_no < pg]
             log.info("=" * 78)
-            log.info(render_prompt(template, doc, p, p.slide_type, prev, pron))
+            log.info(render_prompt(template, doc, p, p.slide_type, prev))
         return 0
 
     existing = {s.page_no: s for s in old.slides} if old else {}
     _, prompt_hash = load_prompt()
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    def save(slides: list[SlideScript]) -> Scenario:
+        sc = Scenario(doc_id=doc.doc_id, model=args.model, prompt_hash=prompt_hash,
+                      pronunciation_hash=pron.hash_for(s.text for s in slides), slides=slides)
+        tmp = out.with_suffix(".json.tmp")           # ghi tạm rồi thay: dừng giữa lúc ghi
+        tmp.write_text(sc.model_dump_json(indent=2), encoding="utf-8")   # không hỏng file cũ
+        tmp.replace(out)
+        # bản đọc cho người — ghi cùng lúc với .json để hai file luôn khớp, CẢ deck
+        # (kể cả khi chỉ chạy --page) để mở ra là thấy toàn bộ
+        out.with_suffix(".md").write_text(to_markdown(sc, doc, None), encoding="utf-8")
+        return sc
+
+    def checkpoint(results: dict[int, SlideScript]) -> None:
+        # trang chưa tới lượt giữ bản cũ — lưu dần không được làm mất trang nào
+        merged = {**existing, **results}
+        save([merged[k] for k in sorted(merged)])
+
     log.info("sinh kịch bản · %s · %s", doc.doc_id,
              f"trang {sorted(pages)}" if pages else "cả deck")
     slides = asyncio.run(run_deck(
         doc, pron, model=args.model, existing=existing, only=pages,
-        force=args.force, workers=args.workers, log_dir=Path("logs/s4") / doc.doc_id))
-
-    sc = Scenario(doc_id=doc.doc_id, model=args.model, prompt_hash=prompt_hash,
-                  pronunciation_hash=pron.hash, slides=slides)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(sc.model_dump_json(indent=2), encoding="utf-8")
+        force=args.force, workers=args.workers, log_dir=Path("logs/s4") / doc.doc_id,
+        on_page=checkpoint))
+    sc = save(slides)
 
     show(sc, pages)
     report(sc)
     log.info("")
     log.info("ghi -> %s", out)
+    log.info("ghi -> %s   (bản đọc — mở Preview: Ctrl+Shift+V)", out.with_suffix(".md"))
     return 1 if any(s.red_flags for s in sc.slides) else 0
 
 

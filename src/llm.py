@@ -3,7 +3,9 @@
 JSON mode, retry luỹ thừa, log full prompt + response vào `logs/` (CLAUDE.md §9).
 Offline và runtime khác nhau ở ĐỘ KIÊN NHẪN, không ở cách gọi:
 
-    S4 (offline)   retry=4, timeout=180s   — không vội, lỗi thì đợi 1+2+4+8s rồi thử lại
+    S4 (offline)   retry=4, backoff=5s     — không vội, lỗi thì đợi 5+10+20s rồi thử lại
+                                             (đo được: 503 "temporarily unavailable" cả loạt,
+                                              đợi 1+2+4s là hết lượt trước khi cổng hồi)
     runtime        retry=1, timeout ngắn   — khán giả đang chờ, lỗi thì escalate ngay
 """
 
@@ -41,7 +43,7 @@ def _unfence(s: str) -> str:
 
 class LLM:
     def __init__(self, model: str, log_dir: Path, *, retry: int = 4, timeout: float = 180.0,
-                 extra: dict[str, Any] | None = None):
+                 backoff: float = 1.0, extra: dict[str, Any] | None = None):
         import httpx
 
         key = os.environ.get("OPENAI_API_KEY")
@@ -51,6 +53,7 @@ class LLM:
         self.url = f"{base}/chat/completions"
         self.model = model
         self.retry = retry
+        self.backoff = backoff                     # giây chờ lần đầu, sau đó nhân đôi
         self.extra = extra or {}                   # tham số riêng của model, vd reasoning_effort
         self.client = httpx.AsyncClient(timeout=timeout,
                                         headers={"Authorization": f"Bearer {key}"})
@@ -79,8 +82,8 @@ class LLM:
             except Exception as e:                         # mạng, timeout, JSON hỏng
                 last = f"{type(e).__name__}: {e}"
             if attempt + 1 < self.retry:
-                wait = 2 ** attempt
-                log.warning("  %s loi (%d/%d) %s -> doi %ds", tag, attempt + 1, self.retry, last, wait)
+                wait = self.backoff * 2 ** attempt
+                log.warning("  %s loi (%d/%d) %s -> doi %.0fs", tag, attempt + 1, self.retry, last, wait)
                 await asyncio.sleep(wait)
         raise RuntimeError(last)
 

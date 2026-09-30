@@ -255,7 +255,7 @@ VÀO  out/parsed/<doc_id>/document.json
   └─> [index]  dense: ma trận .npy, quét vét cạn (0.01ms, chính xác tuyệt đối)
                sparse: BM25 dựng trong RAM lúc khởi động (~10ms)
                gộp bằng RRF K=60   <- KHÔNG cộng điểm: hai thang đo không so được
-RA   out/kb/<doc_id>.chunks.json + <doc_id>__<model_id>.vectors.npy
+RA   out/kb/<doc_id>/{chunks.json, vectors__<model_id>.npy}
 ```
 
 Đo được (7 câu hỏi có nhãn): **hybrid 4/7 top-1 · dense 3/7 · sparse 3/7** — hybrid hơn
@@ -311,7 +311,7 @@ VÀO  KBChunk[] + sections
                ⚠️ self-retrieval hiện gần như luôn 100% vì câu hỏi lấy TỪ CHÍNH
                   văn bản chunk — đề bài là đáp án. Số đo thật lấy từ
                   data/eval/queries.json (src/kb/eval.py)
-RA   deck_map.txt + out/kb/audit/*.json
+RA   deck_map.txt + out/kb/<doc_id>/audit/*.json
 ```
 
 #### S6b · Precompute — `Scenario[]` → `precomputed/`
@@ -412,7 +412,7 @@ data/
 │   ├── deck.pdf                       VỪA là deck VỪA là KB (v0)
 │   ├── parsed.json                    ParsedDocument        <- S0
 │   ├── chunks.json                    KBChunk[]             <- S5
-│   ├── <doc_id>__<model_id>.vectors.npy                     <- S5
+│   ├── vectors__<model_id>.npy                                <- S5
 │   ├── structure.json                 time_budget           <- S2
 │   ├── scenario.json                  Scenario[] + pron_hash <- S4
 │   ├── deck_map.txt                   ~150 token, danh sách section  <- S6a

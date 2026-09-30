@@ -86,7 +86,7 @@ mức "mô tả slide".
 ✅ S2a  slide_type               luật, ParsedPage.slide_type — divider · exercise · content
 ⬜ S2b  time_budget              luật, chưa code
 🟡 S4   kịch bản                  src/scenario/, gpt-5-mini — đủ 2 deck, nhịp chưa đạt gate
-⬜ S6b  TTS + pronunciation.json  chưa có dòng nào
+🟡 S6b  pronunciation.json       KHO CHUNG data/pronunciation.json, sinh TỪ KỊCH BẢN — TTS chưa có
 ⬜ S7   người duyệt phần bị flag  chưa có dòng nào
 ```
 
@@ -118,8 +118,8 @@ deck.pdf  ← v0: CÙNG MỘT FILE →     source/*.pdf
 **Thứ tự chạy thật** (số stage là lớp khái niệm, KHÔNG phải thứ tự):
 
 ```
-S0 → S5 (chunk+embed) ─┬─► S6a deck_map + audit ──┐
-    → S2 (luật)        └─► S4 kịch bản → S6b TTS ──┴─► S7
+S0 → S5 (chunk+embed) ─┬─► S6a deck_map + audit ─────────────┐
+    → S2 (luật)        └─► S4 kịch bản → phát âm → S6b TTS ──┴─► S7
 ```
 
 - **S0 làm hết phần hiểu trang**: bố cục + ảnh (VLM cả trang), `sections` (từ trang mục lục),
@@ -224,11 +224,10 @@ chỉ đọc property đó.
 
 - `polygon` thay cho `relations`: "sơ đồ bên trái" → so `block.center[0]` của các mẩu trên
   trang. Đo được ở p19: code `cx=0.28` (trái), chart `cx=0.71` (phải).
-- Sinh/bổ sung `pronunciation.json` từ `entities` — xem
-  [docs/spec/pronunciation.md](docs/spec/pronunciation.md). Đây là lý do chính `entities`
-  còn sống: S4 **đếm âm tiết theo bảng đó**, và TTS đọc theo bảng đó.
-  **Máy đề xuất, NGƯỜI chốt** — đo được: không tách nổi tiếng Việt không dấu (`quan`,
-  `hoa`, `xanh`) khỏi tiếng Anh (`plot`, `sin`) bằng luật ký tự.
+- `pronunciation.json` **KHÔNG sinh ở đây** (bản cũ sinh từ `entities`/chunk). Nó sinh TỪ
+  KỊCH BẢN S4 — chỉ từ robot thật sự nói mới cần cách đọc. Đo trên 3_datavisualization:
+  bảng quét từ chunk có 10/35 mục kịch bản không bao giờ nói, và thiếu 16 từ kịch bản có
+  nói. Xem [docs/spec/pronunciation.md](docs/spec/pronunciation.md).
 
 ### S2 — co lại, phần lớn đã deterministic
 
@@ -254,16 +253,26 @@ Spec đầy đủ: [docs/spec/scenario.md](docs/spec/scenario.md).
 - **Chạy song song theo SECTION, tuần tự TRONG section** — trang sau đọc kịch bản trang
   trước cùng section để không lặp ý (7 trang liền cùng tên "Đồ thị dạng đường"). Đây là
   thứ thay cho `message` đã bỏ.
-- **Không có `time_budget`** (đã bỏ) → trần số câu theo `slide_type` là cái phanh duy nhất.
+- **Không có `time_budget`, KHÔNG có trần độ dài trang** — độ dài đi theo nội dung, nhưng
+  **bắt buộc ĐỦ Ý**: người nghe phải hình dung được hết thông tin trên trang. Code kiểm:
+  mỗi khối chữ có câu trỏ vào (`block_not_covered`), mọi con số trên slide được nói
+  (`number_missing`). Không đọc thành tiếng: link, email, số điện thoại, mã tài liệu.
+  Trần 2 câu chỉ còn cho trang chuyển chương / lời kết.
   Pass 2 thành **pass sửa lỗi validate**, chỉ chạy cho trang trượt.
 - **`syllables` do CODE tính** theo `pronunciation.json`, không để LLM tự khai.
 - **Input mỗi trang: nội dung CHÍNH TRANG ĐÓ** (`KBChunk` của trang) + `title` trang
   trước/sau + `slide_type`. **KHÔNG nhồi cả deck vào prompt.**
 - Mọi câu `content` phải có `grounding`; `null` → flag đỏ (NT4 §2)
 - `slide_type` quyết định độ dài: `section_divider` thì một câu chuyển là xong,
-  `title`/`agenda` cũng ngắn. Chỉ `content` mới viết dài.
+  `title`/`agenda` cũng ngắn. Chỉ `content` mới viết dài. `section_divider` ở **trang cuối
+  deck** ("THANK YOU!") là **lời kết**, không phải chương mới (`is_closing`).
 - Tiếng Việt: **190–210 âm tiết/phút**. Đếm âm tiết, KHÔNG đếm từ,
   và đếm **theo `pronunciation.json`** (viết tắt đọc thế nào thì đếm thế ấy)
+- **Thuật ngữ tiếng Anh / viết tắt: CHỈ dùng từ có trên chính trang đó** — code kiểm
+  (`term_not_on_page`). Kho phát âm KHÔNG vào prompt (nó là của cả kho, không phải của trang).
+- **Phát âm đi SAU kịch bản:** S4 → `scripts/extract_terms.py` gom từ lạ trong kịch bản vào
+  kho chung → người chốt `say` → chạy lại S4 = chỉ đếm lại âm tiết, không gọi LLM.
+  **Máy đề xuất, NGƯỜI chốt** — không tách nổi tiếng Việt không dấu khỏi tiếng Anh bằng luật.
 - **Tự nhiên — 7 đòn bẩy, xếp theo tác động:**
   1. **Văn nói ≠ văn viết** (nguyên nhân số một). Cấm `việc…`, `sự…`, `được thực hiện bởi`,
      danh từ hoá. Câu chủ động, mệnh đề ngắn.
@@ -276,6 +285,9 @@ Spec đầy đủ: [docs/spec/scenario.md](docs/spec/scenario.md).
      chỉ nói TÊN HÀM và nó làm gì. Người thật không đọc "pi-eo-ti chấm ép-rờ-bo mở
      ngoặc", họ nói "gọi errorbar, truyền thêm sai số trục y".
      Hệ quả: bảng phát âm chỉ cần ~25 mục, không phải 335.
+     Cùng lý do: **số, ngày, ký hiệu viết theo cách NÓI** — "44 giờ một tuần", "ngày 25
+     tháng 10", không "44h/tuần", "25/10". Code cấm `/ % & + < > @` và số dính chữ
+     (`written_symbol`); deck nhân sự có 271 dấu `/`.
   7. `max_syllables` mỗi câu = **30** (không phải 40) — ranh giới ngắt của R7 là ranh
      giới câu, câu 40 âm tiết ≈ 12s không ngắt được
 - **Pass 2 cắt theo thứ tự: trùng lặp ở câu `content` TRƯỚC, câu `delivery` SAU CÙNG.**
@@ -304,6 +316,8 @@ Spec đầy đủ: [docs/spec/scenario.md](docs/spec/scenario.md).
 - `pronunciation.json`: xem [docs/spec/pronunciation.md](docs/spec/pronunciation.md).
 - Hash `pronunciation.json` ghi vào `Scenario`; S6b **so hash trước khi synth**.
   Lệch bảng = S4 đếm một đằng, TTS đọc một nẻo, timing sai mà không ai thấy.
+  Hash CHỈ tính trên các mục kịch bản đó dùng — kho chung, sửa từ deck khác nói không được
+  làm dừng deck này.
 - Xuất **bản nghe thử** (3 trang + mọi câu bị flag) cho S7
 
 ---
@@ -418,6 +432,7 @@ BẢN SAO để tìm, xoá đi thì tự dựng lại từ `.npy`, không tốn 
 data/raw/<file>.pdf                       file gốc — VỪA là deck VỪA là KB (.pptx cần .pdf cùng tên)
 data/patches/<doc_id>.json                nội dung gõ tay cho trang parser vẫn sai
 data/eval/queries.json                    câu hỏi có nhãn để đo retrieval
+data/pronunciation.json                   KHO PHÁT ÂM CHUNG mọi deck — máy đề xuất từ kịch bản, người chốt
 .env  VLM_MODEL · LLM_MODEL · EMBED_MODEL tên model dùng — sửa ở đây, KHÔNG sửa trong code
 .env  VECTOR_DB=inmem|chroma · CHROMA_PATH kho vector (src/kb/store/) — đổi kho không sửa code
 
@@ -426,12 +441,14 @@ out/parsed/<doc_id>/                      S0 — MỘT lệnh: python src/parsin
 ├── layout.json                           ② bố cục VLM từng trang (cache, chỉ trỏ id)
 └── document.json                         ③ ParsedDocument — vừa để người đọc vừa để pipeline chạy
 
-out/kb/<doc_id>.chunks.json               KBChunk[]     (src/kb/cli.py)
-out/kb/<doc_id>__<model_id>.vectors.npy   ma trận vector + .vectors.json (thứ tự hàng)
-out/kb/.embed_cache/<model>/<sha1>.npy    cache theo hash nội dung
-out/kb/chroma/                            kho Chroma: MỘT collection kb__<model_id> cho mọi
-                                          tài liệu, tách bằng metadata doc_id (VECTOR_DB=chroma)
-out/kb/audit/{self_retrieval,eval}.json   kết quả đo
+out/kb/<doc_id>/                          S5 — MỖI BÀI MỘT THƯ MỤC (như out/parsed/)
+├── chunks.json                           KBChunk[]     (src/kb/cli.py)
+├── vectors__<model_id>.npy               ma trận vector — tên model PHẢI nằm trong tên file
+├── vectors__<model_id>.json              rows[i] = chunk_id của hàng i
+└── audit/{self_retrieval,eval}.json      kết quả đo
+out/kb/.embed_cache/<model>/<sha1>.npy    DÙNG CHUNG — cache theo hash nội dung
+out/kb/chroma/                            DÙNG CHUNG — kho Chroma: MỘT collection kb__<model_id>
+                                          cho mọi bài, tách bằng metadata doc_id (VECTOR_DB=chroma)
 ```
 
 **Kịch bản sẽ nằm ở đây** (chưa có code):
@@ -439,9 +456,8 @@ out/kb/audit/{self_retrieval,eval}.json   kết quả đo
 ```
 out/deck/<doc_id>/
 ├── scenario.json          kịch bản CẢ deck, mỗi entry kèm page_hash cho incremental
-├── pronunciation.json     viết tắt đọc thế nào — S4 đếm âm tiết theo bảng này
-│                          MÁY đề xuất, NGƯỜI chốt (docs/spec/pronunciation.md)
 └── precomputed/<hash câu>.wav    TTS cache, key = hash TỪNG CÂU
+                           (bảng phát âm KHÔNG ở đây — một kho chung data/pronunciation.json)
 ```
 
 **Kịch bản KHÔNG để chung với `ParsedDocument`** (parse lại là mất, đúng bẫy đã dính với
@@ -449,8 +465,9 @@ trang 15) **và KHÔNG để chung với `KBChunk`** (sửa một câu thoại k
 
 Kho vector KHÔNG mua tốc độ: 52 vector, quét vét cạn hết **0.01ms**; ngay cả 100.000 vector
 cũng chỉ 25ms, trong khi gọi API nhúng câu hỏi đã mất ~700ms. Chroma mua về **lưu đĩa +
-metadata filter + nhiều tài liệu chung một chỗ**. Kho chỉ làm nhánh dense — BM25 + RRF vẫn ở
-`search.py`. `Searcher` khởi tạo gọi `store.sync`: kho lệch `chunks.json` thì nạp lại từ `.npy`.
+metadata filter + nhiều tài liệu chung một chỗ**. Kho chỉ làm nhánh dense — BM25 ở
+`src/kb/sparse/` (cùng hình với `store/`, chọn bằng `SPARSE_INDEX`), RRF ở `search.py`.
+`Searcher` khởi tạo gọi `sync` cả hai: lệch `chunks.json` thì nạp lại từ `.npy` / dựng lại BM25.
 Khung inmem/chroma/factory lấy từ `minhbtrc/chatbot-template` (MIT) — chỗ khác bản gốc ghi ở
 `src/kb/store/base.py`. Sơ đồ §7.1 là đích, chưa áp dụng.
 
@@ -460,11 +477,12 @@ Khung inmem/chroma/factory lấy từ `minhbtrc/chatbot-template` (MIT) — ch�
 SHARED LAYER              ← dùng chung mọi deck
 ├── KB chunks + embeddings (metadata: source_doc, deck_ids[], content_type)
 │   └── Qdrant: kb_chunks__{model_id}
-└── pronunciation.json     ← thuật ngữ trùng nhau giữa các deck
+└── pronunciation.json     ← MỘT kho cho mọi deck. Không có bản per-deck: viết tắt đọc
+                              khác nhau tùy ngữ cảnh (T7) thì chấp nhận một cách đọc
 
 PER-DECK LAYER
 └── deck_{id}/
-    ├── Scenario  ·  pronunciation.json
+    ├── Scenario
     ├── Qdrant: slide_index__{deck_id}__{model_id}
     ├── deck_map.txt        (~150 token, danh sách section)
     ├── audit/self_retrieval.json
@@ -536,7 +554,9 @@ SmartArt đôi khi vỡ). Phải cài font Việt vào container.
   (v0: chỉ còn **text layer của PDF** là bản đúng; `chart_data`/`tables` không có
   nguồn deterministic nên mọi số đọc từ biểu đồ phải khai `provenance: vlm`)
 - ❌ Coi mô tả ảnh do VLM sinh là dữ liệu chắc đúng — nó là `vlm`, đo được là có sai
-  (chép `0x1675e5550` thành `0x1675e550`)
+  (chép `0x1675e5550` thành `0x1675e550`). **Nhưng S4 VẪN ĐƯỢC NÓI số từ block `vlm`**
+  (người dùng chốt 2026-09-30, chấp nhận rủi ro sai: bảng hệ số làm thêm giờ là ảnh, cấm
+  số thì trang mất nội dung) — câu đó mang cờ vàng `vlm_number` để còn truy được.
 - ❌ Fixed-size chunking ở S5
 - ❌ Embed `text_raw` thay vì `text_enriched`
 - ❌ Vứt chunk vì tưởng nó vô dụng (trang phân mục, chunk trùng) — ĐÁNH DẤU rồi lọc

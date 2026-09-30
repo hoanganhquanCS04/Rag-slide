@@ -6,8 +6,8 @@ nhưng nhãn do người gán nên có thể sai, và người gán dễ thiên 
 
 Hai bài bổ sung cho nhau, không thay được nhau.
 
-    python src/kb/eval.py out/kb/<ten>.chunks.json
-    python src/kb/eval.py out/kb/<ten>.chunks.json --by nguoi     # chi cau nguoi that viet
+    python src/kb/eval.py out/kb/<ten>/chunks.json
+    python src/kb/eval.py out/kb/<ten>/chunks.json --by nguoi     # chi cau nguoi that viet
 """
 
 from __future__ import annotations

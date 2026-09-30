@@ -60,9 +60,13 @@ def text_key(text: str, model_id: str) -> str:
     return hashlib.sha1(f"{model_id}\x00{text}".encode()).hexdigest()
 
 
-def vectors_file(out_dir: str | Path, doc_id: str, model_id: str) -> Path:
-    """out/kb/<doc_id>__<model>.vectors.npy — MỘT chỗ đặt tên, ghi và đọc cùng dùng."""
-    return Path(out_dir) / f"{doc_id}__{model_slug(model_id)}.vectors.npy"
+def vectors_file(kb_dir: str | Path, model_id: str) -> Path:
+    """out/kb/<doc_id>/vectors__<model>.npy — nằm CẠNH chunks.json của bài đó.
+
+    MỘT chỗ đặt tên, ghi và đọc cùng dùng. Tên bài đã là tên thư mục; tên model thì PHẢI
+    nằm trong tên file (§10) — đổi model mà trỏ vector cũ là trả rác không báo lỗi.
+    """
+    return Path(kb_dir) / f"vectors__{model_slug(model_id)}.npy"
 
 
 def load_vectors(cs: ChunkSet, path: str | Path, model_id: str) -> np.ndarray:
@@ -74,7 +78,8 @@ def load_vectors(cs: ChunkSet, path: str | Path, model_id: str) -> np.ndarray:
     p = Path(path)
     if not p.exists():
         raise SystemExit(f"khong thay vector: {p}\n"
-                         "chay `python src/kb/cli.py <document.json> -o <chunks.json> --embed` truoc da")
+                         "chay `python src/kb/cli.py out/parsed/<ten>/document.json "
+                         "-o out/kb/<ten>/chunks.json --embed` truoc da")
     info = json.loads(p.with_suffix(".json").read_text(encoding="utf-8"))
     if info.get("model") != model_id:
         raise SystemExit(f"{p.name}: nhung bang '{info.get('model')}', dang can '{model_id}'")
@@ -174,10 +179,10 @@ class Embedder:
 
 
 def embed_chunkset(
-    cs: ChunkSet, out_dir: str | Path, *, model_id: str = MODEL_ID,
+    cs: ChunkSet, kb_dir: str | Path, *, model_id: str = MODEL_ID,
     use_cache: bool = True,
 ) -> tuple[Path, Path]:
-    """Nhúng CẢ BỘ chunk -> ghi .npy + .json. Trả về đường dẫn hai file."""
+    """Nhúng CẢ BỘ chunk -> ghi .npy + .json vào `kb_dir` (thư mục của bài, cạnh chunks.json)."""
     emb = Embedder(model_id)
     texts = [c.text_enriched for c in cs.chunks]      # KHÔNG dùng text_raw (§10)
 
@@ -185,7 +190,7 @@ def embed_chunkset(
     mat = emb.embed(texts, use_cache=use_cache)
     dt = time.perf_counter() - t0
 
-    p_npy = vectors_file(out_dir, cs.doc_id, model_id)
+    p_npy = vectors_file(kb_dir, model_id)
     p_npy.parent.mkdir(parents=True, exist_ok=True)
     p_json = p_npy.with_suffix(".json")
 

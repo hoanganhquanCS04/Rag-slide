@@ -1,10 +1,12 @@
 """Cắt chunk từ ParsedDocument (§9: chạy riêng được qua CLI).
 
-    python src/kb/cli.py out/parsed/<ten>/document.json -o out/kb/<ten>.chunks.json
+    python src/kb/cli.py out/parsed/<ten>/document.json -o out/kb/<ten>/chunks.json
     python src/kb/cli.py out/parsed/<ten>/document.json --page 19        # xem chunk của 1 trang
     python src/kb/cli.py out/parsed/<ten>/document.json --stats          # phân bố token
-    python src/kb/cli.py out/parsed/<ten>/document.json -o out/kb/<ten>.chunks.json --embed
+    python src/kb/cli.py out/parsed/<ten>/document.json -o out/kb/<ten>/chunks.json --embed
                                                     # nhúng qua API + nạp kho (VECTOR_DB)
+
+Mỗi bài một thư mục `out/kb/<ten>/`: chunks.json + vectors__<model>.{npy,json} nằm cạnh nhau.
 """
 
 from __future__ import annotations
@@ -64,7 +66,8 @@ def stats(cs: ChunkSet) -> None:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="kb")
     ap.add_argument("parsed", help="out/parsed/<ten>/document.json")
-    ap.add_argument("-o", "--out", default=None)
+    ap.add_argument("-o", "--out", default=None,
+                    help="out/kb/<ten>/chunks.json — vector ghi cung thu muc")
     ap.add_argument("--page", default=None, help="chi xem chunk cua trang: '19' | '19,20'")
     ap.add_argument("--stats", action="store_true", help="chi in thong ke")
     ap.add_argument("--full", action="store_true")
@@ -72,7 +75,6 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--embed", action="store_true",
                     help="nhung vector qua API OpenAI (can OPENAI_API_KEY)")
     ap.add_argument("--embed-model", default=None, help="mac dinh EMBED_MODEL trong .env")
-    ap.add_argument("--vector-dir", default="out/kb", help="noi ghi .vectors.npy")
     ap.add_argument("--no-cache", action="store_true", help="bo qua cache tren dia")
     args = ap.parse_args(argv)
     if args.embed and not args.out:
@@ -107,7 +109,7 @@ def main(argv: list[str] | None = None) -> int:
 
         model_id = args.embed_model or MODEL_ID
         log.info("")
-        p_npy, _ = embed_chunkset(cs, args.vector_dir, model_id=model_id,
+        p_npy, _ = embed_chunkset(cs, Path(args.out).parent, model_id=model_id,   # cạnh chunks.json
                                   use_cache=not args.no_cache)
         # Kho ghi đĩa (chroma) nạp luôn ở offline (§2 NT1). inmem thì lúc chạy mới nạp.
         store = create_store(model_id=model_id)

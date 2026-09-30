@@ -47,7 +47,7 @@ def main() -> None:
     ap.add_argument("--bm25", action="store_true", help="chỉ BM25, không gọi API nhúng")
     args = ap.parse_args()
 
-    s = Searcher(f"out/kb/{args.doc}.chunks.json")
+    s = Searcher(f"out/kb/{args.doc}/chunks.json")
     doc = ParsedDocument.load(f"out/parsed/{args.doc}/document.json")
     mode = "sparse" if args.bm25 else "hybrid"
 

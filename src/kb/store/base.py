@@ -15,7 +15,7 @@ Khác bản gốc — CỐ Ý, đừng sửa lại cho giống:
     tìm trả về chữ (page_content)             trả (chunk_id, cosine) — R2 cần page_no, RRF cần hạng
     lọc: inmem nhận HÀM, chroma nhận DICT     cả hai nhận CÙNG một dict phẳng
          (lệch nhau -> lọc ở inmem hỏng)
-    chỉ dense                                 vẫn chỉ dense — BM25 + RRF ở search.py
+    chỉ dense                                 vẫn chỉ dense — BM25 ở kb/sparse/, RRF ở search.py
 
 Kho chỉ là BẢN SAO để tìm. Nguồn vẫn là `chunks.json` + `.npy` (§9 resume được từ bất kỳ
 stage nào): xoá cả thư mục chroma thì lần chạy sau `sync` tự dựng lại, không tốn API.

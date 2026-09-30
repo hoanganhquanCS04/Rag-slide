@@ -1,11 +1,11 @@
 """Chạy thử buổi thuyết trình trong terminal — bản chữ, hỏi đáp ở cuối mỗi trang.
 
-    python src/runtime/cli.py 3_datavisualization
-    python src/runtime/cli.py 3_datavisualization --start 11            # bắt đầu từ trang 11
-    python src/runtime/cli.py tetnguyendan --speed 1                    # đợi đúng thời lượng nói
-    python src/runtime/cli.py 3_datavisualization < cau_hoi.txt         # chạy thử bằng file
+    python src/runtime/cli.py onboarding_kit
+    python src/runtime/cli.py onboarding_kit --start 11                 # bắt đầu từ trang 11
+    python src/runtime/cli.py onboarding_kit --speed 1                  # đợi đúng thời lượng nói
+    python src/runtime/cli.py onboarding_kit < cau_hoi.txt              # chạy thử bằng file
 
-Cần có sẵn (offline): out/parsed/<ten>/document.json · out/kb/<ten>.chunks.json + vector
+Cần có sẵn (offline): out/parsed/<ten>/document.json · out/kb/<ten>/chunks.json + vector
                       · out/deck/<ten>/scenario.json · out/deck/<ten>/deck_map.txt
 """
 

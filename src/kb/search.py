@@ -12,7 +12,7 @@ Xem docs/spec/search.md. Bốn điểm dễ sai:
   4. **Nhánh điều hướng (R2) phải TẮT lọc trang phân mục.** Hỏi "quay lại phần đồ thị ba
      chiều" thì trang mở chương mới là đáp án đúng. Lọc là luật của R4, không phải của R2.
 
-    python src/kb/search.py out/kb/<ten>.chunks.json "cau hoi" -k 5 --explain
+    python src/kb/search.py out/kb/<ten>/chunks.json "cau hoi" -k 5 --explain
 """
 
 from __future__ import annotations
@@ -20,7 +20,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import re
 import sys
 from pathlib import Path
 from typing import Literal
@@ -32,6 +31,7 @@ if __package__ in (None, ""):
 
 from kb.embed import MODEL_ID, Embedder, vectors_file
 from kb.models import ChunkSet, KBChunk, SearchHit
+from kb.sparse import SparseIndex, create_sparse
 from kb.store import VectorStore, create_store
 
 log = logging.getLogger(__name__)
@@ -42,60 +42,35 @@ POOL = 50           # lấy sâu ở mỗi nhánh rồi mới gộp — gộp tr
 
 Mode = Literal["hybrid", "dense", "sparse"]
 
-# Tách dính liền của code: plt.savefig(x) -> plt savefig x ; np.arange -> np arange
-_SPLIT = re.compile(r"[^0-9A-Za-zÀ-ỹ]+")
-
-
-def tokenize(text: str) -> list[str]:
-    """Tách chữ cho BM25.
-
-    Tiếng Việt viết rời từng âm tiết nên tách theo khoảng trắng là đủ dùng. Điểm mấu chốt
-    là **tách tên hàm**: người hỏi gõ "savefig" chứ không gõ "plt.savefig('line_graph.png')".
-    Không tách thì cả cụm là một token và không bao giờ khớp.
-
-    GIỮ NGUYÊN DẤU tiếng Việt. Hệ quả: gõ thiếu dấu là nhánh này về 0 (`bieu` != `biểu`).
-    Dense còn vớt được mờ mờ, BM25 thì không. Ghi ở search.md §3.
-    """
-    return [t for t in _SPLIT.split(text.lower()) if len(t) > 1 or t.isdigit()]
-
-
-def _ranks(scores: np.ndarray, idx: list[int], pool: int) -> dict[int, int]:
-    """-> {chỉ số chunk: hạng bắt đầu từ 1}, chỉ lấy `pool` cái đầu. Nhánh BM25 dùng —
-    nhánh dense lấy hạng thẳng từ kho."""
-    order = sorted(idx, key=lambda i: -scores[i])[:pool]
-    return {i: r for r, i in enumerate(order, 1)}
-
 
 class Searcher:
     """Nạp một lần, hỏi nhiều lần.
 
     Nhánh dense hỏi KHO VECTOR (`VECTOR_DB` trong .env: inmem | chroma, xem kb/store/).
-    Nhánh BM25 dựng trong RAM lúc khởi tạo (~10ms cho 52 chunk) — kho không làm BM25.
-    Khởi tạo gọi `store.sync`: kho lệch `chunks.json` thì nạp lại từ .npy, khớp thì thôi.
+    Nhánh sparse hỏi INDEX TỪ KHOÁ (`SPARSE_INDEX`: rank_bm25, xem kb/sparse/).
+    Khởi tạo gọi `sync` cả hai: lệch `chunks.json` thì nạp / dựng lại, khớp thì thôi.
     """
 
     def __init__(self, chunks_path: str | Path, *, vectors_path: str | Path | None = None,
                  model_id: str = MODEL_ID, embed_retry: int = 4,
-                 store: VectorStore | None = None):
-        from rank_bm25 import BM25Okapi
-
+                 store: VectorStore | None = None, sparse: SparseIndex | None = None):
         cp = Path(chunks_path)
         self.cs = ChunkSet.model_validate(json.loads(cp.read_text(encoding="utf-8")))
         self.chunks: list[KBChunk] = self.cs.chunks
         self._pos = {c.chunk_id: i for i, c in enumerate(self.chunks)}
 
-        self.vectors_path = Path(vectors_path) if vectors_path else vectors_file(
-            cp.parent, self.cs.doc_id, model_id)
+        self.vectors_path = Path(vectors_path) if vectors_path else vectors_file(cp.parent, model_id)
         self.store = store or create_store(model_id=model_id)
         n_sync = self.store.sync(self.cs, self.vectors_path)
+        self.sparse = sparse or create_sparse()
+        self.sparse.sync(self.cs)
 
-        # KHÔNG dùng text_raw (§10) — index phải khớp đúng thứ đã đem đi nhúng.
-        self.bm25 = BM25Okapi([tokenize(c.text_enriched) for c in self.chunks])
         self.model_id = model_id
         self.embed_retry = embed_retry
         self._emb: Embedder | None = None
-        log.info("nap %d chunk | kho %s%s | model %s", len(self.chunks), self.store.kind,
-                 f" (nap lai {n_sync} vector)" if n_sync else "", model_id)
+        log.info("nap %d chunk | kho %s%s | tu khoa %s | model %s", len(self.chunks),
+                 self.store.kind, f" (nap lai {n_sync} vector)" if n_sync else "",
+                 self.sparse.kind, model_id)
 
     @property
     def embedder(self) -> Embedder:
@@ -109,12 +84,13 @@ class Searcher:
     def search(self, query: str, *, k: int = TOP_K, mode: Mode = "hybrid",
                filter_dividers: bool = True, group_by_page: bool = True) -> list[SearchHit]:
         n = len(self.chunks)
-        # Lọc TRƯỚC khi xếp hạng, để hạng của hai nhánh tính trên cùng một tập ứng viên.
-        cand = [i for i in range(n)
-                if not filter_dividers or self.chunks[i].is_searchable]
-        if not cand:
+        if not any(c.is_searchable or not filter_dividers for c in self.chunks):
             return []
+        # Lọc TRƯỚC khi xếp hạng, CÙNG một `where` cho hai nhánh — để hạng của hai nhánh
+        # tính trên cùng một tập ứng viên: đúng tài liệu này, lọc phân mục nếu được yêu cầu.
+        where = {"doc_id": self.cs.doc_id, **({"is_searchable": True} if filter_dividers else {})}
 
+        # Chunk ngoài pool thì điểm = 0 — điểm chỉ để debug, RRF không dùng điểm.
         s_dense = np.zeros(n, dtype=np.float32)
         s_sparse = np.zeros(n, dtype=np.float32)
         r_dense: dict[int, int] = {}
@@ -122,17 +98,16 @@ class Searcher:
 
         if mode in ("hybrid", "dense"):
             qv = self.embedder.embed([query], use_cache=True)[0]
-            # Cùng tập ứng viên với `cand`: đúng tài liệu này, lọc phân mục nếu được yêu cầu.
-            # Chunk ngoài pool dense thì score_dense = 0 — chỉ để debug, RRF không dùng điểm.
-            where = {"doc_id": self.cs.doc_id, **({"is_searchable": True} if filter_dividers else {})}
             for r, (cid, s) in enumerate(self.store.query(qv, POOL, where), 1):
                 if (i := self._pos.get(cid)) is not None:
                     s_dense[i] = s
                     r_dense[i] = r
 
         if mode in ("hybrid", "sparse"):
-            s_sparse = np.asarray(self.bm25.get_scores(tokenize(query)), dtype=np.float32)
-            r_sparse = _ranks(s_sparse, cand, POOL)
+            for r, (cid, s) in enumerate(self.sparse.query(query, POOL, where), 1):
+                if (i := self._pos.get(cid)) is not None:
+                    s_sparse[i] = s
+                    r_sparse[i] = r
 
         # RRF: chỉ nhìn thứ hạng, vứt điểm đi. Không lọt pool thì không góp gì.
         rrf: dict[int, float] = {}
@@ -183,7 +158,7 @@ def _group_by_page(hits: list[SearchHit]) -> list[SearchHit]:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="search")
-    ap.add_argument("chunks", help="out/kb/<ten>.chunks.json")
+    ap.add_argument("chunks", help="out/kb/<ten>/chunks.json")
     ap.add_argument("query", nargs="+", help="cau hoi")
     ap.add_argument("-k", type=int, default=TOP_K)
     ap.add_argument("--vectors", default=None)

@@ -1,6 +1,6 @@
 # Search — từ câu hỏi ra số trang
 
-**Vào:** `out/kb/*.chunks.json` + `out/kb/*__<model>.vectors.npy` · **Ra:** `SearchHit[]` · **Code:** `src/kb/search.py` + `src/kb/audit.py`
+**Vào:** `out/kb/*/chunks.json` + `out/kb/*/vectors__<model>.npy` · **Ra:** `SearchHit[]` · **Code:** `src/kb/search.py` + `src/kb/sparse/` (BM25) + `src/kb/audit.py`
 
 ---
 
@@ -104,6 +104,12 @@ bỏ chữ quá ngắn (1 ký tự)      trừ chữ số
    được mờ mờ, BM25 thì bằng không. Đã đo: gõ không dấu, cả 4 câu thử đều trượt.
    → Nếu kênh hỏi là form web (kế hoạch v1) thì phải tính tới chuyện người gõ không dấu.
    Cách xử: index **hai bản** — có dấu và bỏ dấu — chưa làm ở v0, ghi lại ở §9.
+3. **Chunk 0 điểm KHÔNG được xếp hạng** (đã sửa, `src/kb/sparse/rankbm25.py`). Bản đầu lấy
+   top-50 bất kể điểm: câu hỏi toàn từ hiếm thì gần hết pool là chunk 0 điểm, hoà nhau nên
+   giữ thứ tự file — p1 hạng 2, p2 hạng 3… — và trang đầu deck ăn điểm RRF không vì lý do
+   gì. Đo trên onboarding_kit: `VGRFOC`, `VGRDBIZ`, `kscv` trước ra **p1 (trang bìa) top-1**,
+   sau khi sửa ra đúng trang. Câu hỏi thường không bị: luôn khớp vài chữ chung ("được",
+   "bao nhiêu") nên không có chunk 0 điểm — bộ eval 93 câu không đổi một dòng.
 
 ---
 
@@ -247,7 +253,7 @@ Dựng bảng BM25 mất ~10ms cho 52 chunk, làm **một lần lúc khởi đ�
 ## 8. Chạy
 
 ```bash
-python src/kb/search.py out/kb/3_datavisualization.chunks.json "làm sao lưu biểu đồ ra file ảnh"
+python src/kb/search.py out/kb/3_datavisualization/chunks.json "làm sao lưu biểu đồ ra file ảnh"
 ```
 
 | cờ | nghĩa |
@@ -337,8 +343,8 @@ Khe rất hẹp, và đây mới là deck **duy nhất** đo được — deck t
 ### Chạy
 
 ```bash
-python src/kb/audit.py out/kb/3_datavisualization.chunks.json -o out/kb/audit/self_retrieval.json
-python src/kb/audit.py out/kb/3_datavisualization.chunks.json --query-from title --show-fail
+python src/kb/audit.py out/kb/3_datavisualization/chunks.json -o out/kb/3_datavisualization/audit/self_retrieval.json
+python src/kb/audit.py out/kb/3_datavisualization/chunks.json --query-from title --show-fail
 ```
 
 Thoát mã 1 khi top-1 dưới gate, để CI bắt được.
@@ -349,8 +355,8 @@ Thoát mã 1 khi top-1 dưới gate, để CI bắt được.
 `data/eval/queries.json`:
 
 ```bash
-python src/kb/eval.py out/kb/3_datavisualization.chunks.json -o out/kb/audit/eval.json
-python src/kb/eval.py out/kb/3_datavisualization.chunks.json --by nguoi
+python src/kb/eval.py out/kb/3_datavisualization/chunks.json -o out/kb/3_datavisualization/audit/eval.json
+python src/kb/eval.py out/kb/3_datavisualization/chunks.json --by nguoi
 ```
 
 Hai bài **bổ sung** nhau, không thay được nhau:
@@ -399,8 +405,8 @@ chứng đo được rằng R3b **bắt buộc phải có**, không phải tính
 ### File sinh ra
 
 ```
-out/kb/audit/self_retrieval.json    duplicates[] + top-1/top-3 từng kiểu + caveat
-out/kb/audit/eval.json              kết quả từng câu hỏi, từng kiểu
+out/kb/3_datavisualization/audit/self_retrieval.json    duplicates[] + top-1/top-3 từng kiểu + caveat
+out/kb/3_datavisualization/audit/eval.json              kết quả từng câu hỏi, từng kiểu
 ```
 
 `search.py` **không ghi file** — nó là hàm chạy lúc runtime, trả `SearchHit[]` trong bộ
