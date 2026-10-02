@@ -17,13 +17,12 @@ from typing import Any
 import numpy as np
 
 from kb.models import ChunkSet
-from kb.sparse.base import SparseIndex, filter_metadata, tokenize
-from kb.store.base import Hit, Where, matches
+from kb.sparse.base import SparseIndex, tokenize
+from kb.store.base import Hit, Where, filter_metadata, matches
 
 
 class RankBM25Index(SparseIndex):
     kind = "rank_bm25"
-    persistent = False
 
     def __init__(self) -> None:
         # doc_id -> (bảng BM25, chunk_id theo hàng, metadata theo hàng, vân tay để so ở sync)

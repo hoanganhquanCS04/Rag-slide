@@ -47,7 +47,10 @@ def page_label(page: ParsedPage) -> str:
 
 
 def build(doc: ParsedDocument) -> str:
-    lines = [f"Bộ slide {doc.doc_id} · {doc.n_pages} trang"]
+    """Dòng đầu ghi SỐ chương: khán giả hỏi "bài có mấy chương" thì LLM đọc thẳng, khỏi đếm dòng —
+    đếm dòng là tính cả "Mở đầu" (bìa + mục lục) thành chương (Onboarding: 5 chương, 6 dòng)."""
+    lines = [f"Bộ slide {doc.doc_id} · {doc.n_pages} trang"
+             + (f" · {len(doc.sections)} chương" if doc.sections else "")]
     if not doc.sections:
         lines += [f"- trang {p.page_no}: {page_label(p)}" for p in doc.pages]
         return "\n".join(lines) + "\n"
@@ -55,7 +58,8 @@ def build(doc: ParsedDocument) -> str:
     for sec_id, group in groupby(doc.pages, key=lambda p: p.section_id):
         pages = list(group)
         sec = next((s for s in doc.sections if s.id == sec_id), None)
-        name = sec.title if sec else ("Mở đầu" if pages[0].page_no == 1 else "Phần khác")
+        name = (f"Chương {doc.sections.index(sec) + 1}: {sec.title}" if sec else
+                "Mở đầu (trước chương 1, không phải chương)" if pages[0].page_no == 1 else "Phần khác")
         extra = [p for p in pages if p.slide_type == "exercise"]
         note = f" (bài tập: {_span(extra)})" if extra else ""
         lines.append(f"- {_span(pages)}: {name}{note}")

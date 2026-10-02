@@ -1,9 +1,10 @@
 # Nhánh offline — tổng quan
 
-> **File này là THIẾT KẾ ĐÍCH.** Hiện trạng v0 khác ở ba điểm:
-> **một file PDF duy nhất vừa làm deck vừa làm KB** (không phải `.pptx` + `source/*.pdf`
-> tách biệt) · lưu **file JSON trên đĩa**, chưa có Qdrant · mới code xong đúng
-> **S0 phiên bản PDF** ([`src/parsing/`](../../src/parsing/)), S1–S7 chưa có dòng nào.
+> **File này là THIẾT KẾ ĐÍCH.** Cái đang chạy thật: [01-hien-trang.md](./01-hien-trang.md).
+> Hiện trạng v0 khác thiết kế ở ba điểm: **một file PDF duy nhất vừa làm deck vừa làm KB**
+> (không phải `.pptx` + `source/*.pdf` tách biệt) · lưu **file JSON trên đĩa** + kho vector
+> Chroma/RAM, chưa có Qdrant · mới code **S0, S5, S6a `deck_map`, S4** — chưa có S2
+> `time_budget`, S6b, S7. Trạng thái từng stage ghi ở §3.3 và §4 dưới đây.
 >
 > Hệ quả của việc gộp hai nguồn: [CLAUDE.md §3.0](../../CLAUDE.md). Tóm tắt — mất bản
 > đúng của `chart_data`/`tables`/`build_steps`, S3 Alignment suy biến, hệ thống co lại
@@ -101,10 +102,9 @@ vô nghĩa, đã bỏ. Xem [CLAUDE.md §3.0](../../CLAUDE.md).
 ```
 data/raw/<ten>.pdf   ← VỪA là deck VỪA là KB
       |
-   S0 Ingest  (docling + VLM mô tả ảnh qua API)
+   S0 Ingest  (docling + VLM sắp bố cục cả trang + chép bảng, qua API)
       |  ├─ sections   từ trang mục lục    ← luật, không gọi model
-      |  ├─ slide_type từ bbox + tiêu đề   ← luật, 40/40 đúng
-      |  └─ entities                        → pronunciation.json
+      |  └─ slide_type từ bbox + tiêu đề   ← luật, 40/40 đúng
       v
  ParsedDocument
       |
@@ -144,7 +144,8 @@ S0 -> S5 -+-> S2 (luật, rẻ)
 
 - **S0 làm hết phần hiểu trang.** Không còn vòng gọi LLM thứ hai để "hiểu" lại.
 - **S2 không gọi model.** `sections` đã có từ S0; `time_budget` chia theo số trang `content`.
-- **S4 đọc từng trang một** — input là `KBChunk` của chính trang đó + `title` trang kề.
+- **S4 đọc từng trang một** — input là block của chính trang đó + `title` trang kề + kịch
+  bản các trang trước cùng chương (chống lặp ý). `pronunciation.json` sinh SAU, từ kịch bản.
 - **Một index duy nhất**, vì KB đến từ chính file slide.
 
 ### 3.1 Offline dựng MỘT index, không phải hai
@@ -160,36 +161,24 @@ R2  hỏi điều hướng   →  KHÔNG lọc            (trang mở chương l
 ```
 
 Chưa dựng Qdrant và **chưa cần**: 52 vector quét vét cạn hết **0.01ms**, 100.000 vector
-cũng chỉ 25ms — trong khi gọi API nhúng câu hỏi đã mất ~700ms. Qdrant mua về metadata
-filter và nhiều deck, **không phải tốc độ**.
+cũng chỉ 25ms — trong khi gọi API nhúng câu hỏi đã mất ~700ms. Kho vector mua về metadata
+filter và nhiều deck, **không phải tốc độ**. v0 dùng Chroma (ghi đĩa, một collection cho mọi
+tài liệu, lọc bằng `doc_id`) hoặc RAM — chọn bằng `VECTOR_DB`, xem `src/kb/store/`.
 
-### 3.2 Dòng thời gian thật (deck 20 trang, build lần đầu)
+### 3.2 Thời gian thật (đo 2026-10-02)
 
 ```
-t=0                                                            t ~ 6 phút
-│
-├── S5 KB ════════════════════════╗   chạy SONG SONG, không cần deck
-│   (~2 phút, 1 lần / corpus)     ║   deck thứ 2 dùng chung nguồn --> SKIP
-│                                 ║
-├── S0 ═══╗                       ║
-│  (~30s) ╚═ S1 ═══════╗          ║
-│            (~90s)    ╚═ S2 ═╗   ║
-│                      (~15s) ║   ║
-│                             ╠═══╡ S6a ═╗                  <- song song với S3
-│                             ║  (~25s)  ╚═ self-retr (~5s) ═╗
-│                             ╚═══╩═ S3 ═══╗                 ║
-│                                  (~105s) ╚═ S4 ═══╗        ║
-│                                            (~2ph) ╚═ S6b ══╗║
-│                                                    (~90s)  ╚╩═ S7
-│                                                             (người, 10–20ph)
+① docling          ~2s/trang CPU, miễn phí
+② bố cục VLM       ~4–5s/lần gọi, 1 lần/trang   ┐ 4 luồng song song
+②b chép bảng       ~9s/lần gọi, 1 lần/bảng      ┘ Onboarding: 51 trang + 18 bảng
+③ document.json    vài giây
+④ chunk + nhúng    vài giây (lô 64 chunk/lần gọi API)
+⑤ deck_map         tức thì
+S4 kịch bản        1–2 lần gọi LLM/trang, song song theo CHƯƠNG, tuần tự trong chương
 ```
 
-Ba thứ đọc được từ hình này: **S5 không nằm trên đường găng**; **S3 là nút thắt**
-(không có nó thì S4 không chạy được); và **S6a nằm gọn trong bóng của S3** nên việc dựng
-SlideIndex **không tốn thêm một giây nào**.
-
-Hệ quả thứ ba mới là cái đáng giá: `self-retrieval check` xong **trước khi S4 chạy**, nên
-nó bắt được slide có biểu diễn lẫn nhau **trước khi tiêu tiền viết kịch bản** cho chúng.
+Build lần đầu bị chi phối bởi ① và ②. Chạy lại khi không đổi gì: Onboarding (51 trang)
+**22 giây, 0 lần gọi API** — mọi bước tốn tiền đều có cache theo nội dung (§6).
 
 ### 3.3 Bên trong từng stage
 
@@ -212,6 +201,13 @@ VÀO  data/raw/<ten>.pdf
   │                  chỉ ô bảng / mô tả hình đọc từ ảnh là vlm   <- CÓ THỂ BỊA (NT2)
   │                  code kiểm: sót id / id bịa / bỏ quên vùng ─> dùng docling + cờ
   │
+  ├─> [VLM bảng]     cắt ảnh TỪNG bảng, prompt s0_table.md, TABLE_MODEL
+  │                  chữ trong ô nắn về text layer của trang (khớp >= 0.85)
+  │                  khớp hết -> text_layer · còn mảnh không khớp (ảnh chụp bảng) -> vlm
+  │
+  ├─> [link ẩn]      annotation PDF -> hrefs của block chồng lên
+  │                  >= nửa số dòng là link -> role "links", robot không đọc địa chỉ
+  │
   ├─> [luật] sections   từ trang mục lục: trang đầu tiên có tiêu đề khớp mục = mở chương
   │          slide_type từ bbox tiêu đề + tiêu đề "Bài tập…"
   │          KHÔNG gọi model cho hai thứ này
@@ -224,7 +220,8 @@ VÀO  data/raw/<ten>.pdf
                     v
               ParsedDocument ─> [cờ]  empty_page · image_not_described · table_empty
                                       layout_failed · no_sections
-RA   out/parsed/<doc_id>/document.json  ──> S5
+RA   out/parsed/<doc_id>/{docling,layout,document}.json  ──> S5
+     layout.json = cache phản hồi VLM (trang + bảng) — chạy lại không gọi lại
 ```
 
 > **S1 cũ nằm ở đây.** Bản trước có một stage riêng gọi LLM sinh `message` / `relations`.
@@ -240,26 +237,29 @@ RA   out/parsed/<doc_id>/document.json  ──> S5
 VÀO  out/parsed/<doc_id>/document.json
   │
   ├─> [chunk]  1 trang = 1 chunk chính            <- vì R2 nhảy tới TRANG
-  │            mỗi mô tả ảnh = 1 vector phụ
-  │            tiền tố "[<chương> · trang N/M]"   <- KHÔNG gọi LLM
-  │            > 500 token thì cắt theo ranh giới block
-  │            KHÔNG overlap: ranh giới là ranh giới TRANG, không câu nào bị cắt đôi
+  │            trang >= 2 ảnh có mô tả ─> mỗi ảnh thêm 1 vector phụ
+  │            tiền tố "[<chương> · <tiêu đề trang> · trang N/M]"   <- KHÔNG gọi LLM
+  │            > 500 token ─> cắt ÍT khúc nhất, chọn chỗ cắt: trước đề mục > giữa block
+  │                           > giữa dòng / hàng bảng > giữa câu; bảng lặp hàng tiêu đề
+  │            khúc < 100 token ─> gộp vào khúc bên cạnh
+  │            KHÔNG overlap: không câu nào bị cắt đôi, tiền tố mang ngữ cảnh
   │            trang phân mục ─> đánh dấu section_divider, KHÔNG xoá
   │                    │
-  │                    v  52 chunk (45 tìm được, 7 phân mục)
+  │                    v  Onboarding 104 chunk · Thời gian làm việc 18 (17 tìm được)
   │
   ├─> [embed]  text_enriched qua API text-embedding-3-small   <- KHÔNG dùng text_raw
-  │            1536 chiều · chuẩn hoá L2 · cache theo sha1
-  │            nhúng CẢ 52, kể cả phân mục — lọc là việc của lúc TRUY VẤN
+  │            1536 chiều · chuẩn hoá L2 · cache theo hash(model + chữ)
+  │            nhúng CẢ BỘ, kể cả phân mục — lọc là việc của lúc TRUY VẤN
   │
-  └─> [index]  dense: ma trận .npy, quét vét cạn (0.01ms, chính xác tuyệt đối)
-               sparse: BM25 dựng trong RAM lúc khởi động (~10ms)
-               gộp bằng RRF K=60   <- KHÔNG cộng điểm: hai thang đo không so được
-RA   out/kb/<doc_id>/{chunks.json, vectors__<model_id>.npy}
+  └─> [index]  dense: kho vector chroma | inmem (BẢN SAO của .npy, tự đồng bộ)
+               sparse: BM25 dựng trong RAM lúc khởi động (src/kb/sparse/)
+               gộp bằng RRF K=15, dense 1 : sparse 1   <- đo bằng scripts/tune.sh
+               KHÔNG cộng điểm: hai thang đo không so được
+RA   out/kb/<doc_id>/{chunks.json, vectors__<model_id>.npy} + out/kb/chroma/
 ```
 
-Đo được (7 câu hỏi có nhãn): **hybrid 4/7 top-1 · dense 3/7 · sparse 3/7** — hybrid hơn
-từng nhánh riêng.
+Đo được (2026-10-02, câu hỏi do AI viết — thiên vị): Onboarding 200 câu **hybrid 157 top-1 /
+195 top-5** · dense 131 / 189 · sparse 145 / 185 — hybrid hơn từng nhánh riêng.
 
 #### S2 · Deck Structure — `ParsedDocument` → `time_budget`  ⬜ CHƯA CÓ
 
@@ -276,34 +276,41 @@ RA   DeckStructure  ──> S4
 > **Không gọi model.** Bản trước cho LLM sinh `concept_map` / `dependencies` / `arc`.
 > Bỏ hết — chúng phục vụ việc bơm ngữ cảnh toàn cục vào prompt.
 
-#### S4 · Scenario — từng trang → `Scenario[]`  ⬜ CHƯA CÓ
+#### S4 · Scenario — từng trang → `Scenario`  🟡 ĐÃ CÓ, chạy riêng
+
+`src/scenario/` · xem [scenario.md](../spec/scenario.md)
 
 ```
-VÀO  KBChunk của CHÍNH TRANG ĐÓ + title trang trước/sau + slide_type + time_budget
-     <- KHÔNG nhồi cả deck vào prompt
+VÀO  block của CHÍNH TRANG ĐÓ (id + provenance) + title trang trước/sau + slide_type
+     + kịch bản các trang trước cùng chương      <- KHÔNG nhồi cả deck vào prompt
   │
-  ├─> [pass 1]  viết lời, mỗi câu khai kind + grounding
-  │             kind=content   grounding null ─> CỜ ĐỎ (NT3)
+  ├─> [pass 1]  viết lời, mỗi câu khai kind + ref
+  │             kind=content   ref phải là block của trang, thiếu / sai ─> CỜ ĐỎ (NT3)
   │             kind=delivery  không mang sự thật mới, validate BẰNG CODE
   │             slide_type quyết định độ dài:
-  │                 section_divider ─> một câu chuyển
-  │                 content         ─> viết đủ
+  │                 section_divider ─> 1–2 câu chuyển  (trang cuối = lời kết)
+  │                 content         ─> ĐỦ Ý, không trần độ dài
+  │                 exercise        ─> đọc yêu cầu, không giảng
   │
-  ├─> [pass 2]  cân giờ theo time_budget
-  │             cắt trùng lặp ở câu content TRƯỚC, câu delivery SAU CÙNG
-  │             sàn 10% delivery là CỨNG
+  ├─> [kiểm]    đủ ý (block_not_covered, number_missing) · văn nói · nhịp ·
+  │             thuật ngữ phải có trên trang · không đọc code/URL/ký hiệu
   │
-  └─> [đếm âm tiết]  theo pronunciation.json, 190–210 âm tiết/phút
+  ├─> [pass 2]  CHỈ cho trang trượt kiểm, kèm danh sách lỗi; giữ bản ít lỗi hơn
+  │
+  └─> [đếm âm tiết]  CODE đếm theo pronunciation.json, 200 âm tiết/phút
                      KHÔNG đếm từ
-RA   out/deck/<doc_id>/scenario.json  ──> S6b
+RA   out/deck/<doc_id>/scenario.json + scenario.md  ──> S6b
 ```
 
-#### S6a · deck_map + audit — `KBChunk[]` → `deck_map.txt`  ⬜ CHƯA CÓ
+Chưa có `time_budget` (S2) nên chưa cân giờ — độ dài đi theo nội dung trang.
+
+#### S6a · deck_map + audit — `ParsedDocument` → `deck_map.txt`  ✅ ĐÃ CÓ
 
 ```
-VÀO  KBChunk[] + sections
+VÀO  ParsedDocument (sections + slide_type)
   │
-  ├─> deck_map.txt (~150 token: danh sách section)  ─> prompt runtime
+  ├─> deck_map.txt (~180 token: số chương + khoảng trang từng chương)  ─> prompt runtime
+  │       src/kb/deck_map.py — luật, không gọi model
   │
   └─> [audit]  src/kb/audit.py — ĐÃ CÓ
                quét trùng lặp: cosine cặp >= 0.94   ─> bắt được 2 cặp thật
@@ -380,16 +387,16 @@ RA   DeckBundle verified ──> runtime     (còn cờ đỏ ─> KHÔNG đóng
 
 | Stage                                          | Input                                          | Output                                     | Model                      | Thời gian (deck 20 trang)    |
 | ---------------------------------------------- | ---------------------------------------------- | ------------------------------------------ | -------------------------- | ----------------------------- |
-| [S0](./s0-ingest.md) Ingest                | `deck.pdf`                             | `ParsedDocument`                         | docling + VLM qua API      | ~9s + VLM 11 ảnh  ✅ |
-| [S5](./s5-kb-construction.md) KB           | `ParsedDocument`                       | `KBChunk[]` + vector                     | embedding qua API          | ~4s (52 chunk)     ✅ |
-| S6a deck_map + audit                        | `KBChunk[]` + `sections`               | `deck_map.txt` + audit                   | embedding                  | vài giây          ⬜ |
+| [S0](./s0-ingest.md) Ingest                | `deck.pdf`                             | `ParsedDocument`                         | docling + VLM qua API      | ~2s/trang + VLM 1 lần/trang + 1 lần/bảng  ✅ |
+| [S5](./s5-kb-construction.md) KB           | `ParsedDocument`                       | `KBChunk[]` + vector + kho               | embedding qua API          | vài giây          ✅ |
+| S6a deck_map + audit                        | `ParsedDocument` / `KBChunk[]`         | `deck_map.txt` + audit                   | — (luật) / embedding       | tức thì           ✅ |
 | [S2](./s2-deck-structure.md) Structure     | `ParsedDocument`                       | `time_budget`                            | — (luật)                  | tức thì           ⬜ |
-| [S4](./s4-scenario.md) Scenario            | `KBChunk` từng trang + `pronunciation` | `Scenario[]`                             | LLM, 2 pass                | ~2 phút           ⬜ |
+| [S4](./s4-scenario.md) Scenario            | block từng trang + `pronunciation`     | `Scenario`                               | LLM, pass 2 cho trang trượt | 1–2 lần gọi/trang 🟡 |
 | S6b Precompute                              | `Scenario[]` + `pronunciation.json`    | `precomputed/`                           | TTS                        | ~90s              ⬜ |
 | [S7](./s7-hitl-review.md) HITL             | mọi artifact + flags + bản nghe thử    | `DeckBundle` verified                    | —                         | 10–20 phút người ⬜ |
 
-Phần đã có (S0 + S5) chạy hết **~15s** cho deck 40 trang, chưa tính lần gọi VLM đầu tiên.
-Cache vector làm lần chạy lại gần như miễn phí: đo được **52/52 trúng cache, 0 lần gọi API**.
+S0 → S5 → S6a chạy bằng một lệnh `bash scripts/run_deck.sh "<file>"`. Chạy lại khi không đổi
+gì: Onboarding (51 trang) **22 giây, 104/104 vector trúng cache, 0 lần gọi API**.
 
 ---
 
@@ -398,6 +405,9 @@ Cache vector làm lần chạy lại gần như miễn phí: đo được **52/5
 Mọi artifact là **Pydantic v2 model**, ghi ra JSON, đọc lại được. Không dict trần giữa
 các stage. Pipeline phải resume được từ bất kỳ stage nào — nghĩa là mỗi stage đọc file
 của stage trước chứ không nhận object trong bộ nhớ.
+
+Cây dưới là ĐÍCH. v0 đang ghi vào `out/parsed/` · `out/kb/` · `out/deck/` — xem
+[01-hien-trang.md §1](./01-hien-trang.md).
 
 ```
 data/
@@ -467,13 +477,13 @@ Cache vector đi theo **hash của `text_enriched`**, không theo `page_hash`, n
 hay đổi tên file cũng không mất cache. Đo được: sinh lại toàn bộ sau khi đổi `doc_id` →
 **52/52 trúng cache, 0 lần gọi API**.
 
-Điểm dễ sai: S4 của trang N phụ thuộc trang N−1 qua câu chuyển. Khi N−1 đổi, phải chạy
-lại S4 cho cả N. Quy tắc an toàn:
+Điểm dễ sai: S4 của trang N đọc kịch bản các trang trước cùng chương (chống lặp ý). Khi
+một trang trước đổi, các trang sau phải viết lại theo. Code hiện làm (`scenario/generate.py`):
 
 ```
-dirty  = {slide có hash đổi}
-dirty += {slide kề sau mỗi slide dirty}          (vì câu chuyển)
-dirty += {slide có dependencies giao dirty}      (vì tham chiếu ngược)
+dirty  = {trang có page_hash / prompt / model đổi}
+dirty += {MỌI trang sau nó trong cùng chương}    (vì đọc kịch bản trang trước)
+trang người sửa tay (edited_by: "nguoi") -> không bao giờ viết lại, chỉ đếm lại + kiểm
 ```
 
 ---
@@ -482,14 +492,15 @@ dirty += {slide có dependencies giao dirty}      (vì tham chiếu ngược)
 
 - Python 3.11+, type hints bắt buộc, Pydantic v2 cho schema.
 - Mỗi stage là một module độc lập, **chạy riêng được qua CLI**:
-  `python -m src.offline.s1_understand --deck-id rag-intro`
+  `python src/kb/cli.py out/parsed/<ten>/document.json -o out/kb/<ten>/chunks.json --embed`
 - Gọi LLM/VLM: retry exponential backoff, log **full prompt + response** vào `logs/`.
   Không log thì không bao giờ debug được vì sao model bịa.
 - Mọi prompt nằm trong `prompts/*.md`. **Không hardcode prompt trong file `.py`.**
-- Async cho mọi I/O. S1 và S4 phải song song hoá được (mặc định 5 luồng).
+- Async cho mọi I/O. Gọi VLM (4 luồng) và S4 (5 luồng) đều song song.
 - Không `print()`. Dùng `logging` hoặc `rich`.
-- Stage sinh flag thì **append vào `flags.json`**, không tự sửa dữ liệu, không tự quyết.
-  Quyết định là việc của người ở S7.
+- Stage sinh flag thì ghi flag, không tự sửa dữ liệu, không tự quyết. Quyết định là việc
+  của người ở S7. v0: cờ S0 nằm trong `document.json` (`flags[]`), cờ S4 trong từng trang
+  của `scenario.json`; đích là gộp về một `flags.json`.
 
 ---
 
@@ -501,10 +512,10 @@ Không đạt thì không deploy. Chạy được trong CI.
 
 | Chỉ số                                     | Ngưỡng                               | Đo ở        |
 | -------------------------------------------- | -------------------------------------- | ------------- |
-| Alignment coverage                           | ≥ 80% slide có ≥1 nguồn conf > 0.6 | S3            |
+| Alignment coverage — *v1, S3 bỏ ở v0*        | ≥ 80% slide có ≥1 nguồn conf > 0.6 | S3            |
 | Ungrounded rate (**câu `content`**) | < 10%                                  | S4            |
-| Timing deviation                             | < 15% so với`time_budget`           | S4            |
-| **Self-retrieval top-1**               | **≥ 90% slide**                 | **S6a** |
+| Timing deviation — *chờ S2 `time_budget`*    | < 15% so với`time_budget`           | S4            |
+| **Self-retrieval top-1** ⚠️ gần như luôn 100% | **≥ 90% slide**                 | **S6a** |
 | Flag precision                               | ≥ 60%                                 | S7            |
 | P95 latency tới byte audio đầu            | < 2.5s                                 | runtime       |
 
@@ -537,8 +548,8 @@ Mọi flag từ mọi stage đổ về một file, S7 đọc file đó. Chi ti�
 | Stage | Flag tiêu biểu                                                                                                                                                                  |
 | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | S0    | `empty_page`, `image_not_described`, `table_empty`, `layout_failed`, `no_sections` |
-| S5    | chunk trùng nhau (cosine >= 0.94), chunk vượt 500 token                                              |
-| S2    | `sections` không phủ kín / chồng nhau / đứt quãng                                                    |
-| S4    | `ungrounded_content_sentence` ← **cờ đỏ**, `timing_overflow`, **`delivery_below_floor`**, **`written_register_hit`**, **`monotone_rhythm`** |
+| S5    | chunk trùng nhau (cosine >= 0.94, `audit.py`), chunk vượt 500 token (log `--stats`)                  |
+| S2    | `sections` không phủ kín / chồng nhau / đứt quãng — *chưa code*                                      |
+| S4    | **cờ đỏ:** `ungrounded_content_sentence`, `bad_grounding_ref`, `divider_has_content`, `title_grounded_claim`, `empty_script`, `llm_failed`, `stale_manual` · **sửa ở pass 2:** `block_not_covered`, `number_missing`, `monotone_rhythm`, `delivery_ratio`, `written_register`, `too_long`, `term_not_on_page`… · **vàng:** `vlm_number`, `unknown_pronunciation` |
 | S6a   | `self_retrieval_fail` — ⚠️ hiện gần như không bao giờ bắn, xem §3.3                                |
 | S6b   | `duration_mismatch`, **`pronunciation_hash_mismatch`**, **`voice_id_mismatch`**                 |

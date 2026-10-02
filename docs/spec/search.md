@@ -134,7 +134,7 @@ Vứt điểm đi, chỉ hỏi *"mày xếp nó thứ mấy"*:
 ```
 RRF(chunk) = Σ  1 / (K + hạng của chunk trong bảng đó)
            mọi bảng
-K = 60
+K = 15      (đo — xem dưới; paper gốc dùng 60)
 ```
 
 Số thật từ câu `"savefig"` ở §2:
@@ -150,9 +150,38 @@ p11  = 1/(60+5) + 1/(60+1) = 0.0154 + 0.0164 = 0.0318   ← lên đầu
 
 `p11` thắng vì **khá ở cả hai bên**, còn `p8` chỉ giỏi một bên. Đó đúng là hành vi mong muốn.
 
-**K = 60** là hằng số gốc trong paper RRF (Cormack et al. 2009), không phải số bịa. Tác
-dụng: làm khoảng cách hạng 1 ↔ hạng 2 không quá lớn, để một nhánh không tự tiện quyết hết.
-Để trong config, không hardcode.
+**K = 60** là hằng số gốc trong paper RRF (Cormack et al. 2009) — ví dụ `savefig` ở trên tính
+bằng nó. Tác dụng: làm khoảng cách hạng 1 ↔ hạng 2 không quá lớn, để một nhánh không tự tiện
+quyết hết. K nhỏ hơn thì hạng đầu của mỗi nhánh nặng hơn. Để trong config, không hardcode.
+
+Có thêm **trọng số từng nhánh** (`W_DENSE`, `W_SPARSE`, mặc định 1 : 1):
+`RRF = w_dense/(K + hạng dense) + w_sparse/(K + hạng sparse)`. Nhân cả hai cùng một số thì
+thứ hạng không đổi — chỉ TỈ LỆ có nghĩa. K và tỉ lệ **đo bằng `scripts/tune.sh`** (dưới),
+không đoán. Đo trên Onboarding 200 câu (2026-10-01): K = 60 phẳng quá — trang chỉ MỘT nhánh
+thấy (dense hạng 1, BM25 không lọt pool) thua trang hạng 8–10 ở cả hai nhánh; K = 10,
+dense × 2 lên top-5 từ 187 → 191 nhưng top-1 149 → 147.
+
+**Mặc định trong code: K = 15, dense 1 : sparse 1** (đổi 2026-10-02, `search.py`). Đo trên
+Onboarding 200 câu, chunk cắt theo đề mục + bảng đọc từ ảnh: top-1/3/5 = 157/188/195, so với
+157/188/192 ở K = 60. Lưới 15 K × 13 tỉ lệ; kiểm chéo chia đôi bộ câu hỏi (chọn trên 100 câu, chấm
+trên 100 câu còn lại) cũng hay chọn K = 15 1:1. Đổi cách chunk / đổi deck thì tune lại.
+
+#### Tune — `scripts/tune.sh`
+
+```bash
+bash scripts/tune.sh out/kb/<ten>/chunks.json                  # -> out/kb/<ten>/audit/chunks_tune.md + .json
+bash scripts/tune.sh out/kb/<ten>/chunks_thu.json --k 5,10,20 --wd 1,1.5,2     # -> audit/chunks_thu_tune.*
+```
+
+- Pool 50 của mỗi nhánh lấy MỘT lần mỗi câu (`Searcher.ranks`), gộp offline bằng ĐÚNG hàm
+  `rrf_fuse` mà `search` dùng — cả lưới ~30 cấu hình chạy vài giây.
+- Ra `<thư mục chunks>/audit/<tên chunks>_tune.md` + `.json` — đặt theo tên file vào, chạy lại
+  thì ghi đè báo cáo của chính file đó: top-1/3/5, MRR, token 5 trang đầu, **cứu / hỏng** so với
+  cấu hình code đang dùng, bảng theo `type` câu hỏi, câu trượt top-5 của cấu hình tốt nhất.
+- Đổi cách chunk -> chỉ đổi file đầu vào; bộ chunk chưa nhúng thì tự nhúng (có cache).
+- Kho theo `VECTOR_DB`. Báo cáo tự so pool dense của kho với cosine tính tay từ `.npy`:
+  Chroma từng trả pool lệch thỉnh thoảng (~3/14 lượt, nặng nhất ngay sau khi dựng lại S5) —
+  lệch thì bảng lượt đó không tin được, script thoát mã 1.
 
 > Con số RRF **không phải xác suất, không phải độ tương đồng**. Nó chỉ dùng để XẾP THỨ TỰ.
 > Cấm lấy nó làm confidence gate — gate phải lấy điểm reranker (§6, và §9 dưới đây).

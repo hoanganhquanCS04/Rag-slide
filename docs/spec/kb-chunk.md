@@ -190,6 +190,27 @@ cắt thêm trong block                -> 0 chunk > 500, max 498 · 25/51 trang 
 Hàng tiêu đề phải lặp: không có nó mảnh `p021.3` chỉ còn các ô chữ, không biết cột nào là
 "cấp T3 trở lên", cột nào là "còn lại".
 
+### Chọn CHỖ cắt — không cắt thêm khúc nào (2026-10-02)
+
+Số khúc của trang giữ ít nhất có thể (đúng bằng cách nhồi đầy), nhưng không nhồi cho đầy 500
+rồi mới cắt — chọn chỗ cắt theo thứ tự ưu tiên:
+
+```
+trước một ĐỀ MỤC   0   block title không ở đầu trang ("LƯU Ý:", "Quy tắc phản hồi email:"),
+                       hoặc dòng ngắn (<= 12 chữ) kết bằng ':' ("Bảo hiểm sức khỏe Vingroup:")
+giữa hai block     1
+giữa dòng / hàng   2
+giữa câu           4
+NGAY SAU đề mục    8   đề mục trơ trọi cuối khúc, nội dung sang khúc sau — gần như cấm
+khúc < 100 token  +5   rồi vẫn còn thì gộp vào khúc bên cạnh (được vượt 500, tối đa 600)
+hoà                    chọn cách chia đều nhất
+```
+
+Vì sao: nhồi đầy cắt ngang chủ đề — Onboarding p29 bảng gói bảo hiểm rơi sang khúc sau, đề mục
+"Bảo hiểm sức khỏe Vingroup:" ở lại khúc trước; p9, p11 đề mục nằm trơ cuối khúc. Đo trên 200 câu
+(kiểm chéo, chọn cấu hình trên 100 câu, chấm trên 100 câu còn lại): top-1/3/5 153.7/185.3/191.6
+-> 155.1/187.2/192.3; số cấu hình RRF đạt top-5 >= 194 tăng 9 -> 30 (ít nhạy với tham số hơn).
+
 ---
 
 ## 8. Nhúng vector
@@ -239,6 +260,8 @@ tiền tố       [<chương> · <tiêu đề trang> · trang N/M], thiếu ph�
 nội dung      mọi block có content, đúng thứ tự page.blocks
 đánh dấu      trang phân mục (slide_type) -> section_divider, lọc lúc tìm, KHÔNG xoá
 cắt thêm      > 500 token: trang -> block -> hàng bảng (lặp tiêu đề) / dòng -> câu
+chỗ cắt       ít khúc nhất; ưu tiên trước đề mục > giữa block > giữa dòng > giữa câu;
+              cấm ngay sau đề mục; khúc < 100 token gộp sang bên cạnh (tối đa 600)
 nhúng         text_enriched · EMBED_MODEL trong .env (text-embedding-3-small) + BM25
 ```
 

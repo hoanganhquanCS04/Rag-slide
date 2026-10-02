@@ -8,5 +8,7 @@
   "max_answer_sentences": 4,
   "llm_timeout_s": 30,
   "llm_retry": 1,
-  "llm_extra": {}
+  "llm_extra": {},
+  "_json_mode": "false: cổng trả 503 cho gemini-3.5-flash-lite khi bật JSON mode (đo 2026-10-02) — prompt vẫn đòi JSON, code vẫn kiểm. Đổi LLM_MODEL sang model chạy được JSON mode thì bật lại.",
+  "json_mode": false
 }

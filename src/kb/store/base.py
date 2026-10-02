@@ -43,22 +43,27 @@ def collection_name(model_id: str) -> str:
     return "kb__" + re.sub(r"[^a-z0-9._-]+", "-", model_slug(model_id))
 
 
-def chunk_metadata(c: KBChunk, model_id: str) -> dict[str, Any]:
-    """Metadata PHẲNG (Chroma không nhận None / list / dict lồng) — thứ để lọc + đối chiếu.
-
-    `text_key` = vân tay 'vector này nhúng từ đúng chữ này, bằng đúng model này'.
-    """
+def filter_metadata(c: KBChunk) -> dict[str, Any]:
+    """Các trường `where` lọc được — CHUNG cho kho vector và index BM25 (kb/sparse/), để hai
+    nhánh của search lọc bằng cùng một dict. PHẲNG: Chroma không nhận None / list / dict lồng."""
     meta = {
         "doc_id": c.doc_id,
         "page_no": c.page_no,
-        "page_hash": c.page_hash,
         "section_id": c.section_id,
         "vector_role": c.vector_role,
         "content_type": c.content_type,
         "is_searchable": c.is_searchable,
-        "text_key": text_key(c.text_enriched, model_id),
     }
     return {k: v for k, v in meta.items() if v is not None}
+
+
+def chunk_metadata(c: KBChunk, model_id: str) -> dict[str, Any]:
+    """Metadata kho vector cất cạnh mỗi vector = trường lọc + hai trường để `sync` đối chiếu.
+
+    `text_key` = vân tay 'vector này nhúng từ đúng chữ này, bằng đúng model này'.
+    """
+    return {**filter_metadata(c), "page_hash": c.page_hash,
+            "text_key": text_key(c.text_enriched, model_id)}
 
 
 def matches(meta: dict[str, Any], where: Where | None) -> bool:

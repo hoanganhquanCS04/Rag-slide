@@ -8,6 +8,10 @@ Hai bài bổ sung cho nhau, không thay được nhau.
 
     python src/kb/eval.py out/kb/<ten>/chunks.json
     python src/kb/eval.py out/kb/<ten>/chunks.json --by nguoi     # chi cau nguoi that viet
+    python src/kb/eval.py out/kb/<ten>/chunks.json --rrf-k 7 --wd 1.25   # thu cau hinh ★ cua tune
+
+Cấu hình gộp RRF mặc định = hằng số của search.py (cái runtime đang chạy), ghi vào JSON ở
+`rrf` — tune.py chỉ ĐO, không đổi mặc định, nên muốn thử cấu hình ★ của tune thì truyền tay.
 """
 
 from __future__ import annotations
@@ -22,7 +26,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from kb.embed import MODEL_ID
-from kb.search import Mode, Searcher
+from kb.search import RRF_K, W_DENSE, W_SPARSE, Mode, Searcher
 
 log = logging.getLogger(__name__)
 
@@ -38,14 +42,16 @@ def load_queries(path: str | Path, by: str | None = None) -> list[dict]:
 
 
 def run(se: Searcher, queries: list[dict], *, mode: Mode = "hybrid",
-        k: int = 5, filter_dividers: bool = True) -> tuple[int, int, list[str]]:
+        k: int = 5, filter_dividers: bool = True, rrf_k: int = RRF_K,
+        w_dense: float = W_DENSE, w_sparse: float = W_SPARSE) -> tuple[int, int, list[str]]:
     """-> (so cau top-1 dung, so cau top-k dung, cac dong ket qua de in)."""
     top1 = topk = 0
     lines: list[str] = []
     for spec in queries:
         want = spec["page"]
         want = want if isinstance(want, list) else [want]
-        hits = se.search(spec["q"], k=k, mode=mode, filter_dividers=filter_dividers)
+        hits = se.search(spec["q"], k=k, mode=mode, filter_dividers=filter_dividers,
+                         rrf_k=rrf_k, w_dense=w_dense, w_sparse=w_sparse)
         pages = [h.page_no for h in hits]
 
         ok1 = bool(pages) and pages[0] in want
@@ -71,6 +77,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--by", default=None, choices=["ai", "nguoi"],
                     help="chi chay cau do ai/nguoi viet")
     ap.add_argument("--mode", default=None, choices=["hybrid", "dense", "sparse"])
+    ap.add_argument("--rrf-k", type=int, default=RRF_K, help=f"K cua RRF, mac dinh {RRF_K} (search.py)")
+    ap.add_argument("--wd", type=float, default=W_DENSE, help=f"trong so dense, mac dinh {W_DENSE:g}")
+    ap.add_argument("--ws", type=float, default=W_SPARSE, help=f"trong so sparse, mac dinh {W_SPARSE:g}")
     ap.add_argument("-o", "--out", default=None, help="ghi ket qua ra JSON")
     args = ap.parse_args(argv)
 
@@ -86,13 +95,19 @@ def main(argv: list[str] | None = None) -> int:
 
     se = Searcher(args.chunks, vectors_path=args.vectors, model_id=args.model)
     modes: list[Mode] = [args.mode] if args.mode else ["dense", "sparse", "hybrid"]
+    # trọng số chỉ có tác dụng ở hybrid — dense/sparse riêng thì thứ hạng là thứ hạng của nhánh đó
+    is_default = (args.rrf_k, args.wd, args.ws) == (RRF_K, W_DENSE, W_SPARSE)
+    rrf = {"k": args.rrf_k, "w_dense": args.wd, "w_sparse": args.ws, "is_default": is_default}
     report: dict = {"doc_id": se.cs.doc_id, "model": args.model, "k": args.k,
+                    "queries": str(args.queries), "rrf": rrf,
                     "n_queries": len(qs), "n_by_ai": n_ai, "modes": {}}
 
     log.info("")
     log.info("=== %d cau hoi  (%d do AI tu bia, %d nguoi that viet)", len(qs), n_ai, len(qs) - n_ai)
+    log.info("=== gop RRF: K=%d dense=%g sparse=%g (%s)", args.rrf_k, args.wd, args.ws,
+             "mac dinh search.py" if is_default else "KHAC mac dinh search.py")
     for m in modes:
-        t1, tk, lines = run(se, qs, mode=m, k=args.k)
+        t1, tk, lines = run(se, qs, mode=m, k=args.k, rrf_k=args.rrf_k, w_dense=args.wd, w_sparse=args.ws)
         report["modes"][m] = {"top1": t1, f"top{args.k}": tk, "n": len(qs),
                               "top1_rate": round(t1 / len(qs), 4),
                               "detail": [ln.strip() for ln in lines]}

@@ -1,7 +1,8 @@
 # Nhánh offline — hiện trạng đang chạy (v0)
 
-> Đây là **cái đã code và chạy thật**. Thiết kế đích (S1, S3, Qdrant, nhiều deck…) ở
-> [00-overview.md](./00-overview.md). Chỗ nào hai file lệch nhau, **file này đúng với code**.
+> Đây là **cái đã code và chạy thật** (cập nhật 2026-10-02). Thiết kế đích (pptx, nguồn
+> riêng, Qdrant, nhiều deck…) ở [00-overview.md](./00-overview.md). Chỗ nào hai file lệch
+> nhau, **file này đúng với code**.
 
 Offline làm một việc: biến **một file slide** thành mọi thứ robot cần lúc thuyết trình —
 biết slide nói gì, tìm được trang khi bị hỏi, và có sẵn kịch bản để nói. Không giới hạn
@@ -12,43 +13,49 @@ thời gian, nên mọi thứ tính trước được đều làm ở đây.
 ## 1. Luồng
 
 ```
-data/raw/<ten>.pdf  (| .pptx + .pdf cùng tên)   MỘT file vừa là DECK vừa là KB
+data/raw/<file>.pdf  (| .pptx + .pdf CÙNG TÊN)     MỘT file vừa là DECK vừa là KB
         │
-        │ ① docling: chữ + toạ độ + vùng ảnh/bảng     miễn phí (~2s/trang CPU)
+        │ ① docling: chữ + toạ độ + vùng ảnh/bảng, TẮT OCR      miễn phí, CPU
         ▼
-out/parsed/<ten>/docling.json                     docling thô — không ai đọc trực tiếp
+out/parsed/<ten>/docling.json                       docling thô — không ai đọc trực tiếp
         │
-        │ ② VLM nhìn CẢ trang, sắp chữ thành khối     💰 1 lần gọi/trang, có cache
+        │ ② VLM nhìn CẢ trang, sắp mẩu chữ thành khối          💰 1 lần gọi/trang
+        │    (chỉ TRỎ id mẩu chữ, không chép lại chữ)
+        │ ②b cắt ảnh từng bảng, VLM chép ra ô,                 💰 1 lần gọi/bảng
+        │    chữ trong ô nắn về text layer
         ▼
-out/parsed/<ten>/layout.json                      bố cục từng trang (chỉ trỏ id, không chép chữ)
+out/parsed/<ten>/layout.json                        cache phản hồi VLM: "pages" + "tables"
         │
-        │ ③ ghép chữ docling theo bố cục + kiểm       miễn phí
-        │    + link ẩn trong PDF + chương + vá tay data/patches/<ten>.json + cờ
+        │ ③ ghép + kiểm bố cục · thay ô bảng · link ẩn trong PDF   miễn phí
+        │    · chương từ trang mục lục · vá tay data/patches/ · cờ
         ▼
-out/parsed/<ten>/document.json            ★ ParsedDocument — NGUỒN của mọi bước sau, mở ra đọc được luôn
+out/parsed/<ten>/document.json            ★ ParsedDocument — NGUỒN của mọi bước sau
         │
-        ├──④ chunk + nhúng vector + nạp kho ─────── 💰 embedding (có cache)
+        ├──④ chunk + nhúng vector + nạp kho ─────── 💰 embedding (cache theo nội dung)
         │      ▼
-        │   out/kb/<ten>/chunks.json               KBChunk[]      → để TÌM
+        │   out/kb/<ten>/chunks.json                 KBChunk[]  → để TÌM
         │   out/kb/<ten>/vectors__<model>.{npy,json}
-        │   out/kb/chroma/                         kho vector (VECTOR_DB=chroma) — bản sao từ .npy
+        │   out/kb/chroma/                           kho vector — BẢN SAO từ .npy
         │      │
-        │      └─ audit.py / eval.py ──────► out/kb/<ten>/audit/*.json   đo chất lượng tìm
+        │      └─ eval.py / tune.sh ──► out/kb/<ten>/audit/   đo chất lượng tìm
         │
-        └──⑤ viết kịch bản từng trang ─────────────── 💰 LLM
-               đọc: block của trang  (đếm âm tiết theo data/pronunciation.json)
+        ├──⑤ deck_map ───────────────────────────── miễn phí, luật
+        │      ▼
+        │   out/deck/<ten>/deck_map.txt              ~180 token: danh sách chương → prompt runtime
+        │
+        └── S4 kịch bản (CHẠY RIÊNG) ─────────────── 💰 LLM
+               đọc: block của trang + kịch bản trang trước cùng chương
                ▼
-            out/deck/<ten>/scenario.json            Scenario       → robot NÓI
-            out/deck/<ten>/scenario.md              bản đọc cho người
+            out/deck/<ten>/scenario.json · scenario.md
                │
-               └─⑥ scripts/extract_terms.py ──► data/pronunciation.json   KHO CHUNG mọi deck
-                     gom từ Anh/viết tắt kịch bản NÓI mà kho chưa có
-                     máy ĐỀ XUẤT, NGƯỜI chốt → chạy lại ⑤ = chỉ đếm lại, không gọi LLM
+               └─ scripts/extract_terms.py ──► data/pronunciation.json   KHO CHUNG mọi deck
 ```
 
-Hai nhánh từ `ParsedDocument` **độc lập nhau**: KB (④) để trả lời câu hỏi, kịch bản (⑤)
-để tự thuyết trình. ⑤ không đọc chunk — nó đọc thẳng block của trang, vì mỗi câu phải trỏ
-về đúng một block.
+**`scripts/run_deck.sh` chạy ①→⑤ bằng một lệnh** (thêm `--eval` thì đo luôn). S4 không
+nằm trong script: nó tốn một lần gọi LLM mỗi trang, chạy riêng khi cần kịch bản.
+
+KB (④) và kịch bản (S4) **độc lập nhau**. S4 không đọc chunk — nó đọc thẳng block của
+trang, vì mỗi câu phải trỏ về đúng một block.
 
 ---
 
@@ -56,23 +63,21 @@ về đúng một block.
 
 Đủ lệnh chạy, đọc kết quả, chạy lại một phần: [02-lenh.md](./02-lenh.md).
 
-```powershell
-.venv\Scripts\python.exe src\parsing\cli.py run "data\raw\<file>.pdf"                              # ①②③
-.venv\Scripts\python.exe src\kb\cli.py out\parsed\<ten>\document.json -o out\kb\<ten>\chunks.json --embed  # ④
-.venv\Scripts\python.exe src\scenario\cli.py out\parsed\<ten>\document.json                                # ⑤
-.venv\Scripts\python.exe src\scenario\cli.py out\parsed\<ten>\document.json --md                           # ⑤ bản đọc
-.venv\Scripts\python.exe scripts\extract_terms.py out\deck\<ten>\scenario.json                          # ⑥ phát âm (nháp)
+```bash
+bash scripts/run_deck.sh "data/raw/<file>.pdf"            # ①②②b③ ④ ⑤ — phần offline của một deck
+bash scripts/run_deck.sh "data/raw/<file>.pdf" --eval     # + đo bộ câu hỏi có nhãn
+.venv/Scripts/python.exe scripts/try_ask.py <ten>         # hỏi đáp thử trên KB vừa dựng
 ```
-
-Thử tìm kiếm: `.venv\Scripts\python.exe scripts\try_search.py <ten> "câu hỏi"`
 
 | Bước | Tốn | Chạy lại khi nào |
 |---|---|---|
 | ① docling | ~2s/trang CPU, miễn phí | đổi file gốc (`--redo`) |
-| ② bố cục VLM | 1 lần gọi/trang; trang không đổi → 0 lần | đổi file gốc, prompt, `VLM_MODEL` |
-| ③ dựng document.json | vài giây, miễn phí | luôn chạy lại trong `run` |
-| ④ chunk + embed + nạp kho | vài giây; chữ không đổi → 0 lần gọi API | sau ③, đổi luật chunk, đổi `EMBED_MODEL` |
-| ⑤ kịch bản | ~1 lần gọi LLM mỗi trang | trang có `page_hash` đổi |
+| ② bố cục VLM | 1 lần gọi/trang; đã có trong cache → 0 | đổi file gốc, `VLM_MODEL`, hoặc ép bằng `--pages` |
+| ②b chép bảng | 1 lần gọi/bảng; đã có → 0 | khung bảng đổi, `TABLE_MODEL`, hoặc `--pages` |
+| ③ dựng document.json | vài giây, miễn phí | luôn dựng lại |
+| ④ chunk + nhúng + nạp kho | vài giây; chữ không đổi → 0 lần gọi API | sau ③, đổi luật chunk, đổi `EMBED_MODEL` |
+| ⑤ deck_map | tức thì | luôn dựng lại |
+| S4 kịch bản | ~1–2 lần gọi LLM mỗi trang | trang có `page_hash` / prompt / model đổi |
 
 ---
 
@@ -80,12 +85,12 @@ Thử tìm kiếm: `.venv\Scripts\python.exe scripts\try_search.py <ten> "câu h
 
 ### ③ `ParsedDocument` — tài liệu → trang → block
 
-Chi tiết: [spec/parsed-document.md](../spec/parsed-document.md)
+Chi tiết: [spec/parsed-document.md](../spec/parsed-document.md) · code: `src/parsing/`
 
 ```
 ParsedDocument   doc_id · source · parser · sections[] · flags[]
- └─ pages[]      page_no · title · section_id · page_hash
-     ├─ slide_type    section_divider · exercise · content — luật, S4 viết theo loại trang
+ └─ pages[]      page_no · title · section_id · page_hash · layout_error
+     ├─ slide_type    section_divider · exercise · content — LUẬT, tính lại mỗi lần nạp
      └─ blocks[]      NỘI DUNG, theo thứ tự đọc
           └─ id · kind · role · content · hrefs · polygon · provenance
 ```
@@ -94,40 +99,58 @@ Mỗi block trả lời ba câu, loại nào cũng vậy:
 
 | | field | |
 |---|---|---|
-| nói gì | `content` | chữ (`paragraph`) · mô tả VLM (`image`) · markdown (`table`) |
+| nói gì | `content` | chữ (`paragraph`) · mô tả hình (`image`) · markdown sinh từ `cells` (`table`) |
 | nằm đâu | `polygon` | 4 góc, `[0,1]`, gốc trên-trái |
-| tin được không | `provenance` | `text_layer` đúng 100% · `vlm` máy tả, có thể sai · `manual` người sửa |
+| tin được không | `provenance` | `text_layer` đúng 100% · `vlm` máy đọc/tả từ ảnh, có thể sai · `manual` người gõ |
+
+`id` cho biết khối từ đâu ra: `p007.v01` = VLM sắp (②), `p007.b03` = docling (trang trượt
+kiểm tra bố cục), `p015.m00` = vá tay.
 
 ```json
-{"id": "p002.b01", "kind": "paragraph", "role": "body", "content": "Mùng 1",
- "polygon": [[0.232, 0.33], [0.768, 0.33], [0.768, 0.552], [0.232, 0.552]],
+{"id": "p007.v00", "kind": "paragraph", "role": "title", "content": "CÁCH TÍNH LÀM THÊM GIỜ",
+ "polygon": [[0.499, 0.094], [0.843, 0.094], [0.843, 0.141], [0.499, 0.141]],
  "provenance": "text_layer"}
 ```
+
+- **Chương** dựng từ trang mục lục trong 5 trang đầu: trang đầu tiên có tiêu đề khớp một
+  mục là trang mở chương. Không có mục lục khớp → 0 chương, không đoán.
+- **Link ẩn** (annotation PDF) gắn vào `hrefs` của block chồng lên nó. Block có ≥ nửa số
+  dòng là link → `role: "links"` — robot không đọc địa chỉ thành tiếng.
+- **Cờ** cho người duyệt: `empty_page` · `image_not_described` · `table_empty` ·
+  `layout_failed` · `no_sections`. Block rỗng không có cờ (ảnh nhỏ, ảnh trang trí) bị bỏ.
 
 ### ④ `KBChunk` + vector — để TÌM
 
 Chi tiết: [spec/kb-chunk.md](../spec/kb-chunk.md) · [spec/embedding.md](../spec/embedding.md) ·
-[spec/search.md](../spec/search.md)
+[spec/search.md](../spec/search.md) · code: `src/kb/`
 
 ```
-1 trang = 1 chunk   (+ 1 chunk phụ mỗi ảnh nếu trang có ≥2 ảnh được mô tả)
+1 trang = 1 chunk chính   (+ 1 vector phụ mỗi ảnh, nếu trang có ≥ 2 ảnh được mô tả)
 text_enriched = "[<chương> · <tiêu đề trang> · trang N/M] " + các block.content nối lại
-> 500 token   -> cắt: trang theo block -> bảng theo hàng (lặp hàng tiêu đề) / chữ theo dòng -> câu
+> 500 token   -> cắt ÍT khúc nhất, chọn chỗ cắt: trước đề mục > giữa block > giữa dòng /
+                 hàng bảng > giữa câu. Bảng cắt theo hàng, khúc nào cũng lặp hàng tiêu đề
+< 100 token   -> khúc vụn, gộp vào khúc bên cạnh (được vượt tới 600)
+KHÔNG overlap · trang phân mục -> content_type "section_divider", lọc lúc tìm, KHÔNG xoá
 ```
 
 ```json
-{"chunk_id": "tetnguyendan#p002", "page_no": 2, "content_type": "content",
- "text_enriched": "[trang 2/10] Khởi Nguồn Nam Mới\nMùng 1\nTháng Giêng Âm Lịch\n...",
- "block_ids": ["p002.b00", "p002.b01", "p002.b02", "p002.b03"],
- "provenance": {"text_layer": 4}}
+{"chunk_id": "thoi_gian_lam_viec_chinh_sach_nhan_su#p007", "page_no": 7,
+ "section_title": "LÀM THÊM GIỜ", "vector_role": "page", "content_type": "content",
+ "text_enriched": "[LÀM THÊM GIỜ · CÁCH TÍNH LÀM THÊM GIỜ · trang 7/17] CÁCH TÍNH LÀM THÊM GIỜ\n|  | GIỜ LÀM THÊM BAN NGÀY | ...",
+ "token_count": 237, "block_ids": ["p007.v00", "p007.v01", "p007.v02"],
+ "provenance": {"text_layer": 1, "vlm": 2}}
 ```
+
+Trang bị cắt thì chunk mang đuôi `.1`, `.2` (`…#p009.1`); vector phụ của ảnh mang id block
+(`…#p019.v02`). Mọi chunk đều trỏ về `page_no` — điều hướng theo TRANG.
 
 Chữ và vector ở **hai file riêng**, nối bằng thứ tự hàng:
 
 ```
 out/kb/<ten>/chunks.json                              chữ + metadata
-out/kb/<ten>/vectors__text-embedding-3-small.npy      ma trận (số chunk × 1536)
+out/kb/<ten>/vectors__text-embedding-3-small.npy      ma trận (số chunk × 1536), chuẩn hoá L2
 out/kb/<ten>/vectors__text-embedding-3-small.json     rows[i] = chunk_id của hàng i
+out/kb/.embed_cache/<model>/<sha1>.npy                cache dùng chung, khoá = hash(model + chữ)
 ```
 
 Tên model nằm trong tên file vector: đổi model mà quên nhúng lại thì tìm kiếm trả rác
@@ -138,10 +161,57 @@ Tên model nằm trong tên file vector: đổi model mà quên nhúng lại th�
 chạy. Kho chỉ lo nhánh vector và là BẢN SAO của `.npy` — lệch với `chunks.json` thì tự nạp
 lại, xoá đi thì tự dựng lại, không gọi API.
 
-Tìm = **vector + BM25, gộp bằng RRF**. Trang phân mục (`content_type: section_divider`)
-được đánh dấu, lọc lúc tìm, **không xoá**.
+**Tìm** (`src/kb/search.py`) = hai nhánh, gộp bằng RRF:
 
-### Bảng phát âm — `pronunciation.json`
+```
+câu hỏi ─┬─ dense: nhúng câu hỏi (API) → kho vector → top 50 ─┐
+         └─ sparse: BM25 (src/kb/sparse/, dựng trong RAM) → top 50 ┴─ RRF K=15, dense 1 : sparse 1
+                                                                    → gộp theo trang (điểm max)
+                                                                    → top-5
+```
+
+Hằng số RRF đo bằng `scripts/tune.sh`, không đoán. Hỏi nội dung thì **lọc** trang phân mục;
+hỏi điều hướng ("quay lại phần…") thì **không lọc** — trang mở chương là đáp án đúng.
+API nhúng lỗi lúc chạy → tự lùi về chỉ BM25.
+
+### ⑤ `deck_map.txt` — bản đồ bộ slide
+
+```
+Bộ slide thoi_gian_lam_viec_chinh_sach_nhan_su · 17 trang · 5 chương
+- trang 1–2: Mở đầu (trước chương 1, không phải chương)
+- trang 3: Chương 1: THỜI GIAN LÀM VIỆC
+- trang 4–5: Chương 2: CHẤM CÔNG
+...
+```
+
+TRẠNG THÁI gọn đưa thẳng vào prompt runtime — LLM biết bộ slide có những phần nào mà không
+phải nhồi cả deck. Dựng bằng luật từ `sections` + `slide_type`, không gọi model.
+
+### S4 `Scenario` — robot NÓI gì
+
+Chi tiết: [spec/scenario.md](../spec/scenario.md) · code: `src/scenario/`
+
+```
+Scenario        doc_id · model · prompt_hash · pronunciation_hash
+ └─ slides[]    page_no · page_hash · slide_type · flags[] · passes · edited_by
+     └─ sentences[]   kind · text · grounding · syllables · prosody
+```
+
+```json
+{"kind": "delivery", "text": "Cách tính cụ thể ra sao?",
+ "grounding": {"type": "structure", "ref": null}, "syllables": 6}
+{"kind": "content", "text": "Làm thêm ngày lễ tết tính hệ số 3 ban ngày và hệ số 3.9 ban đêm.",
+ "grounding": {"type": "kb_chunk", "ref": "p007.v01"}, "syllables": 19,
+ "prosody": {"emphasis": ["3", "3.9"], "pause_before_ms": 0, "speed": 1.0}}
+```
+
+- `content` = câu mang thông tin → **bắt buộc** trỏ về một block của trang. Không trỏ = cờ đỏ.
+- `delivery` = câu dẫn dắt → không được mang sự thật mới; code kiểm (không số, không thuật ngữ).
+- Pass 1 viết; **pass 2 chỉ chạy cho trang trượt bộ kiểm** (đủ ý, nhịp, văn nói…), giữ bản ít lỗi hơn.
+- `syllables` do **code** đếm theo `data/pronunciation.json`, không để LLM khai.
+- `edited_by: "nguoi"` = đã sửa tay → máy không bao giờ viết đè.
+
+### Bảng phát âm — `data/pronunciation.json`
 
 Chi tiết: [spec/pronunciation.md](../spec/pronunciation.md)
 
@@ -149,47 +219,23 @@ Chi tiết: [spec/pronunciation.md](../spec/pronunciation.md)
 {"terms": {"CBNV": {"say": "xê bê en vê", "mode": "spell", "by": "auto"}}}
 ```
 
-`data/pronunciation.json` — **MỘT kho cho mọi deck**. Robot đọc thuật ngữ thế nào, và ⑤
-**đếm âm tiết theo đúng kho này**. Sinh TỪ KỊCH BẢN (⑥), không từ chunk: chỉ từ robot thật
-sự nói mới cần cách đọc. `by: "auto"` = máy đề xuất, chưa ai duyệt; `"nguoi"` = đã chốt,
-chạy lại ⑥ không bao giờ đè.
-
-### ⑤ `Scenario` — robot NÓI gì
-
-Chi tiết: [spec/scenario.md](../spec/scenario.md)
-
-```
-Scenario        doc_id · model · prompt_hash · pronunciation_hash
- └─ slides[]    page_no · page_hash · slide_type · flags[] · edited_by
-     └─ sentences[]   kind · text · grounding · syllables · prosody
-```
-
-```json
-{"kind": "delivery", "text": "Vậy, mốc nào quan trọng trong dịp này?",
- "grounding": {"type": "structure", "ref": null}, "syllables": 8}
-{"kind": "content",  "text": "Tháng Giêng âm lịch là tên gọi của tháng này.",
- "grounding": {"type": "kb_chunk", "ref": "p002.b02"}, "syllables": 10,
- "prosody": {"emphasis": [], "pause_before_ms": 300, "speed": 1.0}}
-```
-
-- `content` = câu mang thông tin → **bắt buộc** trỏ về một block. Không trỏ = cờ đỏ.
-- `delivery` = câu dẫn dắt, chuyển ý → không được mang sự thật mới; code kiểm (không số…).
-- `syllables` do **code** đếm, không để LLM khai.
-- `edited_by: "nguoi"` = đã sửa tay → máy không bao giờ viết đè.
+**MỘT kho cho mọi deck.** Sinh TỪ KỊCH BẢN (`extract_terms.py`), không từ chunk: chỉ từ robot
+thật sự nói mới cần cách đọc. `by: "auto"` = máy đề xuất; `"nguoi"` = đã chốt, chạy lại
+không bao giờ đè. Sửa kho rồi chạy lại S4 = chỉ đếm lại âm tiết, không gọi LLM.
 
 ---
 
 ## 4. Các tầng nối nhau bằng `block_id`
 
 ```
- ParsedDocument               KB                           Scenario
- page 2                       chunk tetnguyendan#p002      trang 2
-  p002.b02 "Tháng Giêng  ◄─── block_ids: [.., p002.b02,..]  câu "Tháng Giêng âm lịch là…"
-            Âm Lịch"     ◄──────────────────────────────── grounding.ref: "p002.b02"
+ ParsedDocument               KB                                  Scenario
+ page 7                       chunk …#p007                        trang 7
+  p007.v01 (bảng hệ số)  ◄─── block_ids: [p007.v00, p007.v01, …]  câu "Làm thêm ngày lễ tết… hệ số 3"
+                         ◄──────────────────────────────────────── grounding.ref: "p007.v01"
 ```
 
 Từ bất kỳ câu robot nói hay kết quả tìm kiếm nào cũng lần ngược được về đúng mẩu trên
-slide: nó là chữ thật (`text_layer`) hay máy tả (`vlm`), nằm ở đâu (`polygon`).
+slide: nó là chữ thật (`text_layer`) hay máy đọc từ ảnh (`vlm`), nằm ở đâu (`polygon`).
 
 ---
 
@@ -197,26 +243,38 @@ slide: nó là chữ thật (`text_layer`) hay máy tả (`vlm`), nằm ở đâ
 
 | Cơ chế | Nằm ở | Tác dụng |
 |---|---|---|
-| `page_hash` = hash(nội dung + vị trí mọi block của trang) | `ParsedPage` | ⑤ chỉ viết lại trang có hash đổi |
-| cache vector theo hash của `text_enriched` | `out/kb/.embed_cache/` | chữ không đổi → 0 lần gọi API |
+| khoá trang = hash(model + mẩu chữ của trang) | `layout.json` `pages` | chữ trang không đổi → không gọi lại VLM. Sửa prompt KHÔNG làm cache mất hiệu lực — log ③ báo `prompt cu [...]` |
+| khoá bảng = hash(model + id + khung bảng) | `layout.json` `tables` | bảng không đổi → không gọi lại |
+| `page_hash` = hash(nội dung + vị trí mọi block) | `ParsedPage` | S4 chỉ viết lại trang có hash đổi |
+| cache vector theo hash(model + `text_enriched`) | `out/kb/.embed_cache/` | chữ không đổi → 0 lần gọi API |
+| `sync` so metadata từng chunk | kho vector, BM25 | lệch thì nạp lại từ `.npy`, khớp thì thôi |
 | `edited_by: "nguoi"` | `SlideScript` | câu người sửa không bị máy ghi đè |
 | `pronunciation_hash` | `Scenario` | đổi bảng phát âm → biết timing đã lệch |
 
-Đo được: build lại `tetnguyendan` sau khi sửa toạ độ → ④ **10/10 vector từ cache, 0 lần
-gọi API**; ⑤ viết lại cả 10 trang vì toạ độ nằm trong `page_hash`.
+Đo được (2026-10-02): chạy lại `run_deck.sh` trọn luồng cho cả hai deck → **0 lần gọi
+VLM, 0 lần gọi API nhúng**, Onboarding 22 giây.
 
 ---
 
-## 6. Số hiện tại
+## 6. Số hiện tại (2026-10-02)
 
-| | `3_datavisualization` (.pdf) | `tetnguyendan` (.pptx) |
+Hai deck đang làm:
+
+| | Onboarding Kit | Thời gian làm việc & Chính sách nhân sự |
 |---|---|---|
-| trang | 40 | 10 |
-| block (chữ + ảnh) | 138 | 58 |
-| ảnh VLM mô tả được | 27 / 71 | 6 / 15 |
-| chương | 7 | 0 (không có thanh header) |
-| chunk (tìm được) | 52 (45) | 10 (10) |
-| kịch bản | 40 trang | 10 trang · 0 câu thiếu nguồn · 0 cờ đỏ |
+| trang | 51 | 17 |
+| block | 272 | 71 |
+| bố cục VLM / dùng docling | 51 / 0 | 17 / 0 |
+| bảng · ảnh có mô tả · link ẩn | 18 · 26 · 57 | 1 · 3 · 1 |
+| chương (từ mục lục) | 5 | 5 |
+| cờ cho người duyệt | 0 | 0 |
+| chunk (tìm được) | 104 (104) — 85 trang + 19 ảnh, 25 trang bị cắt | 18 (17) — 1 trang phân mục |
+| eval hybrid top-1 / top-5 | 157/200 · 195/200 | 28/30 · 30/30 |
+| eval dense / sparse top-1 | 131 / 145 | 29 / 29 |
+| kịch bản | chưa sinh | 17 trang · 114 câu · ~10.8 phút · 0 câu thiếu nguồn · 0 cờ đỏ |
+
+⚠️ Toàn bộ câu eval do AI viết rồi tự chấm — số **thiên vị**, chưa đủ để kết luận. Cần bộ
+câu người thật viết (giọng nói, có dấu, văn nói đủ chữ).
 
 ---
 
@@ -224,10 +282,10 @@ gọi API**; ⑤ viết lại cả 10 trang vì toạ độ nằm trong `page_ha
 
 | | Việc | Ghi chú |
 |---|---|---|
-| ⬜ S2 | `time_budget` theo chương | luật, không gọi model. Hiện trần số câu theo `slide_type` là phanh duy nhất |
+| ⬜ S4 Onboarding | kịch bản 51 trang | `src/runtime/cli.py` (thuyết trình thử) cần `scenario.json` |
+| ⚠️ nhịp kịch bản | độ lệch chuẩn âm tiết/câu ≥ 6 mỗi trang | Thời gian làm việc: cả deck 6.8 nhưng 9/17 trang còn cờ `monotone_rhythm` |
+| ⬜ S2 | `time_budget` theo chương | luật, không gọi model. S4 hiện không có trần độ dài trang — đi theo nội dung |
 | ⬜ `slide_type` đủ loại | `title` · `agenda` | đã có `section_divider` · `exercise` · `content` |
-| ⬜ S6a | `deck_map.txt` (~150 token) cho prompt runtime | audit đã có |
 | ⬜ S6b | TTS theo từng câu, một giọng duy nhất | |
 | ⬜ S7 | người duyệt **chỉ phần bị cờ**, đọc + nghe | |
-| ⚠️ nhịp kịch bản | độ lệch chuẩn âm tiết/câu ≥ 6 | `tetnguyendan` mới 4.0 — câu dài đều nhau, nghe đều đều |
-| ⏳ reranker | confidence gate khi điều hướng | API key chưa được bật quyền `rerank` (403) |
+| 🚫 reranker | đã chốt bỏ (2026-10-01) | cố định top-5; cải thiện ở RRF / dữ liệu / viết lại câu hỏi |

@@ -4,9 +4,12 @@
 **Output:** `RawSlide[]` + `render/s{n}.png`
 **Model:** không có. Thuần parsing.
 
-> **v0 KHÔNG chạy theo file này.** Đang nhận **PDF**, parse bằng `docling`, mô tả ảnh
-> gọi VLM **qua API**. Output là `ParsedDocument`, không phải `RawSlide[]`.
-> Code: [`src/parsing/`](../../src/parsing/) · Spec: [parsed-document.md](../spec/parsed-document.md)
+> **v0 KHÔNG chạy theo file này** — file này là thiết kế đích cho `.pptx`. v0 nhận **PDF**
+> (hoặc `.pptx` kèm `.pdf` cùng tên), parse bằng `docling` (tắt OCR), rồi VLM **qua API**
+> nhìn ảnh CẢ trang để sắp mẩu chữ thành khối (chỉ trỏ id, chữ vẫn là text layer) và chép
+> bảng từ ảnh bảng. Output là `ParsedDocument`, không phải `RawSlide[]`.
+> Luồng v0: [00-overview §3.3](./00-overview.md) · [01-hien-trang](./01-hien-trang.md) ·
+> code: [`src/parsing/`](../../src/parsing/) · spec: [parsed-document.md](../spec/parsed-document.md)
 >
 > Mất so với bản pptx dưới đây: `chart_data`, `tables`, `build_steps` — chúng đến từ
 > XML mà PDF không có. Hệ quả cho NT2 xem [CLAUDE.md §3.0](../../CLAUDE.md).

@@ -23,13 +23,14 @@ def _empty_page(doc: ParsedDocument) -> list[Flag]:
     """Không chữ (ngoài tiêu đề) mà cũng không mô tả ảnh nào -> vào KB gần như rỗng.
 
     Trang phân mục rỗng là ĐÚNG thiết kế — không bắn (trước đây bắn oan 7 cờ error,
-    CLI thoát mã 1, CI đỏ giả).
+    CLI thoát mã 1, CI đỏ giả). Trang chỉ có tiêu đề + MỘT BẢNG có chữ cũng không rỗng —
+    Onboarding p21/p22/p49/p50 (bảng chấm công, danh mục văn bản ATTT) từng bị bắn oan.
     """
     out: list[Flag] = []
     for page in doc.pages:
         if not page.is_text_starved or page.slide_type == "section_divider":
             continue
-        if any(im.content for im in page.images):
+        if any(im.content for im in page.images) or any(t.content for t in page.tables):
             continue
         out.append(
             Flag(

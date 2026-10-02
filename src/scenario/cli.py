@@ -27,27 +27,14 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from parsing.models import ParsedDocument
 from llm import DEFAULT_MODEL
+from parsing.cli import parse_pages
+from parsing.models import ParsedDocument
 from scenario.generate import load_prompt, render_prompt, run_deck
 from scenario.models import Scenario, SlideScript
 from scenario.syllables import STORE, Pronunciation
 
 log = logging.getLogger("scenario")
-
-
-def parse_pages(spec: str | None) -> set[int] | None:
-    if not spec:
-        return None
-    out: set[int] = set()
-    for part in spec.split(","):
-        part = part.strip()
-        if "-" in part:
-            lo, hi = part.split("-", 1)
-            out.update(range(int(lo), int(hi) + 1))
-        elif part:
-            out.add(int(part))
-    return out
 
 
 def show(sc: Scenario, pages: set[int] | None) -> None:
@@ -142,7 +129,7 @@ def main(argv: list[str] | None = None) -> int:
     deck_dir = Path("out/deck") / doc.doc_id
     out = Path(args.out) if args.out else deck_dir / "scenario.json"
     pron = Pronunciation.load(args.pron)
-    pages = parse_pages(args.page)
+    pages = set(parse_pages(args.page)) if args.page else None
 
     old: Scenario | None = None
     if out.exists():

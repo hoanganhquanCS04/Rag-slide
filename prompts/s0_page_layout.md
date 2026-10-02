@@ -26,6 +26,9 @@ Các loại khối:
   vào một khối theo đúng thứ tự đọc.
 - `{"kind": "list", "items": [["T6"], ["T7", "T8"]]}` — bó gạch đầu dòng. Mỗi phần tử là MỘT
   gạch đầu dòng; một gạch có thể gồm nhiều mẩu.
+- Trong `title` / `text` / `list`, chỗ nào chữ nằm TRONG ẢNH mà không có mẩu T nào chứa nó thì
+  thay id bằng `{"read": "chữ"}` (xem luật 9), vd
+  `{"kind": "list", "items": [[{"read": "Không quá 40 giờ trong 01 tháng"}]]}`.
 - `{"kind": "table", "source": "B1"}` — GIỮ NGUYÊN bảng B1 khi chữ trong bảng đã đúng cột, đúng hàng.
 - `{"kind": "table", "source": "B1", "rows": [[ô, ô], [ô, ô]]}` — dựng lại bảng (bảng B1 sai
   cột, rỗng, hoặc bảng nằm trong ảnh P). `source` = vùng B hoặc P chứa bảng. Hàng đầu là header.
@@ -56,3 +59,9 @@ Luật:
 7. `describe` viết tiếng Việt, gọi đối tượng bằng TÊN. Cấm "hình này", "nó", "như trên",
    "ở phần trước". Không mở đầu bằng "Hình ảnh này…".
 8. Chỉ ghi cái nhìn thấy trên trang. Không suy diễn, không thêm kiến thức ngoài trang.
+9. Chữ nhìn thấy trên ảnh mà KHÔNG có mẩu T nào chứa nó và cũng KHÔNG thuộc bảng / hình nào
+   bạn đã dựng (vd dòng "Lưu ý" nằm dưới một bảng dán, ghi chú trong ảnh chụp màn hình): KHÔNG
+   được bỏ. Ghi thành khối `title` / `text` / `list` với phần tử `{"read": "chữ"}`, đặt đúng
+   thứ tự đọc. Chép nguyên văn, giữ nguyên số. Không bao giờ trả khối rỗng (`"ids": []`).
+   Chữ ĐÃ có mẩu T thì luôn trỏ id — KHÔNG `read` lại, KHÔNG đưa mẩu đó vào `skip` (kể cả
+   tiêu đề in đậm, đề mục của một nhóm).

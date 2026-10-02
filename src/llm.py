@@ -60,12 +60,15 @@ class LLM:
         self.log_dir = log_dir
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.n_calls = 0
+        self.json_mode = True                      # cổng không có kênh JSON mode -> tắt, nhớ cho cả phiên
 
     async def chat(self, messages: list[dict], tag: str) -> dict:
-        payload = {"model": self.model, "messages": messages,
-                   "response_format": {"type": "json_object"}, **self.extra}
+        payload = {"model": self.model, "messages": messages, **self.extra}
+        if self.json_mode:
+            payload["response_format"] = {"type": "json_object"}
         last = ""
-        for attempt in range(self.retry):
+        attempt = 0
+        while attempt < self.retry:
             t0 = time.perf_counter()
             try:
                 r = await self.client.post(self.url, json=payload)
@@ -79,11 +82,24 @@ class LLM:
                         ensure_ascii=False, indent=2), encoding="utf-8")
                     return json.loads(_unfence(content))
                 last = f"HTTP {r.status_code}: {r.text[:200]}"
+                if "response_format" in payload and ("get_channel_failed" in r.text or r.status_code == 503):
+                    # Cổng (key nhóm "starter") không có kênh nào chạy JSON mode cho model này —
+                    # đo 2026-10-01: cùng request bỏ response_format thì qua. 2026-10-02 cổng đổi
+                    # cách báo: flash-lite + JSON mode -> 503 "temporarily unavailable", bỏ JSON mode
+                    # thì 200. Prompt vẫn đòi JSON, _unfence + json.loads vẫn kiểm.
+                    # Gửi lại NGAY, không tính một lần thử: runtime chỉ có retry=1, tính vào là hết lượt.
+                    if self.json_mode:                     # báo một lần mỗi phiên, không mỗi request
+                        log.warning("  %s: cong khong chay JSON mode cho %s -> bo response_format cho ca phien",
+                                    tag, self.model)
+                    self.json_mode = False
+                    payload.pop("response_format")
+                    continue
             except Exception as e:                         # mạng, timeout, JSON hỏng
                 last = f"{type(e).__name__}: {e}"
-            if attempt + 1 < self.retry:
-                wait = self.backoff * 2 ** attempt
-                log.warning("  %s loi (%d/%d) %s -> doi %.0fs", tag, attempt + 1, self.retry, last, wait)
+            attempt += 1
+            if attempt < self.retry:
+                wait = self.backoff * 2 ** (attempt - 1)
+                log.warning("  %s loi (%d/%d) %s -> doi %.0fs", tag, attempt, self.retry, last, wait)
                 await asyncio.sleep(wait)
         raise RuntimeError(last)
 

@@ -24,9 +24,9 @@ from __future__ import annotations
 
 import re
 from abc import ABC, abstractmethod
-from typing import Any, ClassVar
+from typing import ClassVar
 
-from kb.models import ChunkSet, KBChunk
+from kb.models import ChunkSet
 from kb.store.base import Hit, Where
 
 # Tách dính liền của code: plt.savefig(x) -> plt savefig x ; np.arange -> np arange
@@ -46,22 +46,8 @@ def tokenize(text: str) -> list[str]:
     return [t for t in _SPLIT.split(text.lower()) if len(t) > 1 or t.isdigit()]
 
 
-def filter_metadata(c: KBChunk) -> dict[str, Any]:
-    """Các trường `where` lọc được — cùng tên với `chunk_metadata` của kho vector."""
-    meta = {
-        "doc_id": c.doc_id,
-        "page_no": c.page_no,
-        "section_id": c.section_id,
-        "vector_role": c.vector_role,
-        "content_type": c.content_type,
-        "is_searchable": c.is_searchable,
-    }
-    return {k: v for k, v in meta.items() if v is not None}
-
-
 class SparseIndex(ABC):
     kind: ClassVar[str]
-    persistent: ClassVar[bool]       # False = tắt là mất, phải dựng lại mỗi lần chạy
 
     @abstractmethod
     def sync(self, cs: ChunkSet) -> int:

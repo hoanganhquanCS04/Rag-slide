@@ -1,12 +1,13 @@
 # Tài liệu hệ thống
 
 > **HIỆN TRẠNG v0 — đọc trước.** Bài toán: robot thuyết trình và trả lời câu hỏi từ
-> **một file PDF duy nhất**, file đó vừa là deck vừa là KB. Lưu file JSON trên đĩa,
-> chưa có vector DB, **không chạy model local nào** (VLM và embedding đều qua API).
+> **một file PDF duy nhất**, file đó vừa là deck vừa là KB. Lưu file JSON trên đĩa + kho
+> vector Chroma (hoặc RAM), **không chạy model local nào** (VLM, LLM, embedding đều qua API).
 >
 > So với bản thiết kế cũ: **S1 đã bỏ** (gộp vào S0), **S3 đã bỏ** (align vào chính mình),
 > **multi-field embed đã bỏ**. Lý do ở [CLAUDE.md §5](../CLAUDE.md).
-> `runtime/` vẫn là thiết kế đích, chưa có dòng code nào.
+> `runtime/` mới có bản chữ chạy thử (`src/runtime/`, `scripts/try_ask.py`) — chưa giọng
+> nói, chưa ngắt lời.
 
 | Nhóm | Nội dung |
 |---|---|
@@ -18,13 +19,15 @@
 ## Đã code đến đâu
 
 ```
-✅ PDF → ParsedDocument     src/parsing/     40 trang · 7 section · patch tay
-✅ ParsedDocument → chunk   src/kb/chunk.py  52 chunk
-✅ chunk → vector qua API   src/kb/embed.py  1536 chiều · cache sha1
-✅ tìm hybrid + đo          src/kb/{search,audit,eval}.py
-🚫 S1, S3                   BỎ — xem bảng dưới
-⬜ S2 S4 S6b S7             chưa có dòng nào
-⬜ Runtime R1–R7            chưa có dòng nào
+✅ S0  file raw → ParsedDocument   src/parsing/          docling + VLM bố cục trang + chép bảng
+✅ S5  chunk + vector + kho        src/kb/               1536 chiều · cache · chroma | inmem
+✅     tìm hybrid + đo             src/kb/{search,eval,tune,audit}.py
+✅ S6a deck_map                    src/kb/deck_map.py
+   ─── cả bốn dòng trên: MỘT lệnh  bash scripts/run_deck.sh "<file>"
+🟡 S4  kịch bản                    src/scenario/         chạy riêng, nhịp chưa đạt gate
+🟡     runtime bản chữ             src/runtime/          hỏi đáp + thuyết trình thử trong terminal
+🚫 S1, S3                          BỎ — xem bảng dưới
+⬜ S2 time_budget · S6b TTS · S7 duyệt · R5 giọng nói · R7 ngắt lời
 ```
 
 | Spec | Nội dung |
@@ -48,10 +51,11 @@ Muốn biết thiết kế đích: đọc [`offline/00-overview.md`](./offline/0
 | Trạng thái | File | Một câu |
 |---|---|---|
 | — | [00-overview](./offline/00-overview.md) | Bốn nguyên tắc · kiến trúc v0 **một file một index** · sơ đồ từng stage · incremental |
-| ✅ | [S0 Ingest](./offline/s0-ingest.md) | PDF qua docling + VLM mô tả ảnh qua API · `sections` và `slide_type` bằng **luật** |
-| ✅ | [S5 KB Construction](./offline/s5-kb-construction.md) | Chunk theo trang + embed qua API + hybrid dense/BM25 |
+| ✅ | [S0 Ingest](./offline/s0-ingest.md) | PDF qua docling + VLM nhìn cả trang sắp bố cục, chép bảng · `sections` và `slide_type` bằng **luật** |
+| ✅ | [S5 KB Construction](./offline/s5-kb-construction.md) | Chunk theo trang + embed qua API + hybrid dense/BM25 gộp RRF |
+| ✅ | S6a deck_map | Bản đồ chương ~180 token cho prompt runtime — luật, không gọi model |
 | ⬜ | [S2 Deck Structure](./offline/s2-deck-structure.md) | Chỉ còn `time_budget` — `sections` đã có từ S0 |
-| ⬜ | [S4 Scenario](./offline/s4-scenario.md) | Kịch bản nói · `content` vs `delivery` · 7 đòn bẩy tự nhiên |
+| 🟡 | [S4 Scenario](./offline/s4-scenario.md) | Kịch bản nói · `content` vs `delivery` · 7 đòn bẩy tự nhiên — đã code, chạy riêng |
 | ⬜ | S6b Precompute | TTS theo câu, một giọng duy nhất, qa_cache, bản nghe thử |
 | ⬜ | [S7 HITL Review](./offline/s7-hitl-review.md) | Duyệt **chỉ phần bị flag** · vòng ĐỌC + vòng **NGHE** (MOS) |
 | 🚫 | ~~S1 Slide Understanding~~ | **BỎ** — gộp vào S0. `message`/`relations` sinh ra để nhồi prompt, không dùng |

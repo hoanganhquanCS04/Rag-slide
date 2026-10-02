@@ -22,7 +22,7 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Literal
+from typing import Hashable, Literal, TypeVar
 
 import numpy as np
 
@@ -31,16 +31,37 @@ if __package__ in (None, ""):
 
 from kb.embed import MODEL_ID, Embedder, vectors_file
 from kb.models import ChunkSet, KBChunk, SearchHit
-from kb.sparse import SparseIndex, create_sparse
-from kb.store import VectorStore, create_store
+from kb.sparse import create_sparse
+from kb.store import create_store
 
 log = logging.getLogger(__name__)
 
-RRF_K = 60          # hằng số gốc của paper RRF (Cormack 2009), không phải số bịa
+# Gộp RRF — ĐO bằng `scripts/tune.sh`, không đoán. 2026-10-02, Onboarding 200 câu, chunk cắt theo
+# đề mục + bảng đọc từ ảnh: K=15 1:1 -> top-1/3/5 = 157/188/195 (K=60 của paper Cormack 2009:
+# 157/188/192). Kiểm chéo chia đôi bộ câu hỏi cũng hay chọn K=15 1:1.
+RRF_K = 15
+W_DENSE = 1.0       # trọng số từng nhánh khi gộp
+W_SPARSE = 1.0
 TOP_K = 5           # khớp "top-k = 5" của §6
 POOL = 50           # lấy sâu ở mỗi nhánh rồi mới gộp — gộp trên top-5 là mất tín hiệu
 
 Mode = Literal["hybrid", "dense", "sparse"]
+Key = TypeVar("Key", bound=Hashable)
+
+
+def rrf_fuse(r_dense: dict[Key, int], r_sparse: dict[Key, int], *, k: int = RRF_K,
+             w_dense: float = W_DENSE, w_sparse: float = W_SPARSE) -> dict[Key, float]:
+    """RRF có trọng số: điểm = w_dense/(k + hạng dense) + w_sparse/(k + hạng sparse).
+
+    Chỉ nhìn THỨ HẠNG, vứt điểm gốc. Không lọt pool của nhánh nào thì nhánh đó không góp gì.
+    Nhân cả hai trọng số cùng một số thì thứ hạng không đổi -> chỉ TỈ LỆ dense:sparse có nghĩa.
+    `Searcher.search` và `tune.py` cùng gọi hàm này -> bảng tune đo đúng thứ search chạy.
+    """
+    out: dict[Key, float] = {}
+    for ranks, w in ((r_dense, w_dense), (r_sparse, w_sparse)):
+        for key, r in ranks.items():
+            out[key] = out.get(key, 0.0) + w / (k + r)
+    return out
 
 
 class Searcher:
@@ -52,17 +73,16 @@ class Searcher:
     """
 
     def __init__(self, chunks_path: str | Path, *, vectors_path: str | Path | None = None,
-                 model_id: str = MODEL_ID, embed_retry: int = 4,
-                 store: VectorStore | None = None, sparse: SparseIndex | None = None):
+                 model_id: str = MODEL_ID, embed_retry: int = 4):
         cp = Path(chunks_path)
         self.cs = ChunkSet.model_validate(json.loads(cp.read_text(encoding="utf-8")))
         self.chunks: list[KBChunk] = self.cs.chunks
         self._pos = {c.chunk_id: i for i, c in enumerate(self.chunks)}
 
         self.vectors_path = Path(vectors_path) if vectors_path else vectors_file(cp.parent, model_id)
-        self.store = store or create_store(model_id=model_id)
+        self.store = create_store(model_id=model_id)
         n_sync = self.store.sync(self.cs, self.vectors_path)
-        self.sparse = sparse or create_sparse()
+        self.sparse = create_sparse()
         self.sparse.sync(self.cs)
 
         self.model_id = model_id
@@ -81,16 +101,20 @@ class Searcher:
 
     # ------------------------------------------------------------------ tìm
 
-    def search(self, query: str, *, k: int = TOP_K, mode: Mode = "hybrid",
-               filter_dividers: bool = True, group_by_page: bool = True) -> list[SearchHit]:
-        n = len(self.chunks)
-        if not any(c.is_searchable or not filter_dividers for c in self.chunks):
-            return []
-        # Lọc TRƯỚC khi xếp hạng, CÙNG một `where` cho hai nhánh — để hạng của hai nhánh
-        # tính trên cùng một tập ứng viên: đúng tài liệu này, lọc phân mục nếu được yêu cầu.
-        where = {"doc_id": self.cs.doc_id, **({"is_searchable": True} if filter_dividers else {})}
+    def where(self, filter_dividers: bool = True) -> dict[str, object]:
+        """Lọc TRƯỚC khi xếp hạng, CÙNG một `where` cho hai nhánh — để hạng của hai nhánh tính
+        trên cùng một tập ứng viên: đúng tài liệu này, lọc phân mục nếu được yêu cầu."""
+        return {"doc_id": self.cs.doc_id, **({"is_searchable": True} if filter_dividers else {})}
 
-        # Chunk ngoài pool thì điểm = 0 — điểm chỉ để debug, RRF không dùng điểm.
+    def ranks(self, query: str, *, mode: Mode = "hybrid", filter_dividers: bool = True,
+              ) -> tuple[dict[int, int], dict[int, int], np.ndarray, np.ndarray]:
+        """Pool của từng nhánh -> (hạng dense, hạng sparse, điểm dense, điểm sparse), key = vị trí chunk.
+
+        Tách khỏi `search` để `tune.py` lấy pool MỘT lần rồi thử mọi cách gộp trên đúng pool đó.
+        Chunk ngoài pool thì điểm = 0 — điểm chỉ để debug, RRF không dùng điểm.
+        """
+        n = len(self.chunks)
+        where = self.where(filter_dividers)
         s_dense = np.zeros(n, dtype=np.float32)
         s_sparse = np.zeros(n, dtype=np.float32)
         r_dense: dict[int, int] = {}
@@ -108,19 +132,22 @@ class Searcher:
                 if (i := self._pos.get(cid)) is not None:
                     s_sparse[i] = s
                     r_sparse[i] = r
+        return r_dense, r_sparse, s_dense, s_sparse
 
-        # RRF: chỉ nhìn thứ hạng, vứt điểm đi. Không lọt pool thì không góp gì.
-        rrf: dict[int, float] = {}
-        for ranks in (r_dense, r_sparse):
-            for i, r in ranks.items():
-                rrf[i] = rrf.get(i, 0.0) + 1.0 / (RRF_K + r)
+    def search(self, query: str, *, k: int = TOP_K, mode: Mode = "hybrid",
+               filter_dividers: bool = True, group_by_page: bool = True,
+               rrf_k: int = RRF_K, w_dense: float = W_DENSE, w_sparse: float = W_SPARSE,
+               ) -> list[SearchHit]:
+        if not any(c.is_searchable or not filter_dividers for c in self.chunks):
+            return []
+        r_dense, r_sparse, s_dense, s_sparse = self.ranks(query, mode=mode,
+                                                          filter_dividers=filter_dividers)
+        rrf = rrf_fuse(r_dense, r_sparse, k=rrf_k, w_dense=w_dense, w_sparse=w_sparse)
 
         hits = [
             SearchHit(
                 chunk_id=self.chunks[i].chunk_id,
                 page_no=self.chunks[i].page_no,
-                section_id=self.chunks[i].section_id,
-                section_title=self.chunks[i].section_title,
                 score=sc,
                 rank_dense=r_dense.get(i),
                 rank_sparse=r_sparse.get(i),

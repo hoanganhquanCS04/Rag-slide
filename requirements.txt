@@ -4,12 +4,12 @@
 #
 # KHÔNG có model local nào: VLM, embedding, LLM đều qua API (.env).
 
-# S0 parse — layout + TableFormer chạy local, VLM mô tả ảnh qua API
+# S0 parse — layout + TableFormer chạy local, VLM sắp bố cục trang + chép bảng qua API
 docling==2.129.0
 docling-core==2.97.2
 python-pptx==1.0.2        # docling đọc .pptx
-pypdfium2==5.13.0         # render trang PDF ra ảnh (scripts/show_page.py)
-pillow==12.3.0            # vẽ khung bbox để soi mắt
+pypdfium2==5.13.0         # vẽ ảnh trang / cắt ảnh bảng cho VLM, đọc link ẩn trong PDF
+pillow==12.3.0            # pypdfium2 đổi ảnh trang sang JPEG gửi VLM
 
 # Schema + gọi API
 pydantic==2.13.5

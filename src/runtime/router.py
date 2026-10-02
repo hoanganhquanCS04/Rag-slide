@@ -26,6 +26,7 @@ from runtime.models import Context, Reply, RuntimeConfig, Turn
 from runtime.retrieve import Retriever
 
 PROMPT_PATH = ROOT / "prompts" / "r_router.md"
+QA_PROMPT_PATH = ROOT / "prompts" / "r_qa.md"       # chỉ hỏi đáp: không trang đang chiếu, không điều hướng
 
 # Robot nói gì khi không trả lời — KHÔNG lặp lại câu hỏi (đọc to câu troll là troll thành công)
 ESCALATE_TEXT = {
@@ -46,8 +47,10 @@ class Router:
         self.cfg = cfg
         self.deck_map = deck_map.strip()
         self.template = PROMPT_PATH.read_text(encoding="utf-8")
+        self.qa_template = QA_PROMPT_PATH.read_text(encoding="utf-8")
         self.llm = LLM(model, log_dir, retry=cfg.llm_retry, timeout=cfg.llm_timeout_s,
                        extra=cfg.llm_extra)
+        self.llm.json_mode = cfg.json_mode
 
     async def handle(self, question: str, at_slide: int,
                      history: list[Turn]) -> tuple[Reply, dict[str, int]]:
@@ -69,6 +72,47 @@ class Router:
             return self._fallback(qa or nav, f"llm_error: {str(e)[:160]}"), ms
         ms["llm"] = _ms(t1)
         return self._check(raw, current + found, nav), ms
+
+    async def answer(self, question: str,
+                     history: list[Turn]) -> tuple[Reply, dict[str, int], dict]:
+        """CHỈ hỏi đáp (scripts/try_ask.py): không trang đang chiếu, không điều hướng.
+
+        Tìm (lọc trang phân mục) -> top `max_contexts` trang vào prompt r_qa.md -> 1 lần LLM ->
+        code kiểm y như `handle` (grounding phải trỏ vào đoạn đã đưa). LLM chỉ được answer /
+        escalate. -> (reply, thời gian, debug: hits tìm được, đoạn vào prompt, prompt, LLM trả thô,
+        file log).
+        """
+        dbg: dict = {}
+        ms: dict[str, int] = {}
+        t0 = time.perf_counter()
+        _, qa = await asyncio.to_thread(self.retriever.search, question, None)
+        ms["search"] = _ms(t0)
+
+        found = self._found([], qa, 0)
+        hist = "\n".join(f"- Hỏi: {t.question} → Đáp: {t.reply.text or t.reply.action}"
+                         for t in history[-self.cfg.history_turns:])
+        fill = {"deck_map": self.deck_map, "found": _ctx(found) or "(không tìm được đoạn nào)",
+                "history": hist or "(chưa có)", "question": question}
+        prompt = self.qa_template
+        for k, v in fill.items():
+            prompt = prompt.replace("{{" + k + "}}", v)
+
+        tag = f"qa_{int(time.time() * 1000)}"
+        dbg.update(hits=qa, found=found, prompt=prompt, log=self.llm.log_dir / f"{tag}.json")
+        t1 = time.perf_counter()
+        try:
+            raw = await self.llm.chat([{"role": "user", "content": prompt}], tag=tag)
+        except RuntimeError as e:
+            ms["llm"] = _ms(t1)
+            return self._fallback(qa, f"llm_error: {str(e)[:160]}"), ms, dbg
+        ms["llm"] = _ms(t1)
+        dbg["raw"] = raw
+        if raw.get("action") not in ("answer", "escalate"):
+            raw = {"action": "escalate", "reason": "no_info"}
+        # deck_map là nguồn hợp lệ cho câu hỏi cấu trúc bài (mấy trang, mấy chương): dựng bằng LUẬT
+        # từ mục lục (kb/deck_map.py), không do model sinh — vẫn đúng NT3 "mọi câu phải có nguồn"
+        dm = Context(chunk_id="deck_map", page_no=0, text=self.deck_map)
+        return self._check(raw, [*found, dm], []), ms, dbg
 
     async def close(self) -> None:
         await self.llm.close()

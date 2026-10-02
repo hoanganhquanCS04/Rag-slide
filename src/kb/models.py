@@ -73,8 +73,6 @@ class SearchHit(BaseModel):
 
     chunk_id: str
     page_no: int                  # R2 nhảy tới đây
-    section_id: str | None = None
-    section_title: str | None = None
 
     score: float                  # điểm RRF — CHỈ để xếp thứ tự, KHÔNG phải confidence
     rank_dense: int | None = None     # hạng ở nhánh vector; None = không có nhánh này

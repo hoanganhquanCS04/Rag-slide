@@ -433,7 +433,7 @@ data/raw/<file>.pdf                       file gốc — VỪA là deck VỪA l�
 data/patches/<doc_id>.json                nội dung gõ tay cho trang parser vẫn sai
 data/eval/queries.json                    câu hỏi có nhãn để đo retrieval
 data/pronunciation.json                   KHO PHÁT ÂM CHUNG mọi deck — máy đề xuất từ kịch bản, người chốt
-.env  VLM_MODEL · LLM_MODEL · EMBED_MODEL tên model dùng — sửa ở đây, KHÔNG sửa trong code
+.env  VLM_MODEL · TABLE_MODEL · LLM_MODEL · EMBED_MODEL  tên model dùng — sửa ở đây, KHÔNG sửa trong code
 .env  VECTOR_DB=inmem|chroma · CHROMA_PATH kho vector (src/kb/store/) — đổi kho không sửa code
 
 out/parsed/<doc_id>/                      S0 — MỘT lệnh: python src/parsing/cli.py run <file>

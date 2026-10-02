@@ -1,10 +1,12 @@
 # S4 — Scenario
 
-> ⚠️ **Đọc trước: input đã đổi.** S4 nhận **`KBChunk` của CHÍNH TRANG ĐÓ** + `title`
-> trang trước/sau + `slide_type` + `time_budget`. **Không** còn `SlideRepr`, `message`,
-> `concept_map`, `AlignmentMap` — S1 và S3 đã bỏ. Mọi chỗ dưới nhắc tới chúng thì thay
-> bằng nội dung trang. Luật về `content` / `delivery`, 7 đòn bẩy tự nhiên, đếm âm tiết,
-> pass 2 cân giờ **vẫn nguyên giá trị**. Xem [CLAUDE.md §5](../../CLAUDE.md).
+> ⚠️ **Đọc trước: input đã đổi.** S4 (đã code, `src/scenario/`) nhận **block của CHÍNH
+> TRANG ĐÓ** (kèm `id` + `provenance` để câu trỏ `ref` vào) + `title` trang trước/sau +
+> `slide_type` + kịch bản các trang trước cùng chương. **Không** còn `SlideRepr`, `message`,
+> `concept_map`, `AlignmentMap` — S1 và S3 đã bỏ — và **chưa có `time_budget`**: pass 2 hiện
+> là pass **sửa lỗi bộ kiểm**, chỉ chạy cho trang trượt, không phải cân giờ. Luật về
+> `content` / `delivery`, 7 đòn bẩy tự nhiên, đếm âm tiết **vẫn nguyên giá trị**.
+> Cái đang chạy: [spec/scenario.md](../spec/scenario.md) · [CLAUDE.md §5](../../CLAUDE.md).
 >
 > Kịch bản lưu ở `out/deck/<doc_id>/scenario.json` — **không** để chung với
 > `ParsedDocument` (parse lại là mất) hay `KBChunk` (sửa lời thoại không được làm bẩn index).

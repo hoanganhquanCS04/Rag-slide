@@ -7,31 +7,3 @@ mẩu nội dung đều khai rõ `provenance` theo NT2.
 
 Lớp này chỉ BIỂU DIỄN — không chunk, không enrich, không embed. Đó là việc của S5.
 """
-
-from parsing.models import (
-    Block,
-    Flag,
-    ParsedDocument,
-    ParsedImage,
-    ParsedPage,
-    ParsedParagraph,
-    ParsedTable,
-    ParserInfo,
-    Provenance,
-    SectionSpan,
-    SourceInfo,
-)
-
-__all__ = [
-    "Block",
-    "Flag",
-    "ParsedDocument",
-    "ParsedImage",
-    "ParsedPage",
-    "ParsedParagraph",
-    "ParsedTable",
-    "ParserInfo",
-    "Provenance",
-    "SectionSpan",
-    "SourceInfo",
-]

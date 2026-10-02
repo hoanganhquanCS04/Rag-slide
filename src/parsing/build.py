@@ -4,8 +4,9 @@ Không gọi API — chạy lại bao nhiêu lần cũng được, luôn dựng 
 
     from_docling   block thô, toạ độ (header/footer lặp bị bỏ)
     layout         trang có bố cục VLM hợp lệ -> thay block (trượt kiểm tra -> giữ docling + cờ)
+    tables         bảng VLM chép từ ảnh bảng (layout.json["tables"]) -> thay cells, chữ nắn về text layer
     links          link ẩn trong PDF -> `hrefs`, block >= nửa dòng là link -> role "links"
-    sections       chương từ thanh header chạy
+    sections       chương từ trang mục lục
     patch          vá tay (data/patches/)
     flags          cờ cho người duyệt; block rỗng không cờ bị bỏ
 """
@@ -19,7 +20,7 @@ from pathlib import Path
 
 from parsing.flags import apply_flags
 from parsing.from_docling import from_docling_json, slugify_doc_id
-from parsing.layout import apply_layout, load_layout, page_pdf
+from parsing.layout import apply_layout, apply_tables, load_layout, page_pdf
 from parsing.links import attach_links
 from parsing.models import ParsedDocument
 from parsing.patch import apply_patch, find_patch, load_patch
@@ -37,6 +38,7 @@ def build_document(src: Path, docling_json: Path, layout_json: Path) -> ParsedDo
     doc = from_docling_json(docling_json, doc_id=slugify_doc_id(src.stem), source_pdf=str(src),
                             vlm_model=model)
     apply_layout(doc, raw, layout)
+    apply_tables(doc, layout, page_pdf(src))
     if pdf := page_pdf(src):
         attach_links(doc, pdf)
     apply_sections(doc)

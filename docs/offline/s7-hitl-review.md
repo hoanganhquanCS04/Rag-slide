@@ -4,6 +4,10 @@
 **Output:** `DeckBundle` verified + `review.json`
 **Model:** không có. Người — **đọc và NGHE**.
 
+> **⬜ Chưa có code.** Cờ v0 đang sinh ra để chờ S7: cờ S0 trong `document.json`
+> (`flags[]`), cờ S4 trong từng trang của `scenario.json`. `self_retrieval_fail` chưa bao
+> giờ bắn — self-retrieval gần như luôn 100% (xem [00-overview §8](./00-overview.md)).
+>
 > Vòng NGHE (§5b) và xử lý `self_retrieval_fail` (§4b) đã qua vòng chốt. Phần còn lại
 > (UI, thang hành động) vẫn là suy ra từ luật + tập flag — sửa thoải mái khi code thật.
 

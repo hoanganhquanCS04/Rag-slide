@@ -7,8 +7,8 @@ Xem docs/spec/embedding.md. Bốn điểm dễ sai:
      Lọc sớm thì audit không đo được hiện tượng trang phân mục cướp kết quả.
   3. `model_id` nằm trong TÊN FILE. Đổi model mà không sinh lại thì truy vấn index cũ
      bằng vector mới -> trả rác mà không báo lỗi (§5 S6a).
-  4. API KHÔNG trả sparse vector. §5 S5 đòi hybrid dense+sparse; phần sparse phải
-     dựng riêng bằng BM25 ở `search.py`, KHÔNG có sẵn như bge-m3 trước đây.
+  4. API KHÔNG trả sparse vector. Nhánh sparse là BM25 dựng riêng ở `kb/sparse/`, gộp với
+     dense ở `search.py` — KHÔNG có sẵn như bge-m3 trước đây.
 
 Vì sao bỏ bge-m3 local (đo được, ghi lại để sau khỏi tranh cãi lại):
 
@@ -204,11 +204,10 @@ def embed_chunkset(
         "n_vectors": len(texts),
         "n_api_calls": emb.n_api_calls,
         "embed_sec": round(dt, 2),
-        "sparse": False,   # API khong tra sparse -> phai dung BM25 rieng (§5 S5)
+        "sparse": False,   # API khong tra sparse — BM25 dung rieng o kb/sparse/
         "rows": [c.chunk_id for c in cs.chunks],
     }, ensure_ascii=False, indent=2), encoding="utf-8")
 
     log.info("nhung %d vector trong %.1fs (%.0fms/chunk, %d lan goi API) -> %s",
              len(texts), dt, dt / max(len(texts), 1) * 1000, emb.n_api_calls, p_npy.name)
-    log.warning("sparse CHUA co -> moi la dense, CHUA du hybrid nhu §5 S5 doi hoi")
     return p_npy, p_json

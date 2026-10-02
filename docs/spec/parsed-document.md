@@ -29,7 +29,7 @@ out/parsed/<doc_id>/document.json        ③ ParsedDocument — FILE NÀY       
 ParsedDocument
 ├── doc_id
 ├── source      {path, sha256}
-├── parser      {docling_version, vlm_model, do_ocr, picture_area_threshold, options_hash}
+├── parser      {docling_version, vlm_model, picture_area_threshold}
 ├── sections[]  {id, title, pages: [đầu, cuối], source, confidence}
 ├── flags[]     {kind, severity, page_no, block_id, detail}
 └── pages[]
@@ -78,7 +78,6 @@ mục lục.
 | `text_layer` | chữ đọc thẳng từ text layer PDF — **đúng 100%**. Kể cả khối VLM sắp (`vNN`): VLM chỉ trỏ id, chữ vẫn là chữ docling nguyên văn |
 | `vlm` | chữ VLM **tự đọc từ ảnh** (bảng chụp màn hình, dòng chữ nằm trong ảnh) hoặc **mô tả hình** — CÓ THỂ SAI, chỗ người cần soi |
 | `manual` | người gõ tay (`data/patches/`) — tin được như `text_layer` |
-| `ocr` | đọc từ pixel — chỉ khi bật OCR (mặc định tắt) |
 
 **`id`**: `p<trang>.<loại><số>`, ổn định — chunk và câu kịch bản trỏ vào đây.
 
@@ -96,7 +95,7 @@ Id không đánh lại khi bỏ block rỗng → có thể nhảy số (`b03` �
 |---|---|---|
 | `paragraph` | chữ | `role` (luôn có) · `urls` khi `role: links` |
 | `image` | mô tả hình (VLM) | `why_empty` khi `content: null` |
-| `table` | markdown **sinh từ** `cells` | `cells` (bản gốc, hàng đầu là header) · `structure_provenance` |
+| `table` | markdown **sinh từ** `cells` lúc nạp — **không ghi ra file** (trùng `cells`) | `cells` (hàng đầu là header; ô gộp dọc đã chép tên xuống hàng trống) · `structure_provenance` |
 
 **`role`** — `kind` nói mẩu này **là gì**, `role` nói robot **đối xử với chữ đó thế nào**:
 
@@ -242,7 +241,7 @@ Luật dễ quên:
 - **Bảng có hai `provenance`**: chữ trong ô (`provenance`) và lưới hàng/cột
   (`structure_provenance`, do TableFormer hoặc VLM dựng — có thể xếp nhầm hàng).
 - **`content` của bảng, `urls` và `role: links` được tính lại mỗi lần NẠP** — không lệch được
-  với `cells` / chữ gốc / `hrefs`.
+  với `cells` / chữ gốc / `hrefs`. `content` của bảng không ghi vào `document.json`.
 - **Toạ độ `.pptx`**: docling gắn nhãn `BOTTOMLEFT` nhưng số thật đo từ ĐỈNH — `from_docling`
   không tin nhãn với `.pptx`.
 

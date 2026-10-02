@@ -26,6 +26,7 @@ class RuntimeConfig(BaseModel):
     llm_timeout_s: float = 30.0
     llm_retry: int = 1                  # khán giả đang chờ: lỗi là escalate, không đợi
     llm_extra: dict[str, Any] = Field(default_factory=dict)
+    json_mode: bool = True              # false: không gửi response_format (cổng không chạy JSON mode cho model)
 
     @classmethod
     def load(cls, path: str | Path) -> RuntimeConfig:

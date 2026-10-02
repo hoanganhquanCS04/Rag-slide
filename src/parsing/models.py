@@ -49,16 +49,17 @@ Point = tuple[float, float]
 
 
 class _Base(BaseModel):
-    """Ghi JSON gọn: bỏ trường rỗng, xếp trường theo `_ORDER` cho dễ đọc."""
+    """Ghi JSON gọn: bỏ trường rỗng, bỏ trường suy ra được (`_DERIVED`), xếp theo `_ORDER`."""
 
     _KEEP_EMPTY: ClassVar[set[str]] = set()
+    _DERIVED: ClassVar[set[str]] = set()        # tính lại lúc nạp -> không ghi ra file
     _ORDER: ClassVar[tuple[str, ...]] = ()
 
     @model_serializer(mode="wrap")
     def _compact(self, handler: Any) -> dict[str, Any]:
         data = handler(self)
         data = {k: v for k, v in data.items()
-                if k in self._KEEP_EMPTY or v not in (None, [], {})}
+                if k not in self._DERIVED and (k in self._KEEP_EMPTY or v not in (None, [], {}))}
         rank = {k: i for i, k in enumerate(self._ORDER)}
         return dict(sorted(data.items(), key=lambda kv: rank.get(kv[0], len(rank))))
 
@@ -68,7 +69,6 @@ class Provenance(str, Enum):
 
     TEXT_LAYER = "text_layer"   # đọc thẳng từ text layer, đúng 100%
     VLM = "vlm"                 # model nhìn ảnh rồi sinh, CÓ THỂ BỊA
-    OCR = "ocr"                 # đọc từ pixel, sai chính tả được
     MANUAL = "manual"           # người gõ tay (data/patches/) — tin được như text_layer
 
 
@@ -202,14 +202,31 @@ def table_markdown(cells: list[list[str]]) -> str | None:
     return "\n".join([row(cells[0]), "|" + "---|" * len(cells[0])] + [row(r) for r in cells[1:]])
 
 
+def fill_down(cells: list[list[str]]) -> list[list[str]]:
+    """Ô đầu hàng trống mà hàng vẫn có chữ -> chép từ hàng trên xuống.
+
+    Ô gộp dọc (Onboarding p22 "Các trường hợp lỗi công" phủ 4 hàng) chỉ ghi ở hàng đầu, 3 hàng
+    dưới trống — cắt chunk theo hàng là mảnh sau không biết mình thuộc nhóm nào. Chỉ cột đầu, chỉ
+    hàng thân (hàng 0 là header). Đo 2 deck: 5 hàng ở p21–23, đều đúng là ô gộp.
+    """
+    out = [list(r) for r in cells]
+    for i in range(2, len(out)):
+        if out[i] and not out[i][0].strip() and any(c.strip() for c in out[i][1:]) and out[i - 1]:
+            out[i][0] = out[i - 1][0]
+    return out
+
+
 class ParsedTable(Block):
     """Bảng. `cells` là bản gốc, hàng đầu là header; `content` là markdown SINH từ `cells`.
 
     Hai nguồn, hai `provenance` (NT2): chữ trong ô từ text layer (`provenance`, đúng), lưới
     hàng/cột do TableFormer dựng (`structure_provenance`, CÓ THỂ SAI — số đặt nhầm hàng).
 
-    `content` tính lại mỗi lần NẠP. Sửa `cells` trong bộ nhớ thì phải dựng lại object.
+    `content` tính lại mỗi lần NẠP và KHÔNG ghi ra file (trùng với `cells`). Sửa `cells` trong bộ
+    nhớ thì phải dựng lại object. Nạp vào là chép tên ô gộp dọc xuống hàng trống (`fill_down`).
     """
+
+    _DERIVED: ClassVar[set[str]] = {"content"}
 
     kind: Literal["table"] = "table"
     cells: list[list[str]] = Field(default_factory=list)
@@ -218,6 +235,7 @@ class ParsedTable(Block):
 
     @model_validator(mode="after")
     def _markdown(self) -> ParsedTable:
+        self.cells = fill_down(self.cells)
         self.content = table_markdown(self.cells)
         return self
 
@@ -286,7 +304,11 @@ class ParsedPage(_Base):
         content          còn lại
         """
         paras = self.paragraphs
-        if len(paras) == 1 and paras[0].role == "title":
+        # Trang có ảnh được mô tả / bảng có chữ thì KHÔNG phải trang phân mục, dù chỉ 1 tiêu đề:
+        # Onboarding p4 (sơ đồ tổ chức) — khối VLM đọc hoàn toàn bằng `read` không có toạ độ
+        # thật, nhận khung cả trang -> tâm (0.5, 0.5) -> từng bị xếp nhầm là phân mục, lọc khỏi tìm.
+        has_media = any(im.content for im in self.images) or any(t.content for t in self.tables)
+        if len(paras) == 1 and paras[0].role == "title" and not has_media:
             cx, cy = paras[0].center
             if cy >= DIVIDER_MIN_CY and DIVIDER_CX_RANGE[0] <= cx <= DIVIDER_CX_RANGE[1]:
                 return "section_divider"
@@ -353,16 +375,14 @@ class SourceInfo(_Base):
 
 
 class ParserInfo(_Base):
-    """Đổi model hay option mà không parse lại -> dữ liệu cũ mới lẫn nhau trong im lặng.
+    """Parse bằng gì — để biết dữ liệu trong file đến từ đâu.
 
     `vlm_model` là model sắp bố cục trang (parsing/layout.py) — mọi khối `vlm` đến từ nó.
     """
 
     docling_version: str = ""
     vlm_model: str | None = None
-    do_ocr: bool = False
     picture_area_threshold: float = 0.05
-    options_hash: str = ""
 
 
 class ParsedDocument(_Base):

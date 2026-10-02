@@ -2,6 +2,7 @@
 
     ① docling.json    docling đọc file: chữ + toạ độ + vùng ảnh/bảng          docling_run.py
     ② layout.json     VLM nhìn cả trang, sắp chữ thành khối — TỐN API         layout.py
+       └ ②b bảng      cắt ảnh từng bảng, VLM chép ra cells — TỐN API (lần đầu) layout.py
     ③ document.json   ParsedDocument chuẩn — KB, kịch bản, runtime đọc file này build.py
 
     python src/parsing/cli.py run "data/raw/Onboarding Kit.pdf"                # đủ 3 bước
@@ -32,7 +33,7 @@ if __package__ in (None, ""):  # chạy thẳng file, không qua -m
 from parsing.build import build_document
 from parsing.docling_run import run_docling
 from parsing.from_docling import slugify_doc_id
-from parsing.layout import page_pdf, run_layout
+from parsing.layout import page_pdf, run_layout, run_tables
 from parsing.models import ParsedDocument, ParsedParagraph
 
 for _s in (sys.stdout, sys.stderr):
@@ -80,6 +81,11 @@ def cmd_run(args: argparse.Namespace) -> int:
                                concurrency=args.concurrency))
 
     doc = build_document(src, docling_json, layout_json)
+    # ②b cần khung bảng của bố cục cuối -> chạy trên doc vừa dựng; có gọi VLM thì dựng ③ lại
+    if not args.no_vlm and (pdf := page_pdf(src)) is not None and asyncio.run(run_tables(
+            doc, pdf, layout_json, tag=doc_id, model=args.table_model,
+            pages=parse_pages(args.pages) if args.pages else None, concurrency=args.concurrency)):
+        doc = build_document(src, docling_json, layout_json)
     document_json.write_text(doc.to_json(), encoding="utf-8")
     report(doc)
     log.info("ghi -> %s (%d KB)", document_json, document_json.stat().st_size // 1024)
@@ -162,7 +168,7 @@ def report(doc: ParsedDocument) -> None:
             log.info("        %s  p%d-%d  conf=%.2f  %s",
                      s.id, s.start_page, s.end_page, s.confidence, s.title)
     else:
-        log.info("    0 section (khong dung duoc page_header)")
+        log.info("    0 section (khong tim thay trang muc luc khop)")
 
     if doc.flags:
         log.info("    %d co:", len(doc.flags))
@@ -188,6 +194,8 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--redo", action="store_true", help="chay lai docling du da co docling.json")
     run.add_argument("--model", default=os.environ.get("VLM_MODEL", "gemini-3.5-flash-lite"),
                      help="mac dinh VLM_MODEL trong .env")
+    run.add_argument("--table-model", default=os.environ.get("TABLE_MODEL", "gemini-3.8-flash"),
+                     help="model chep bang (②b), mac dinh TABLE_MODEL trong .env")
     run.add_argument("--concurrency", type=int, default=4)
     run.set_defaults(fn=cmd_run)
 
