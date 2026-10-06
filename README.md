@@ -75,9 +75,9 @@ Tạo file `.env` ở gốc repo:
 | Biến                                   | Ví dụ                       | Dùng ở                                   |
 | --------------------------------------- | ----------------------------- | ------------------------------------------ |
 | `OPENAI_API_KEY`, `OPENAI_BASE_URL` | `https://api.yescale.io/v1` | mọi lần gọi API                         |
-| `VLM_MODEL`                           | `gemini-3.5-flash-lite`     | ② bố cục trang                          |
+| `VLM_MODEL`                           | `gemini-3.8-flash`          | ② bố cục trang                          |
 | `TABLE_MODEL`                         | `gemini-3.8-flash`          | ②b chép bảng                            |
-| `LLM_MODEL`                           | `gpt-5-mini`                | hỏi đáp thử, kịch bản                |
+| `LLM_MODEL`                           | `gemini-3.5-flash-lite`     | hỏi đáp thử, kịch bản                |
 | `EMBED_MODEL`                         | `text-embedding-3-small`    | ④ nhúng vector, tìm kiếm               |
 | `VECTOR_DB`                           | `chroma` hoặc `inmem`    | kho vector (bỏ trống =`inmem`)         |
 | `CHROMA_PATH`                         | `out/kb/chroma`             | chỗ Chroma ghi đĩa, tính từ gốc repo |
@@ -129,19 +129,18 @@ Chạy ở **thư mục gốc repo**; đường dẫn file luôn kèm `data/raw/
 ```bash
 # Thời gian làm việc & Chính sách nhân sự   ->   <ten> = thoi_gian_lam_viec_chinh_sach_nhan_su
 bash scripts/run_deck.sh data/raw/thoi_gian_lam_viec_chinh_sach_nhan_su.pdf
+
 bash scripts/run_deck.sh data/raw/thoi_gian_lam_viec_chinh_sach_nhan_su.pdf --no-vlm
+
 python scripts/try_ask.py thoi_gian_lam_viec_chinh_sach_nhan_su
-python scripts/try_ask.py thoi_gian_lam_viec_chinh_sach_nhan_su "làm thêm ngày lễ được tính hệ số bao nhiêu"
-python src/kb/search.py out/kb/thoi_gian_lam_viec_chinh_sach_nhan_su/chunks.json "giờ làm việc ban đêm tính từ mấy giờ" --explain
-python src/parsing/cli.py show thoi_gian_lam_viec_chinh_sach_nhan_su --page 7
+
+
 
 # Onboarding Kit   ->   <ten> = onboarding_kit
 bash scripts/run_deck.sh data/raw/onboarding_kit.pdf
+
 bash scripts/run_deck.sh data/raw/onboarding_kit.pdf --no-vlm
 python scripts/try_ask.py onboarding_kit
-python scripts/try_ask.py onboarding_kit "bảo hiểm sức khỏe Vingroup có những gói nào"
-python src/kb/search.py out/kb/onboarding_kit/chunks.json "quy tắc phản hồi email" --explain
-python src/parsing/cli.py show onboarding_kit --page 29
 ```
 
 ## Cấu trúc repo
