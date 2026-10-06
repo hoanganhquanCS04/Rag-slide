@@ -22,7 +22,7 @@ trên slide.
 | ✅ | S6a`deck_map`   | `src/kb/deck_map.py`          | bản đồ chương ~180 token cho prompt runtime, bằng luật                                                                                                                                              |
 | 🟡 | Hỏi đáp thử   | `scripts/try_ask.py`          | tìm → 1 lần gọi LLM → code kiểm nguồn, trong terminal                                                                                                                                               |
 | 🟡 | S4 kịch bản     | `src/scenario/`               | bước 4 của`run_deck.sh` (`--no-scenario` để bỏ), chỉ viết lại trang đổi                                                                                                                    |
-| ⬜ | Chưa làm        |                                 | S2`time_budget` · S6b TTS · S7 người duyệt · runtime thật (giọng nói, ngắt lời)                                                                                                               |
+|    |                   |                                 |                                                                                                                                                                                                            |
 |    |                   |                                 |                                                                                                                                                                                                            |
 
 Số hiện tại (2026-10-02), hai deck đang làm:
@@ -41,7 +41,7 @@ Số hiện tại (2026-10-02), hai deck đang làm:
 data/raw/<file>.pdf
    │ ① docling: chữ + toạ độ + vùng ảnh/bảng                       CPU
    │ ② VLM sắp bố cục từng trang · ②b VLM chép từng bảng            API + cache
-   │ ③ ghép + kiểm + chương + link + vá tay + cờ            
+   │ ③ ghép + kiểm + chương + link + vá tay + cờ          
    ▼
 out/parsed/<ten>/document.json      ParsedDocument — nguồn của mọi bước sau
    │ ④ chunk + nhúng vector + nạp kho                               💰 API+  có cache
@@ -127,7 +127,6 @@ Chạy ở **thư mục gốc repo**; đường dẫn file luôn kèm `data/raw/
 > VLM cho CẢ deck (51 + 17 trang). Chỉ cần chunk / nhúng lại thì dùng dòng `--no-vlm`.
 >
 > Bước kịch bản (S4) chạy mặc định: Thời gian làm việc đã có kịch bản → 0 lần gọi LLM;
-> Onboarding **chưa có** → lần đầu viết 51 trang (~1–2 lần gọi LLM mỗi trang). Thêm
 > `--no-scenario` nếu chưa cần.
 
 ```bash
