@@ -283,7 +283,7 @@ câu người thật viết (giọng nói, có dấu, văn nói đủ chữ).
 | | Việc | Ghi chú |
 |---|---|---|
 | ⬜ S4 Onboarding | kịch bản 51 trang | `src/runtime/cli.py` (thuyết trình thử) cần `scenario.json` |
-| ⚠️ nhịp kịch bản | độ lệch chuẩn âm tiết/câu ≥ 6 mỗi trang | Thời gian làm việc: cả deck 6.8 nhưng 9/17 trang còn cờ `monotone_rhythm` |
+| 🚫 luật nói tự nhiên | nhịp, tỉ lệ delivery, văn viết… | BỎ khỏi bộ kiểm S4 (2026-10-06) — chỉ còn hướng dẫn trong prompt, xem [spec/scenario.md §11](../spec/scenario.md) |
 | ⬜ S2 | `time_budget` theo chương | luật, không gọi model. S4 hiện không có trần độ dài trang — đi theo nội dung |
 | ⬜ `slide_type` đủ loại | `title` · `agenda` | đã có `section_divider` · `exercise` · `content` |
 | ⬜ S6b | TTS theo từng câu, một giọng duy nhất | |

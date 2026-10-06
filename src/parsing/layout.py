@@ -48,7 +48,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
-from parsing.from_docling import _box, _norm, _resolve
+from parsing.from_docling import docling_box, from_pptx, norm_text, resolve_ref
 from parsing.models import (
     AnyBlock,
     ParsedDocument,
@@ -82,7 +82,7 @@ def page_items(raw: dict[str, Any], page_no: int) -> Items:
     (from_docling gộp cả list thành một block — p10 trộn hai nhóm quy định vào một list).
     """
     size = raw["pages"][str(page_no)]["size"]
-    is_pptx = "presentationml" in ((raw.get("origin") or {}).get("mimetype") or "")
+    is_pptx = from_pptx(raw)
     out: Items = {}
     count = {"T": 0, "P": 0, "B": 0}
     seen: set[str] = set()
@@ -93,7 +93,7 @@ def page_items(raw: dict[str, Any], page_no: int) -> Items:
 
     def walk(node: dict[str, Any]) -> None:
         for ref in node.get("children", []):
-            item = _resolve(raw, ref["$ref"])
+            item = resolve_ref(raw, ref["$ref"])
             if item is None or item.get("self_ref") in seen:
                 continue
             seen.add(item.get("self_ref", ""))
@@ -101,15 +101,15 @@ def page_items(raw: dict[str, Any], page_no: int) -> Items:
             sref = item.get("self_ref", "")
             if (prov and prov[0]["page_no"] == page_no and item.get("label") not in _FURNITURE
                     and item.get("content_layer") != "furniture"):
-                box = [round(x, 3) for x in _box(prov[0], size["width"], size["height"], is_pptx=is_pptx)]
+                box = [round(x, 3) for x in docling_box(prov[0], size["width"], size["height"], is_pptx=is_pptx)]
                 if sref.startswith("#/pictures/"):
                     add("P", box=box)
                 elif sref.startswith("#/tables/"):
                     grid = (item.get("data") or {}).get("grid") or []
-                    cells = [[_norm(c.get("text")) for c in row] for row in grid]
+                    cells = [[norm_text(c.get("text")) for c in row] for row in grid]
                     add("B", box=box, cells=cells,
                         text=table_markdown(cells) if any(any(r) for r in cells) else None)
-                elif text := _norm(item.get("text")):
+                elif text := norm_text(item.get("text")):
                     add("T", box=box, text=text)
             walk(item)
 

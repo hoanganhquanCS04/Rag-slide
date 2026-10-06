@@ -16,11 +16,10 @@ import logging
 import re
 from pathlib import Path
 
+from parsing.from_docling import Box
 from parsing.models import Href, ParsedDocument, ParsedParagraph
 
 log = logging.getLogger(__name__)
-
-Box = tuple[float, float, float, float]   # (trái, trên, phải, dưới), [0,1], gốc trên-trái
 
 _BULLET = re.compile(r"^[•✓➢⚬\-\s]+")
 

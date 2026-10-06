@@ -550,6 +550,6 @@ Mọi flag từ mọi stage đổ về một file, S7 đọc file đó. Chi ti�
 | S0    | `empty_page`, `image_not_described`, `table_empty`, `layout_failed`, `no_sections` |
 | S5    | chunk trùng nhau (cosine >= 0.94, `audit.py`), chunk vượt 500 token (log `--stats`)                  |
 | S2    | `sections` không phủ kín / chồng nhau / đứt quãng — *chưa code*                                      |
-| S4    | **cờ đỏ:** `ungrounded_content_sentence`, `bad_grounding_ref`, `divider_has_content`, `title_grounded_claim`, `empty_script`, `llm_failed`, `stale_manual` · **sửa ở pass 2:** `block_not_covered`, `number_missing`, `monotone_rhythm`, `delivery_ratio`, `written_register`, `too_long`, `term_not_on_page`… · **vàng:** `vlm_number`, `unknown_pronunciation` |
+| S4    | **cờ đỏ:** `bad_grounding`, `empty_script`, `llm_failed`, `stale_manual` · **sửa ở pass 2:** `block_not_covered`, `number_missing` · **vàng:** `unknown_pronunciation` — luật nói tự nhiên bỏ khỏi bộ kiểm 2026-10-06 |
 | S6a   | `self_retrieval_fail` — ⚠️ hiện gần như không bao giờ bắn, xem §3.3                                |
 | S6b   | `duration_mismatch`, **`pronunciation_hash_mismatch`**, **`voice_id_mismatch`**                 |

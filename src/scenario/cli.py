@@ -23,7 +23,6 @@ import argparse
 import asyncio
 import json
 import logging
-import statistics
 import sys
 from pathlib import Path
 
@@ -97,10 +96,7 @@ def report(sc: Scenario) -> None:
     log.info("    tổng thời lượng       %.1f phút  (%d âm tiết ÷ 200/phút)", sc.seconds / 60, tot)
     log.info("    ungrounded (content)  %d/%d = %.1f%%   gate < 10%%",
              len(ungrounded), len(content), len(ungrounded) / max(len(content), 1) * 100)
-    log.info("    tỉ lệ delivery        %.1f%%           gate 10–25%%", deliv / tot * 100)
-    if len(S) > 1:
-        log.info("    độ lệch chuẩn âm tiết %.1f            gate >= 6",
-                 statistics.pstdev([s.syllables for s in S]))
+    log.info("    tỉ lệ delivery        %.1f%%", deliv / tot * 100)
     log.info("    phải chạy pass 2      %d trang %s", len(p2), p2 or "")
     log.info("    CỜ ĐỎ                 %d trang %s", len(red), red or "")
     log.info("    từ chưa có cách đọc   %s", unk or "không")

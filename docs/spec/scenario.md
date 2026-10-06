@@ -296,28 +296,20 @@ nhịp thì đưa SỐ ÂM TIẾT từng câu — LLM không tự đếm đượ
 
 ## 11. Validate — code quyết, không tin LLM
 
+**Chốt 2026-10-06:** bộ kiểm chỉ còn nguồn + đủ ý + phát âm. Các luật "nói tự nhiên" (nhịp ≥ 6,
+tỉ lệ delivery 10–25%, văn viết, ký hiệu `/ %`, ≤ 30 âm tiết, nói về slide, câu đệm, trang chuyển
+chương ≤ 2 câu…) **đã bỏ khỏi code** — vẫn là hướng dẫn trong `prompts/s4_scenario.md` nhưng không
+kiểm, không bắt pass 2. Lý do: 51/51 trang Onboarding phải chạy pass 2, phần lớn vì nhịp — LLM
+không tự đếm được âm tiết tiếng Việt.
+
 | kiểm | ngưỡng | trượt thì |
 |---|---|---|
-| câu `content` có `grounding` | 100% | 🔴 `ungrounded_content_sentence` |
-| `grounding` trỏ vào block có thật, đúng trang | 100% | 🔴 `bad_grounding_ref` |
-| âm tiết mỗi câu | ≤ 30 | pass 2 |
-| tỉ lệ âm tiết `delivery` | 10–25% | pass 2 |
-| độ lệch chuẩn âm tiết/câu (trang ≥ 4 câu) | ≥ 6 | pass 2 → 🟡 `monotone_rhythm` (trước là chỉ cờ vàng: 23/28 và 8/8 trang trượt mà không ai sửa) |
-| từ văn viết bị cấm (`việc`/`sự` danh từ hoá — trừ từ ghép: làm/thử/công việc, nhân sự, sự cố…) | = 0 | pass 2 → 🟡 `written_register` |
-| câu `delivery` mang số / thuật ngữ / tên hàm | = 0 | pass 2 |
-| câu có ký hiệu code `(` `=` `[` | = 0 | pass 2 |
-| câu viết kiểu slide: `/` `%` `&` `+` `<` `>` `@`, số dính chữ `44h` `75tr` | = 0 | pass 2 → 🟡 `written_symbol` |
-| từ Anh / viết tắt không có trên trang | = 0 | pass 2 → 🟡 `term_not_on_page` |
-| từ Anh / viết tắt không có trong kho phát âm | = 0 | 🟡 `unknown_pronunciation` |
-| số câu — CHỈ trang chuyển chương / lời kết | ≤ 2 | pass 2 |
+| câu `content` có `grounding` trỏ vào block có thật, đúng trang | 100% | 🔴 `bad_grounding` |
+| câu `delivery` (không cần nguồn) không mang số / thuật ngữ (trừ chữ trong tên chương) | = 0 | 🔴 `bad_grounding` |
 | mỗi khối chữ mang thông tin có câu content trỏ vào | 100% | pass 2 → 🟡 `block_not_covered` |
-| mọi con số trong khối chữ (trừ link, sđt, mã, khối vlm) được nói | 100% | pass 2 → 🟡 `number_missing` |
-| `section_divider` có câu `content` | = 0 | 🔴 |
-| `section_divider` không nêu tên chương | = 0 | pass 2 |
-| câu content trỏ vào **khối tiêu đề** mà dài hơn tiêu đề > 6 âm tiết | = 0 | 🔴 `title_grounded_claim` |
-| câu content trỏ vào khối `vlm` mà có số / khoảng "từ … đến" | báo cáo | 🟡 `vlm_number` (được nói — §7 tầng 3) |
-| nói VỀ SLIDE: "trang này dạy", "mô tả cho biết", "trong ảnh"… | = 0 | pass 2 `meta_talk` |
-| câu delivery đệm: "hãy chú ý", "lắng nghe", "tiếp theo thôi"… | = 0 | pass 2 `filler_delivery` |
+| mọi con số trong khối chữ (trừ link, sđt, mã) được nói | 100% | pass 2 → 🟡 `number_missing` |
+| từ Anh / viết tắt có trong kho phát âm | = 0 | 🟡 `unknown_pronunciation` |
+| kịch bản không rỗng | — | 🔴 `empty_script` |
 
 🔴 = cờ đỏ, **không đóng gói được** cho tới khi người duyệt xử lý.
 

@@ -15,10 +15,7 @@ SYL_PER_MIN = 200          # tiếng Việt nói 190–210 âm tiết/phút (§5
 
 # Cờ đỏ: KHÔNG đóng gói được cho tới khi người duyệt xử lý
 RED_FLAGS = {
-    "ungrounded_content_sentence",
-    "bad_grounding_ref",
-    "divider_has_content",
-    "title_grounded_claim",     # trỏ vào tiêu đề mà nói nhiều hơn tên chủ đề = bơm kiến thức
+    "bad_grounding",            # content không trỏ đúng khối / delivery mang số, thuật ngữ
     "empty_script",
     "llm_failed",
     "stale_manual",             # người sửa tay, rồi nội dung trang đổi -> câu có thể sai
@@ -66,11 +63,6 @@ class SlideScript(BaseModel):
     @property
     def seconds(self) -> float:
         return self.syllables / SYL_PER_MIN * 60
-
-    @property
-    def delivery_ratio(self) -> float:
-        tot = self.syllables
-        return sum(s.syllables for s in self.sentences if s.kind == "delivery") / tot if tot else 0.0
 
     @property
     def red_flags(self) -> list[str]:

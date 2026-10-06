@@ -260,6 +260,11 @@ Spec đầy đủ: [docs/spec/scenario.md](docs/spec/scenario.md).
   (`number_missing`). Không đọc thành tiếng: link, email, số điện thoại, mã tài liệu.
   Trần 2 câu chỉ còn cho trang chuyển chương / lời kết.
   Pass 2 thành **pass sửa lỗi validate**, chỉ chạy cho trang trượt.
+- **Bộ kiểm code v0 (chốt 2026-10-06) chỉ còn:** 🔴 `bad_grounding` — câu `content` trỏ ĐÚNG một
+  khối của trang, câu `delivery` không mang số / thuật ngữ (không thì thông tin lách qua câu
+  không cần nguồn) · 🟠 đủ ý `block_not_covered`, `number_missing` · 🟡 `unknown_pronunciation` ·
+  🔴 `empty_script`. Các luật "nói tự nhiên" bên dưới (nhịp, tỉ lệ delivery, văn viết, ký hiệu,
+  ≤ 30 âm tiết…) **chỉ còn là hướng dẫn trong prompt, code KHÔNG kiểm**.
 - **`syllables` do CODE tính** theo `pronunciation.json`, không để LLM tự khai.
 - **Input mỗi trang: nội dung CHÍNH TRANG ĐÓ** (`KBChunk` của trang) + `title` trang
   trước/sau + `slide_type`. **KHÔNG nhồi cả deck vào prompt.**
@@ -605,7 +610,7 @@ sparse 145; Thời gian làm việc 30 câu 28 · 29 · 29. Câu hiện đều d
 vẫn cần bộ câu **người viết**.
 Xem [docs/spec/search.md §10](docs/spec/search.md).
 
-**Proxy tự nhiên — chạy được trong CI:**
+**Proxy tự nhiên — chạy được trong CI:** (v0 KHÔNG kiểm — bỏ khỏi bộ kiểm S4 2026-10-06, xem §5 S4)
 
 | Chỉ số                         | Ngưỡng |
 | -------------------------------- | -------- |

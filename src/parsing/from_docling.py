@@ -47,15 +47,20 @@ _ROLE = {
 _FURNITURE_LABELS = {"page_header", "page_footer"}
 
 
-def _norm(s: str | None) -> str:
+def norm_text(s: str | None) -> str:
     return re.sub(r"\s+", " ", s or "").strip()
+
+
+def from_pptx(raw: dict[str, Any]) -> bool:
+    """docling.json này đọc từ .pptx? Hệ toạ độ khác PDF — xem `docling_box`."""
+    return "presentationml" in ((raw.get("origin") or {}).get("mimetype") or "")
 
 
 def _clamp(v: float) -> float:
     return 0.0 if v < 0.0 else (1.0 if v > 1.0 else v)
 
 
-def _box(prov: dict[str, Any], page_w: float, page_h: float, *, is_pptx: bool = False) -> Box:
+def docling_box(prov: dict[str, Any], page_w: float, page_h: float, *, is_pptx: bool = False) -> Box:
     """docling BOTTOMLEFT (t > b, đo từ đáy lên) -> TOPLEFT chuẩn hoá.
 
     NGOẠI LỆ .pptx: backend pptx của docling gắn nhãn `BOTTOMLEFT` nhưng số thật đo từ
@@ -76,7 +81,7 @@ def _box(prov: dict[str, Any], page_w: float, page_h: float, *, is_pptx: bool = 
             _clamp(b["r"] / page_w), _clamp(bottom / page_h))
 
 
-def _resolve(doc: dict[str, Any], ref: str) -> dict[str, Any] | None:
+def resolve_ref(doc: dict[str, Any], ref: str) -> dict[str, Any] | None:
     """'#/texts/12' -> doc['texts'][12]"""
     cur: Any = doc
     for part in ref.lstrip("#/").split("/"):
@@ -89,7 +94,7 @@ def _resolve(doc: dict[str, Any], ref: str) -> dict[str, Any] | None:
 def _walk(doc: dict[str, Any], node: dict[str, Any], seen: set[str]) -> Iterator[dict[str, Any]]:
     """Duyệt cây theo thứ tự đọc. Group trả về chính nó rồi mới tới con."""
     for ref in node.get("children", []):
-        item = _resolve(doc, ref["$ref"])
+        item = resolve_ref(doc, ref["$ref"])
         if item is None:
             continue
         sref = item.get("self_ref", "")
@@ -122,7 +127,7 @@ def _make_table(item: dict[str, Any], bid: str, box: Box) -> ParsedTable:
     grid = (item.get("data") or {}).get("grid") or []
     return ParsedTable(
         id=bid, polygon=polygon_from_box(*box), provenance=Provenance.TEXT_LAYER,   # chữ trong ô
-        cells=[[_norm(c.get("text")) for c in row] for row in grid],
+        cells=[[norm_text(c.get("text")) for c in row] for row in grid],
     )
 
 
@@ -153,7 +158,7 @@ def from_docling_json(
     path = Path(path)
     raw = json.loads(path.read_text(encoding="utf-8"))
 
-    is_pptx = "presentationml" in ((raw.get("origin") or {}).get("mimetype") or "")
+    is_pptx = from_pptx(raw)
 
     sizes = {int(k): (v["size"]["width"], v["size"]["height"]) for k, v in raw["pages"].items()}
     pages = {no: ParsedPage(page_no=no) for no in sorted(sizes)}
@@ -176,7 +181,7 @@ def from_docling_json(
             kids = [
                 k
                 for ref in item.get("children", [])
-                if (k := _resolve(raw, ref["$ref"])) is not None
+                if (k := resolve_ref(raw, ref["$ref"])) is not None
             ]
             kids = [k for k in kids if k.get("label") == "list_item" and (k.get("prov") or [])]
             if not kids:
@@ -184,12 +189,12 @@ def from_docling_json(
             pg = _page_no(kids[0])
             if pg is None or pg not in pages:
                 continue
-            boxes = [_box(k["prov"][0], *sizes[pg], is_pptx=is_pptx) for k in kids]
+            boxes = [docling_box(k["prov"][0], *sizes[pg], is_pptx=is_pptx) for k in kids]
             box = (min(x[0] for x in boxes), min(x[1] for x in boxes),
                    max(x[2] for x in boxes), max(x[3] for x in boxes))
             for k in kids:
                 seen.add(k.get("self_ref", ""))
-            lines = [t for k in kids if (t := _norm(k.get("text")))]
+            lines = [t for k in kids if (t := norm_text(k.get("text")))]
             if not lines:
                 continue
             pages[pg].blocks.append(ParsedParagraph(
@@ -204,7 +209,7 @@ def from_docling_json(
         pg = prov[0]["page_no"]
         if pg not in pages:
             continue
-        box = _box(prov[0], *sizes[pg], is_pptx=is_pptx)
+        box = docling_box(prov[0], *sizes[pg], is_pptx=is_pptx)
 
         if item.get("content_layer") == "furniture" or label in _FURNITURE_LABELS:
             continue                         # header/footer lặp — không phải nội dung
@@ -215,7 +220,7 @@ def from_docling_json(
         elif sref.startswith("#/tables/"):
             block = _make_table(item, next_id(pg), box)
         else:
-            text = _norm(item.get("text"))
+            text = norm_text(item.get("text"))
             if not text:
                 continue                 # bỏ TRƯỚC khi cấp id — không để lại lỗ trong dãy id
             block = ParsedParagraph(

@@ -8,8 +8,8 @@ Ba điểm dễ sai:
      đường" — viết độc lập thì robot mở đầu y hệt bảy lần. Trang sau đọc kịch bản trang
      trước cùng section. Đây là thứ thay cho `message` đã bỏ.
   3. **`syllables` do code tính.** LLM chỉ viết chữ; đếm âm tiết theo kho phát âm chung
-     `data/pronunciation.json`. Kho KHÔNG vào prompt: thuật ngữ lấy từ chính trang, kiểm
-     bằng code (`term_not_on_page`).
+     `data/pronunciation.json`. Kho KHÔNG vào prompt — prompt bảo chỉ dùng thuật ngữ có trên
+     chính trang.
 """
 
 from __future__ import annotations
@@ -106,20 +106,17 @@ def must_cover(b: object) -> bool:
             and len((b.content or "").split()) >= 3)
 
 
-def block_info(page: ParsedPage, pron: Pronunciation) -> dict[str, validate.BlockInfo]:
-    """id -> provenance / có phải tiêu đề / độ dài / phải nói — cho bộ kiểm tra."""
-    titles = {b.id for b in page.blocks if isinstance(b, ParsedParagraph) and b.role == "title"}
+def block_info(page: ParsedPage) -> dict[str, validate.BlockInfo]:
+    """id -> chữ / có phải nói — cho bộ kiểm tra."""
     cover = {b.id for b in page.blocks if must_cover(b)}
-    return {i: validate.BlockInfo(provenance=p, is_title=i in titles,
-                                  syllables=count(t, pron)[0], text=t, must_cover=i in cover)
-            for i, p, t in page_blocks(page)}
+    return {i: validate.BlockInfo(text=t, must_cover=i in cover) for i, _, t in page_blocks(page)}
 
 
 def check(ss: SlideScript, doc: ParsedDocument, page: ParsedPage,
           pron: Pronunciation) -> list[validate.Issue]:
     # trang lời kết không bị bắt nêu tiêu đề
     title = None if is_closing(doc, page) else page.title
-    return validate.check(ss, block_info(page, pron), pron, title)
+    return validate.check(ss, block_info(page), pron, title)
 
 
 def render_prompt(template: str, doc: ParsedDocument, page: ParsedPage, stype: str,
