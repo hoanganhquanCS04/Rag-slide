@@ -1,14 +1,14 @@
 {
-  "_note": "calibrated=false: cổng tin cậy đang dùng biên RRF, CHƯA fit trên bộ eval có nhãn (CLAUDE.md §6). Có reranker + bộ 50 câu thì fit lại.",
+  "_note": "calibrated=false: cổng tin cậy dùng biên RRF (không có reranker — bỏ 2026-10-01), ngưỡng CHƯA fit trên bộ eval có nhãn (CLAUDE.md §6). Có bộ 50 câu người viết thì fit lại.",
   "calibrated": false,
   "gate_min_margin": 0.002,
   "top_k": 5,
-  "max_contexts": 3,
+  "max_contexts": 5,
   "history_turns": 3,
   "max_answer_sentences": 4,
   "llm_timeout_s": 30,
   "llm_retry": 1,
   "llm_extra": {},
-  "_json_mode": "false: cổng trả 503 cho gemini-3.5-flash-lite khi bật JSON mode (đo 2026-10-02) — prompt vẫn đòi JSON, code vẫn kiểm. Đổi LLM_MODEL sang model chạy được JSON mode thì bật lại.",
+  "_json_mode": "false: cổng không chạy ổn JSON mode cho gemini-3.5-flash-lite (đo 2026-10-06: bật 3/9 lần được, còn lại trả chữ 'no longer available' kèm HTTP 200; tắt 9/9) — prompt vẫn đòi JSON, code vẫn kiểm. Đổi LLM_MODEL sang model chạy được JSON mode thì bật lại.",
   "json_mode": false
 }

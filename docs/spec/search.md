@@ -184,7 +184,8 @@ bash scripts/tune.sh out/kb/<ten>/chunks_thu.json --k 5,10,20 --wd 1,1.5,2     #
   lệch thì bảng lượt đó không tin được, script thoát mã 1.
 
 > Con số RRF **không phải xác suất, không phải độ tương đồng**. Nó chỉ dùng để XẾP THỨ TỰ.
-> Cấm lấy nó làm confidence gate — gate phải lấy điểm reranker (§6, và §9 dưới đây).
+> Không có reranker (§9) nên cổng tin cậy ở runtime tạm dùng **biên** RRF giữa top-1 và top-2,
+> khai `calibrated: false` — đừng đọc nó như độ chắc chắn.
 
 ---
 
@@ -298,24 +299,24 @@ minh được hybrid hơn dense ở chỗ nào — chỉ còn nước tin lời 
 
 ---
 
-## 9. Chưa làm — ghi ra để khỏi tưởng đã đủ
+## 9. Đã chốt bỏ · chưa làm
 
-**Reranker.** §6 đòi `retrieve → rerank → LLM chọn`, và confidence gate phải lấy điểm
-**reranker** chứ không lấy điểm tự khai. Nhưng `bge-reranker-v2-m3` là **model local
-2.2 GB** — đúng thứ vừa bị gỡ khỏi máy. Mâu thuẫn chưa gỡ, ba đường:
+**Reranker — BỎ (chốt 2026-10-01).** Ba đường từng cân nhắc:
 
 ```
-a. chạy reranker local        đi ngược quyết định "không model local nào"
-b. tìm rerank API             phải khảo sát, chưa biết endpoint hiện có cho không
-c. bỏ rerank, gate bằng RRF   RRF không calibrate được → §10 cấm thẳng
+a. chạy reranker local        đi ngược quyết định "không model local nào" (bge-reranker 2.2 GB)
+b. rerank qua API             cổng trả 403 capability_not_allowed — key không được bật quyền
+c. bỏ rerank, gate bằng RRF   ← ĐÃ CHỌN
 ```
 
-Chưa chọn. Nhưng **không có reranker thì chưa dựng được confidence gate**, mà không có
-gate thì §11 `harmful_jump < 2%` không đo được. Phải quyết trước khi làm R2.
+Retrieval cố định **top-5**, không nới `k`. Muốn xếp hạng tốt hơn thì làm ở tầng gộp (§4,
+`scripts/tune.sh`), ở dữ liệu (chunk, patch, mô tả ảnh) hoặc viết lại câu hỏi. Cái giá phải
+nhận: cổng tin cậy ở runtime dùng **biên RRF** — chỉ là thứ tự, không calibrate được —
+nên config khai `calibrated: false` và §11 `harmful_jump` chỉ báo cáo, không làm gate.
 
-**Multi-field.** §5 S6a đòi `v_message`, `v_title`, `v_desc`... riêng, §10 cấm gộp một
-vector cho cả slide. Hiện mới có **một vector cho cả chunk**, vì `SlideRepr` là sản phẩm
-của S1 mà S1 chưa có dòng code nào. Làm được sau khi có S1.
+**Multi-field — BỎ.** `v_message`, `v_desc`… riêng cần `message` / `relations` do S1 sinh,
+mà S1 đã bỏ (CLAUDE.md §5). Một vector cho mỗi chunk, cộng vector phụ cho từng ảnh khi trang
+có ≥ 2 ảnh ([kb-chunk.md §4](./kb-chunk.md)).
 
 **Bỏ dấu.** Chưa index bản không dấu. Người gõ thiếu dấu thì BM25 về 0.
 
@@ -341,13 +342,13 @@ Lý do: cả ba biến thể đều lấy câu hỏi **từ chính chữ của t
 trang 11 thì tất nhiên trang 11 khớp — nó so chính nó với chính nó. Bài thi mà đề bài là
 đáp án.
 
-§5 S6a viết gate này cho `message[i]` — **câu do S1 sinh ra**, tức một cách diễn đạt KHÁC
-về cùng nội dung. Đó mới là phép thử thật: *"nói lại bằng lời khác thì có còn tìm ra không"*.
-`message` chưa tồn tại vì S1 chưa có dòng code nào.
+Phép thử thật là *"nói lại bằng lời khác thì có còn tìm ra không"*. Bản thiết kế cũ định
+lấy `message` do S1 sinh làm câu hỏi — S1 đã bỏ, nên phép thử đó giờ là **bộ câu hỏi có
+nhãn** (`eval.py`, mục dưới).
 
-**Kết luận phải ghi rõ:** self-retrieval hiện tại chỉ chứng minh được **không có hai chunk
-trùng nhau**. Nó KHÔNG chứng minh index tìm tốt. Đừng lấy con số 100% này báo cáo là đạt
-gate §11 — gate đó chỉ có nghĩa sau khi có S1.
+**Kết luận phải ghi rõ:** self-retrieval chỉ chứng minh được **không có hai chunk trùng
+nhau**. Nó KHÔNG chứng minh index tìm tốt. Đừng lấy con số 100% này báo cáo là đạt gate
+§11 — số đo thật là bộ câu hỏi có nhãn.
 
 Thứ duy nhất nó bắt được ngay bây giờ là biến thể `title` rớt xuống 97.8%: một chunk mất
 top-1 khi câu hỏi bị cắt ngắn. Dấu hiệu yếu, nhưng là dấu hiệu duy nhất có thật.
@@ -459,8 +460,9 @@ cầu từ khái niệm tiếng Việt sang tên hàm.
 ở nội dung chunk: `p11` chỉ có mã nguồn và mô tả *hình vẽ trông thế nào*, không có câu nào
 nói trang này **dùng để làm gì**.
 
-Đó đúng là việc của **S1** (§5): sinh `message` — *"trang này muốn nói gì"*, tách bạch với
-`description` — *"trang này vẽ gì"*. Một câu `message` kiểu *"lưu biểu đồ đã vẽ ra file ảnh
-bằng plt.savefig"* là khớp ngay cả hai nhánh.
+Bản thiết kế cũ giao việc này cho S1 (sinh `message` — *"trang này muốn nói gì"*), nhưng S1
+đã bỏ. Chỗ chữa còn lại nằm ở **dữ liệu**: một câu kiểu *"lưu biểu đồ đã vẽ ra file ảnh bằng
+plt.savefig"* trong mô tả ảnh hoặc vá tay (`data/patches/`) là khớp ngay cả hai nhánh — hoặc
+viết lại câu hỏi ở runtime (R3b).
 
-Ghi lại ở đây để sau khỏi đi sửa nhầm chỗ: **ca này chờ S1, không chờ search.**
+Ghi lại ở đây để sau khỏi đi sửa nhầm chỗ: **ca này chữa ở dữ liệu, không ở search.**

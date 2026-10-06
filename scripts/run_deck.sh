@@ -14,7 +14,8 @@
 #   (--eval) eval         -> out/kb/<ten>/audit/eval.json            src/kb/eval.py          [nhúng câu hỏi]
 #
 # Tham số khác (--no-vlm, --pages, --redo…) chuyển cho bước parse (`src/parsing/cli.py run --help`).
-# Parse có cờ mức error (mã 1) thì vẫn chạy tiếp — file vẫn ghi, cờ để người duyệt.
+# Parse có cờ mức error (mã 3) thì vẫn chạy tiếp — file vẫn ghi, cờ để người duyệt.
+# Mã khác 0 và 3 (không thấy file, thiếu khoá API…) -> DỪNG, không chạy tiếp trên dữ liệu cũ.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -43,8 +44,8 @@ CHUNKS="out/kb/$DOC_ID/chunks.json"
 
 echo "=== [1/3] parse  $SRC -> $PARSED"
 rc=0; "$PY" src/parsing/cli.py run "$SRC" ${PARSE_ARGS[@]+"${PARSE_ARGS[@]}"} || rc=$?
-if [ "$rc" -eq 1 ]; then echo "    (co co muc error — xem log tren, van chay tiep)"
-elif [ "$rc" -ne 0 ]; then exit "$rc"
+if [ "$rc" -eq 3 ]; then echo "    (co co muc error — xem log tren, van chay tiep)"
+elif [ "$rc" -ne 0 ]; then echo "=== DUNG: buoc parse loi (ma $rc) — xem dong loi o tren" >&2; exit "$rc"
 fi
 
 echo "=== [2/3] chunk + nhung -> $CHUNKS"
@@ -54,11 +55,10 @@ echo "=== [3/3] deck_map -> out/deck/$DOC_ID/deck_map.txt"
 "$PY" src/kb/deck_map.py "$PARSED"
 
 if [ "$EVAL" -eq 1 ]; then
-  QUERIES="data/eval/$DOC_ID.queries.json"
-  [ -f "$QUERIES" ] || QUERIES="data/eval/queries.json"
-  echo "=== [eval] $QUERIES -> out/kb/$DOC_ID/audit/eval.json"
+  # câu hỏi: data/eval/<ten>.queries.json — eval.py tự chọn, dòng "===" đầu tiên in tên file
+  echo "=== [eval] -> out/kb/$DOC_ID/audit/eval.json"
   # eval in từng câu ra log (stderr) — ở đây chỉ giữ dòng tổng; chi tiết từng câu nằm trong eval.json
-  "$PY" src/kb/eval.py "$CHUNKS" --queries "$QUERIES" -o "out/kb/$DOC_ID/audit/eval.json" 2>&1 \
+  "$PY" src/kb/eval.py "$CHUNKS" -o "out/kb/$DOC_ID/audit/eval.json" 2>&1 \
     | grep -E "^(===|---|ghi|CANH BAO|          )"
 fi
 

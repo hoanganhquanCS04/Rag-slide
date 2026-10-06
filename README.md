@@ -1,298 +1,167 @@
-# Slide Presenter Agent
+# Robot Slide RAG
 
-Agent tự thuyết trình một bộ slide và xử lý tương tác thời gian thực từ khán giả —
-trả lời câu hỏi và điều hướng slide — trong khi luôn đồng bộ với trạng thái trình chiếu
-và có nguồn truy nguyên được.
+Robot tự thuyết trình một bộ slide và trả lời câu hỏi của khán giả: hỏi gì đáp nấy, muốn
+xem lại trang nào thì quay về trang đó, câu trả lời nào cũng lần ngược được về đúng mẩu
+trên slide.
 
----
-
-## Vấn đề
-
-Slide là bản nén mất mát của kiến thức. Phần bị mất nằm trong đầu người thuyết trình.
-Một hệ thống chỉ đọc slide thì chỉ đọc được bullet point — không giải thích được,
-không trả lời được câu hỏi tiếp theo.
-
-Deck mục tiêu có đặc điểm **ít chữ nhiều hình**: trung bình dưới 20 từ mỗi trang,
-ngữ nghĩa nằm trong sơ đồ và biểu đồ. Pipeline RAG text thuần thất bại hoàn toàn ở đây.
-
-Hệ thống giải quyết bằng cách tách làm hai nhánh: một nhánh **offline** tái tạo lại
-phần kiến thức đã bị lược bỏ (và trả trước toàn bộ chi phí tính toán), một nhánh
-**online** chỉ tra cứu lại những gì offline đã dựng sẵn, trong ngân sách 2.5 giây.
+> **Giai đoạn hiện tại: nhánh OFFLINE — dựng kho tri thức (KB) để tìm kiếm.**
+> Đầu vào là **một file PDF duy nhất**, vừa là bộ slide vừa là KB. Mọi model (VLM, LLM,
+> embedding) đều gọi **qua API**, không chạy model local nào. Phần nói (TTS), ngắt lời,
+> duyệt bởi người chưa làm.
 
 ---
 
-## Kiến trúc
+## Đã làm đến đâu
 
-```
-NHÁNH DECK                          NHÁNH NGUỒN
-deck.pptx                           source/*.pdf
-    │                                   │
- S0 Ingest ──────┐                  S5 KB Construction
-    │            │                  chunk · enrich · index
- S1 Understanding│                      │
-    │            │                      │
- S2 Structure    └──── S3 Alignment ────┘
-    │                       │
-    └──────────────── S4 Scenario
-                            │
-                       S6 Precompute
-                            │
-                       S7 HITL Review
-                            │
-                       Runtime R1–R7
-```
+|    | Bước            | Code                            | Làm gì                                                                                                                                                                                                   |
+| -- | ----------------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ✅ | S0 Parse          | `src/parsing/`                | docling đọc chữ + toạ độ (tắt OCR) · VLM nhìn cả trang sắp chữ thành khối · VLM chép bảng từ ảnh bảng · chương từ trang mục lục · link ẩn · vá tay · cờ cho người duyệt |
+| ✅ | S5 KB             | `src/kb/`                     | 1 trang = 1 chunk (cắt khi > 500 token) · nhúng`text-embedding-3-small` qua API, cache theo nội dung · kho vector Chroma hoặc RAM · index BM25                                                    |
+| ✅ | Tìm kiếm        | `src/kb/search.py`            | hybrid vector + BM25, gộp bằng RRF (K=15, 1:1), trả**top-5 trang**                                                                                                                                |
+| ✅ | Đo chất lượng | `src/kb/{eval,audit,tune}.py` | bộ câu hỏi có nhãn · self-retrieval + quét chunk trùng · quét tham số RRF                                                                                                                       |
+| ✅ | S6a`deck_map`   | `src/kb/deck_map.py`          | bản đồ chương ~180 token cho prompt runtime, bằng luật                                                                                                                                              |
+| 🟡 | Hỏi đáp thử   | `scripts/try_ask.py`          | tìm → 1 lần gọi LLM → code kiểm nguồn, trong terminal                                                                                                                                               |
+| 🟡 | S4 kịch bản     | `src/scenario/`               | đã code, chạy riêng —**ngoài giai đoạn hiện tại**                                                                                                                                          |
+| ⬜ | Chưa làm        |                                 | S2`time_budget` · S6b TTS · S7 người duyệt · runtime thật (giọng nói, ngắt lời)                                                                                                               |
+| 🚫 | Đã bỏ          |                                 | S1 (gộp vào S0) · S3 Alignment · reranker — lý do ở[CLAUDE.md](./CLAUDE.md)                                                                                                                          |
 
-Thứ tự chạy thật: `S5 ∥ S0 → S1 → S2 → S3 → S4 → S6 → S7`
-(số stage là lớp khái niệm, không phải thứ tự — S5 mang số lớn nhưng chạy sớm nhất)
+Số hiện tại (2026-10-02), hai deck đang làm:
 
-| Stage | Nhiệm vụ |
-|---|---|
-| **S0** Ingest | Parse pptx (XML + render PNG) → `RawSlide[]`. Thuần parsing, không model |
-| **S1** Slide Understanding | VLM sinh ngữ nghĩa mà parsing không lấy được → `SlideRepr[]` |
-| **S2** Deck Structure | Stage duy nhất nhìn toàn cục: phần, phụ thuộc, mạch bài, bản đồ khái niệm |
-| **S5** KB Construction | Chunk + contextual enrichment + hybrid index trên tài liệu nguồn |
-| **S3** Alignment | Nối mỗi slide với đoạn nguồn đã đẻ ra nó. Điểm hội tụ của hai nhánh |
-| **S4** Scenario | Sinh kịch bản nói, mỗi câu kèm `grounding` truy nguyên được |
-| **S6** Precompute | TTS sẵn, Q&A cache, thumbnail — mua latency của runtime |
-| **S7** HITL Review | Người duyệt **chỉ phần bị flag**, không duyệt toàn bộ |
+|                                             | Onboarding Kit     | Thời gian làm việc & Chính sách nhân sự |
+| ------------------------------------------- | ------------------ | ---------------------------------------------- |
+| trang · chương                           | 51 · 5            | 17 · 5                                        |
+| chunk                                       | 104                | 18                                             |
+| tìm đúng trang ở top-1 / top-5 (hybrid) | 157/200 · 195/200 | 28/30 · 30/30                                 |
 
 ---
 
-## Cấu trúc repo
+## Luồng offline
 
 ```
-.
-├── CLAUDE.md               # context cho AI coding agent — đọc trước khi code
-├── README.md
-├── pyproject.toml
-│
-├── src/
-│   ├── schemas/            # Pydantic models cho mọi artifact
-│   │   ├── raw_slide.py
-│   │   ├── slide_repr.py
-│   │   ├── deck_structure.py
-│   │   ├── kb_chunk.py
-│   │   ├── alignment.py
-│   │   └── scenario.py
-│   │
-│   ├── offline/
-│   │   ├── s0_ingest.py
-│   │   ├── s1_understand.py
-│   │   ├── s2_structure.py
-│   │   ├── s3_align.py
-│   │   ├── s4_scenario.py
-│   │   ├── s5_kb.py
-│   │   ├── s6_precompute.py
-│   │   └── pipeline.py     # orchestrator, hỗ trợ resume + incremental
-│   │
-│   ├── runtime/
-│   │   ├── orchestrator.py # nguồn chân lý duy nhất về state
-│   │   ├── fast_path.py    # regex điều hướng, ~5ms
-│   │   ├── agent.py        # 1× LLM function-calling
-│   │   ├── navigation.py   # R2 + confidence gate
-│   │   ├── retrieval.py    # R4
-│   │   ├── state.py        # state machine + resume stack
-│   │   └── tts.py          # streaming theo câu
-│   │
-│   ├── servers/            # MCP servers (tùy chọn)
-│   │   ├── slide_control.py
-│   │   └── knowledge.py
-│   │
-│   └── review/             # UI duyệt HITL
-│
-├── prompts/                # mọi prompt ở đây, không hardcode trong .py
-│   ├── s1_understand.md
-│   ├── s2_structure.md
-│   ├── s3_verify.md
-│   ├── s4_scenario.md
-│   └── runtime_agent.md
-│
-├── data/
-│   ├── decks/{deck_id}/    # per-deck bundle
-│   ├── kb/                 # shared layer
-│   └── eval/               # bộ test có nhãn
-│
-└── tests/
+data/raw/<file>.pdf
+   │ ① docling: chữ + toạ độ + vùng ảnh/bảng                       CPU
+   │ ② VLM sắp bố cục từng trang · ②b VLM chép từng bảng            API + cache
+   │ ③ ghép + kiểm + chương + link + vá tay + cờ                
+   ▼
+out/parsed/<ten>/document.json      ParsedDocument — nguồn của mọi bước sau
+   │ ④ chunk + nhúng vector + nạp kho                               💰 API+  có cache
+   ▼
+out/kb/<ten>/chunks.json + vectors__<model>.npy  (+ out/kb/chroma/)
+   │ ⑤ deck_map                                                     miễn phí
+   ▼
+out/deck/<ten>/deck_map.txt
 ```
+
+`<ten>` = tên file bỏ dấu, viết thường: `Thời gian làm việc & Chính sách nhân sự.pdf` →
+`thoi_gian_lam_viec_chinh_sach_nhan_su`. Chạy lại bao nhiêu lần cũng được — bước nào có cache
+thì không tốn API.
 
 ---
 
 ## Cài đặt
 
-```bash
-# Python 3.11+
-uv sync            # hoặc: pip install -e .
-
-# LibreOffice headless để render slide
-sudo apt install libreoffice fonts-liberation
-
-# Font tiếng Việt (bắt buộc, nếu không render sẽ vỡ dấu)
-sudo apt install fonts-noto fonts-be-vietnam-pro
-
-cp .env.example .env    # điền API key
-```
-
----
-
-## Sử dụng
-
-### Build một deck
+Python 3.12, phiên bản thư viện ghim trong `requirements.txt`:
 
 ```bash
-# chạy toàn bộ nhánh offline
-python -m src.offline.pipeline build \
-    --deck data/decks/rag-intro/deck.pptx \
-    --source data/sources/rag/ \
-    --budget-min 30
-
-# chạy riêng một stage (mọi stage đều standalone)
-python -m src.offline.s1_understand --deck-id rag-intro
-python -m src.offline.s3_align      --deck-id rag-intro
-
-# rebuild tăng dần — chỉ chạy lại slide có hash thay đổi
-python -m src.offline.pipeline build --deck-id rag-intro --incremental
+uv venv --python 3.12
+uv pip install -r requirements.txt
 ```
 
-### Duyệt HITL
+Tạo file `.env` ở gốc repo:
+
+| Biến                                   | Ví dụ                       | Dùng ở                                   |
+| --------------------------------------- | ----------------------------- | ------------------------------------------ |
+| `OPENAI_API_KEY`, `OPENAI_BASE_URL` | `https://api.yescale.io/v1` | mọi lần gọi API                         |
+| `VLM_MODEL`                           | `gemini-3.5-flash-lite`     | ② bố cục trang                          |
+| `TABLE_MODEL`                         | `gemini-3.8-flash`          | ②b chép bảng                            |
+| `LLM_MODEL`                           | `gpt-5-mini`                | hỏi đáp thử, kịch bản                |
+| `EMBED_MODEL`                         | `text-embedding-3-small`    | ④ nhúng vector, tìm kiếm               |
+| `VECTOR_DB`                           | `chroma` hoặc `inmem`    | kho vector (bỏ trống =`inmem`)         |
+| `CHROMA_PATH`                         | `out/kb/chroma`             | chỗ Chroma ghi đĩa, tính từ gốc repo |
+
+Windows: terminal PowerShell mới cần `$env:PYTHONIOENCODING = "utf-8"` (script `.sh` tự đặt).
+
+---
+
+## Chạy
+
+Lệnh `bash` chạy trong Git Bash; `python` là Python trong `.venv`
+(`.venv\Scripts\python.exe` trên Windows).
 
 ```bash
-python -m src.review.app --deck-id rag-intro
-# → http://localhost:8080
+# 1. Cả nhánh offline của một deck: parse -> chunk + nhúng -> deck_map
+bash scripts/run_deck.sh "data/raw/<file>.pdf"
+## các tuỳ chọn khác 
+bash scripts/run_deck.sh "data/raw/<file>.pdf" --no-vlm     # không gọi VLM, dùng cache
+bash scripts/run_deck.sh "data/raw/<file>.pdf" --pages 22   # gọi lại VLM riêng trang 22
+bash scripts/run_deck.sh "data/raw/<file>.pdf" --eval       # chạy xong thì đo luôn
+
+# 2. Hỏi đáp thử trên KB vừa dựng (Ctrl+C để thoát)
+python scripts/try_ask.py <ten>
+python scripts/try_ask.py "data/raw/<file>.pdf"            # tên file gốc cũng được
+python scripts/try_ask.py <ten> "nghỉ phép năm được mấy ngày"
+
+# 3. Chỉ tìm, xem trang nào ra và do nhánh nào kéo lên
+python src/kb/search.py out/kb/<ten>/chunks.json "làm thêm ngày lễ hệ số bao nhiêu" --explain
+
+# Xem nội dung đã parse / chunk của một trang
+python src/parsing/cli.py show <ten> --page 7
+python src/kb/cli.py out/parsed/<ten>/document.json --page 7 --full
 ```
 
-Chỉ hiện những chỗ bị flag: câu kịch bản `grounding: null`, slide coverage = 0,
-chart trích từ ảnh, hai pass VLM bất đồng, dependency chỉ tiến.
+### Ví dụ — 2 deck đang làm, copy chạy luôn
 
-### Chạy buổi thuyết trình
+Chạy ở **thư mục gốc repo**; đường dẫn file luôn kèm `data/raw/`, tên có dấu cách thì bọc ngoặc kép.
+
+> ⚠️ 2 deck này đã dựng bố cục bằng `gemini-3.5-flash-lite`; `VLM_MODEL` nay là `gemini-3.8-flash`
+> (2026-10-06). Cache bố cục khoá theo tên model → chạy lại **không kèm `--no-vlm`** là gọi lại
+> VLM cho CẢ deck (51 + 17 trang). Chỉ cần chunk / nhúng lại thì dùng dòng `--no-vlm`.
 
 ```bash
-python -m src.runtime.orchestrator --deck-id rag-intro
-# → màn hình trình chiếu:  http://localhost:3000
-# → khán giả quét QR gửi câu hỏi: http://localhost:3000/ask
+# Thời gian làm việc & Chính sách nhân sự   ->   <ten> = thoi_gian_lam_viec_chinh_sach_nhan_su
+bash scripts/run_deck.sh "data/raw/Thời gian làm việc & Chính sách nhân sự.pdf"
+bash scripts/run_deck.sh "data/raw/Thời gian làm việc & Chính sách nhân sự.pdf" --no-vlm
+python scripts/try_ask.py thoi_gian_lam_viec_chinh_sach_nhan_su
+python scripts/try_ask.py thoi_gian_lam_viec_chinh_sach_nhan_su "làm thêm ngày lễ được tính hệ số bao nhiêu"
+python src/kb/search.py out/kb/thoi_gian_lam_viec_chinh_sach_nhan_su/chunks.json "giờ làm việc ban đêm tính từ mấy giờ" --explain
+python src/parsing/cli.py show thoi_gian_lam_viec_chinh_sach_nhan_su --page 7
+
+# Onboarding Kit   ->   <ten> = onboarding_kit
+bash scripts/run_deck.sh "data/raw/Onboarding Kit.pdf"
+bash scripts/run_deck.sh "data/raw/Onboarding Kit.pdf" --no-vlm
+python scripts/try_ask.py onboarding_kit
+python scripts/try_ask.py onboarding_kit "bảo hiểm sức khỏe Vingroup có những gói nào"
+python src/kb/search.py out/kb/onboarding_kit/chunks.json "quy tắc phản hồi email" --explain
+python src/parsing/cli.py show onboarding_kit --page 29
 ```
 
-### Đánh giá
+## Cấu trúc repo
 
-```bash
-python -m src.eval.run --deck-id rag-intro --suite navigation
-python -m src.eval.run --deck-id rag-intro --suite qa
-python -m src.eval.run --deck-id rag-intro --suite latency
 ```
-
----
-
-## Ngân sách hiệu năng
-
-**Offline** (deck 20 trang, lần đầu): ~6 phút.
-Rebuild tăng dần khi sửa 3 trang: ~40 giây.
-
-**Online**, tới byte audio đầu tiên:
-
-| Bước | Ngân sách |
-|---|---|
-| Regex fast-path | ~5 ms (bắt ~40% lệnh điều hướng) |
-| 1× LLM function-calling | 400–700 ms |
-| Retrieval | 50–150 ms |
-| Generation, first token | 300–500 ms |
-| TTS chunk đầu | 200–400 ms |
-| **Tổng** | **1.2–1.8 s** |
-
-Cộng thêm hai lớp che: filler audio phát ngay khi nhận câu hỏi (~2s), và hành động
-thị giác (nhảy trang / highlight) đi trước lời nói. `qa_cache` hit thì trả về ~200ms.
-TTS của kịch bản chính đã synth sẵn nên ~90% thời lượng buổi nói có latency bằng 0.
-
----
-
-## Quality gate
-
-Không đạt thì không deploy.
-
-| Chỉ số | Ngưỡng |
-|---|---|
-| Alignment coverage | ≥ 80% slide có ≥1 nguồn conf > 0.6 |
-| Ungrounded sentence rate | < 10% |
-| Timing deviation | < 15% so với budget |
-| Flag precision (S7) | ≥ 60% |
-| P95 latency | < 2.5 s |
-
----
-
-## Đánh giá
-
-| Nhánh | Metric | Ground truth |
-|---|---|---|
-| S1 | Độ đúng `message`, `relations` | Annotate tay 20 slide |
-| S3 | Precision / Recall / F1 của link | 20 slide × ~20 ứng viên = 400 cặp |
-| S4 | Ungrounded rate, human rating | Đếm tự động + chấm tay |
-| R2 | Top-1 accuracy, MRR, **harmful jump rate** | 20 slide × 50 câu điều hướng có nhãn |
-| R4 | Faithfulness, tỉ lệ từ chối đúng | Bộ câu hỏi in-scope / out-of-scope |
-| HITL | Số phút/deck, flag precision | Phiên duyệt thật |
-
-**Harmful jump rate** (nhảy sai trang mà không hỏi lại) là con số quan trọng nhất
-của R2, không phải Top-1 accuracy đơn thuần.
-
-### Ablation
-
-1. **S3**: dense · hybrid · hybrid + LLM verify → bước verify có đáng giá không
-2. **S5**: chunk thô vs chunk enriched → contextual enrichment có đáng giá không
-3. **R2**: nhét thẳng · prefilter+rerank · phân cấp, đo theo N = 20/50/100/200
-
----
-
-## Phạm vi v1
-
-**Trong phạm vi**
-- Chỉ nhận `.pptx` (PDF mất animation, speaker notes, chart data gốc)
-- Kênh hỏi bằng **text** — QR → form web, không ASR
-- App tự render slide
-- Deck cố định lúc build
-- Tiếng Việt, thuật ngữ giữ gốc tiếng Anh
-- Một deck active mỗi phiên
-
-**Ngoài phạm vi v1**
-- Voice / ASR (phòng ồn là rủi ro lớn nhất và không phải phần nghiên cứu)
-- Robot vật lý
-- Điều khiển PowerPoint / Google Slides bên ngoài
-- Upload deck lúc runtime
-- Cross-deck navigation
-
----
-
-## Roadmap
-
-- [ ] S0 — parser pptx + render, quality gate đầu ra
-- [ ] Schema Pydantic cho toàn bộ artifact
-- [ ] S5 — KB với contextual enrichment
-- [ ] S1 — VLM understanding, 2 pass self-consistency
-- [ ] **Bộ eval R2: 50 câu hỏi điều hướng có nhãn trang đúng** ← làm trước khi code runtime
-- [ ] S3 — alignment + coverage report
-- [ ] S2 — deck structure + validate 5 luật
-- [ ] S4 — scenario với grounding trace
-- [ ] S6 — precompute
-- [ ] Runtime R1–R5
-- [ ] S7 — UI duyệt HITL
-- [ ] Ablation + báo cáo
+src/
+├── parsing/      S0 — file gốc -> ParsedDocument          cli.py run | show
+├── kb/           S5 — chunk, nhúng, kho vector, BM25, tìm, đo
+│   ├── store/    kho vector: inmem | chroma (VECTOR_DB)
+│   └── sparse/   index từ khoá: rank_bm25 (SPARSE_INDEX)
+├── runtime/      hỏi đáp thử bản chữ (try_ask.py dùng retrieve + router)
+├── scenario/     S4 kịch bản — ngoài giai đoạn hiện tại
+└── llm.py        gọi LLM/VLM qua API, retry, log vào logs/
+scripts/          run_deck.sh · try_ask.py · tune.sh · pptx2pdf.ps1 · extract_terms.py
+prompts/          mọi prompt (không hardcode trong .py)
+config/           runtime.json — tham số hỏi đáp
+data/             raw/ file gốc · eval/ câu hỏi có nhãn · patches/ vá tay · pronunciation.json
+out/              mọi thứ sinh ra: parsed/ · kb/ · deck/                     (gitignore)
+docs/             tài liệu — xem dưới
+```
 
 ---
 
 ## Tài liệu
 
-Đặc tả nhánh offline — chi tiết từng stage, hợp đồng dữ liệu, failure mode, quality gate:
-[`docs/offline/`](./docs/offline/), bắt đầu từ [`00-overview.md`](./docs/offline/00-overview.md).
-
-| | | |
-|---|---|---|
-| [S0 Ingest](./docs/offline/s0-ingest.md) | [S1 Understanding](./docs/offline/s1-slide-understanding.md) | [S2 Structure](./docs/offline/s2-deck-structure.md) |
-| [S5 KB](./docs/offline/s5-kb-construction.md) | [S3 Alignment](./docs/offline/s3-alignment.md) | [S4 Scenario](./docs/offline/s4-scenario.md) |
-| [S6 Precompute](./docs/offline/s6-precompute.md) | [S7 HITL](./docs/offline/s7-hitl-review.md) | |
-
-Đặc tả nhánh runtime — vì sao có từng lớp, cơ chế, failure mode, chỉ số:
-[`docs/runtime/`](./docs/runtime/), bắt đầu từ [`00-overview.md`](./docs/runtime/00-overview.md).
-
-| | | |
-|---|---|---|
-| [R1 Intake & fast-path](./docs/runtime/r1-intake-fastpath.md) | [R2 Navigation](./docs/runtime/r2-navigation.md) | [R3 Context rewriting](./docs/runtime/r3-context-rewriting.md) |
-| [R4 Grounded answering](./docs/runtime/r4-grounded-answering.md) | [R5 Streaming speech](./docs/runtime/r5-streaming-speech.md) | [R6 State & sync](./docs/runtime/r6-state-sync.md) |
-| [R7 Interrupt & turn-taking](./docs/runtime/r7-interrupt-turntaking.md) | | |
-
-Context cho AI coding agent: [`CLAUDE.md`](./CLAUDE.md) — đọc trước khi sinh code.
+| Đọc khi                                                                             | File                                                                                            |
+| ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Muốn hiểu cái **đang chạy thật**: luồng, dữ liệu từng tầng, số đo | [docs/offline/01-hien-trang.md](./docs/offline/01-hien-trang.md)                                 |
+| Cần**lệnh**: chạy, đọc kết quả, chạy lại một phần                    | [docs/offline/02-lenh.md](./docs/offline/02-lenh.md)                                             |
+| Cần schema / lý do từng quyết định                                              | [docs/spec/](./docs/spec/) — `parsed-document` · `kb-chunk` · `embedding` · `search` |
+| Muốn xem thiết kế đích (pptx, runtime R1–R7, TTS, duyệt)                       | [docs/README.md](./docs/README.md)                                                               |
+| Sắp viết code                                                                       | [CLAUDE.md](./CLAUDE.md) — luật bắt buộc của dự án                                        |

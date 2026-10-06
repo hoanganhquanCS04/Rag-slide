@@ -79,8 +79,9 @@ mức "mô tả slide".
 **Đã làm được đến đâu:**
 
 ```
-✅ S0   PDF → ParsedDocument      src/parsing/     40 trang, 7 section, patch tay
-✅ S5   chunk + vector + tìm      src/kb/          52 chunk, hybrid dense+BM25
+✅ S0   PDF → ParsedDocument      src/parsing/     2 deck: Onboarding 51 trang, Thời gian làm việc 17 — chương từ mục lục
+✅ S5   chunk + vector + tìm      src/kb/          104 + 18 chunk, hybrid dense+BM25 gộp RRF, cố định top-5
+✅ S6a  deck_map.txt             src/kb/deck_map.py — luật, không gọi model
 🚫 S1   BỎ — gộp vào S0                            xem §5
 🚫 S3   BỎ ở v0 — align vào chính mình thì vô nghĩa
 ✅ S2a  slide_type               luật, ParsedPage.slide_type — divider · exercise · content
@@ -346,8 +347,13 @@ input → regex fast-path ──(khớp)──→ goto_slide()          [~5ms]
 
 **Luật cứng:**
 
-- **Đúng 1 lần gọi LLM** cho routing + rewrite + chọn tool. KHÔNG tách router riêng.
+- **Đúng 1 lần gọi LLM** cho routing + trả lời + chọn tool. KHÔNG tách router riêng.
   (R3a là bước deterministic, KHÔNG phải lần gọi model thứ hai.)
+  **Ngoại lệ đã chốt 2026-10-06 — viết lại câu hỏi nối tiếp:** khi đã có lịch sử, 1 lần LLM
+  (`prompts/r_rewrite.md`) xem câu hỏi của 3 lượt gần nhất, viết lại câu cụt ("vậy hạn chót là
+  ngày nào") thành câu đủ ý RỒI MỚI TÌM. Lý do: tìm chạy trước lần gọi trả lời, câu cụt tìm bằng
+  chính nó là lạc đề; đoán câu nối tiếp bằng từ khoá thì sót. Câu đầu phiên không tốn thêm.
+  Chấp nhận chậm thêm ~1–2s. Đây KHÔNG phải router: không phân loại, không chọn tool.
 - **KHÔNG nhồi index hay bảng toàn bộ vào prompt.** Ranh giới phân loại:
 
   ```
@@ -357,49 +363,42 @@ input → regex fast-path ──(khớp)──→ goto_slide()          [~5ms]
   ```
 
   Prompt mục tiêu **~1.3k token**, không phải 3.6k.
-- **R2 = retrieve → rerank → LLM chọn.**
+- **R2 = retrieve → LLM chọn.** KHÔNG có reranker.
 
-  - hybrid dense + BM25 gộp bằng RRF (`src/kb/search.py`) → **top-k = 5** → rerank →
-    **top-3** → LLM chỉ VERIFY và CHỌN trong 3, kèm lý do
+  - hybrid dense + BM25 gộp bằng RRF (`src/kb/search.py`) → **top-k = 5, CỐ ĐỊNH** →
+    **cả top-5** vào prompt → LLM chỉ VERIFY và CHỌN trong 5, kèm lý do (không reranker
+    lọc xuống 3 nữa: top-3 trượt 7/200 câu Onboarding mà top-5 có)
   - **Nhánh điều hướng phải TẮT lọc trang phân mục**: hỏi "quay lại phần đồ thị ba chiều"
     thì trang MỞ CHƯƠNG mới là đáp án đúng (`--no-filter`)
-  - **Reranker: ĐÃ CHỐT là gọi QUA API**, không chạy local — cùng lý do đã bỏ `bge-m3`.
-    Đo được trên endpoint đang dùng (`api.yescale.io`):
+  - **Reranker: BỎ (chốt 2026-10-01).** Không chạy local (cùng lý do đã bỏ `bge-m3`), và
+    không chờ quyền `/rerank` trên API key nữa (cổng trả 403 `capability_not_allowed`).
+    Muốn xếp hạng tốt hơn thì làm ở tầng gộp (RRF K, trọng số — `scripts/tune.sh`), ở dữ
+    liệu (chunk, patch, mô tả ảnh) hoặc viết lại câu hỏi.
+  - ⚠️ **Hệ quả: KHÔNG có confidence gate calibrate được.** Phải chấp nhận và ghi rõ,
+    đừng lờ đi:
 
     ```
-    POST /rerank      HTTP 403  capability_not_allowed
-                                "This API key is not allowed to use the rerank capability"
-    GET  /models      98 model, KHÔNG có model rerank nào
-    ```
-
-    **403 chứ không phải 404** → cổng CÓ đường rerank, chỉ là key chưa được bật quyền.
-    Đây là việc của tài khoản, không phải việc kỹ thuật. Bật xong là cắm vào chạy.
-  - ⚠️ **Trong lúc chờ bật quyền — KHÔNG có confidence gate thật.** Hệ quả phải chấp nhận
-    và ghi rõ, đừng lờ đi:
-
-    ```
-    §11 harmful_jump < 2%    KHÔNG ĐO ĐƯỢC  — không có điểm calibrate được
+    §11 harmful_jump < 2%    KHÔNG ĐO ĐƯỢC chính xác — không có điểm calibrate được
     §10 cấm dùng điểm LLM tự khai làm gate   — vẫn cấm, không nới
     ```
 
-    Tạm thời dùng **biên RRF** (`rrf(top1) − rrf(top2)`) làm phanh, đặt ngưỡng **rộng tay
-    về phía hỏi lại**: thà hỏi nhiều còn hơn nhảy sai. Phải khai rõ trong config là
-    `calibrated: false`, và thay bằng điểm reranker ngay khi có. Biên RRF **không phải**
-    xác suất, chỉ là thứ tự — xem [search.md §4](docs/spec/search.md).
-  - Trượt ở tầng truy xuất thì tầng LLM KHÔNG cứu được → theo dõi `recall@k`,
-    dưới 95% thì nới `k`
+    Cổng dùng **biên RRF** (`rrf(top1) − rrf(top2)`) làm phanh, đặt ngưỡng **rộng tay về
+    phía hỏi lại**: thà hỏi nhiều còn hơn nhảy sai. Config khai rõ `calibrated: false`.
+    Biên RRF **không phải** xác suất, chỉ là thứ tự — xem [search.md §4](docs/spec/search.md).
+  - Trượt ở tầng truy xuất thì tầng LLM KHÔNG cứu được → theo dõi `recall@5`. **KHÔNG nới
+    `k`** (chốt 2026-10-01) — trượt thì sửa ở RRF / dữ liệu / viết lại câu hỏi.
 - **R3 tách đôi để gỡ vòng tròn** (muốn truy xuất cần query đã rewrite, muốn rewrite
   cần LLM, LLM chạy sau truy xuất):
 
   - **R3a — mở rộng query, DETERMINISTIC, ~5ms, không gọi model.** Khớp chuỗi từ chỉ trỏ
     vào `relations[].visual` / `visual_elements`, nối thêm `entities` trang hiện tại
     → `query_expanded` dùng để TRUY XUẤT.
-  - **R3b — rewrite thật, trong lần gọi LLM duy nhất.** `query_rewritten` là tham số tool;
-    `text` GỐC mới là thứ dùng để sinh câu trả lời.
-- **Confidence gate:** `margin = rerank(top1) − rerank(top2) < threshold` → KHÔNG nhảy,
+  - **R3b — rewrite thật.** v0: lần gọi viết lại câu hỏi riêng ở trên (chỉ khi có lịch sử) —
+    câu viết lại chỉ dùng để TÌM; `text` GỐC mới là thứ dùng để sinh câu trả lời.
+- **Confidence gate:** `margin = rrf(top1) − rrf(top2) < threshold` → KHÔNG nhảy,
   hỏi lại + thumbnail.
 
-  - Score lấy từ **RERANKER** — số thật, calibrate được. KHÔNG dùng điểm LLM tự khai
+  - Score lấy từ **biên RRF** (không có reranker — xem trên). KHÔNG dùng điểm LLM tự khai
     (tự tin thái quá có hệ thống).
   - Ngưỡng **fit trên bộ eval 50 câu có nhãn**, KHÔNG đoán. Điểm vận hành:
     `harmful_jump < 2%`, chấp nhận `ask_rate ~15%`. Để trong config, không hardcode.
@@ -451,7 +450,7 @@ out/kb/chroma/                            DÙNG CHUNG — kho Chroma: MỘT coll
                                           cho mọi bài, tách bằng metadata doc_id (VECTOR_DB=chroma)
 ```
 
-**Kịch bản sẽ nằm ở đây** (chưa có code):
+**Kịch bản** (S4, `src/scenario/`) — `precomputed/` chưa có vì S6b TTS chưa code:
 
 ```
 out/deck/<doc_id>/
@@ -539,7 +538,7 @@ synth lại câu chứa từ đó; lệch timing > 15% thì chạy lại pass 2 
 | Render PNG (v1)  | LibreOffice headless → PDF →`PyMuPDF` rasterize              |
 | Parse PDF nguồn | `PyMuPDF`, `unstructured` hoặc `docling` cho cây heading |
 | Embedding        | **v0: `text-embedding-3-small` qua API** (dense-only, 1536 chiều) · đích: `bge-m3` (dense + sparse 1 forward) |
-| Rerank           | **QUA API** — `bge-reranker-v2-m3` local đã loại (2.2 GB). Endpoint có `/rerank` nhưng key CHƯA được bật quyền — xem §6 |
+| Rerank           | **KHÔNG dùng** (chốt 2026-10-01) — `bge-reranker-v2-m3` local đã loại (2.2 GB), không chờ quyền `/rerank` trên API key — xem §6 |
 | Vector DB        | **v0: `chromadb` hoặc RAM** — chọn bằng `VECTOR_DB` (`src/kb/store/`). Tắt embedding có sẵn, cosine, tắt telemetry |
 | Schema           | Pydantic v2                                                      |
 
@@ -563,7 +562,7 @@ SmartArt đôi khi vỡ). Phải cài font Việt vào container.
   lúc truy vấn, đừng xoá. Xoá sai thì phải nhúng lại; lọc sai thì sửa một dòng luật.
 - ❌ **Nhồi index hoặc nội dung cả deck vào prompt** — chỉ TRẠNG THÁI mới được inline,
   TRI THỨC phải truy xuất. Áp cho cả S4: viết kịch bản trang nào thì đọc trang đó.
-- ❌ Dùng điểm LLM tự khai làm confidence gate khi đã có điểm reranker
+- ❌ Dùng điểm LLM tự khai làm confidence gate
 - ❌ Tách router riêng ở runtime (thêm 300–400ms vô ích)
 - ❌ Đợi generate xong mới TTS
 - ❌ Nhảy slide khi confidence gate không đạt
@@ -595,14 +594,16 @@ SmartArt đôi khi vỡ). Phải cài font Việt vào container.
 | Flag precision (S7)               | ≥ 60%                                      |
 | P95 latency tới byte audio đầu | < 2.5s                                      |
 | Self-retrieval top-1 (S6a)        | ≥ 90% — ⚠️ xem cảnh báo dưới bảng    |
-| R2 recall@5                       | ≥ 95% — dưới thì nới k                |
+| R2 recall@5                       | ≥ 95% — KHÔNG nới k, sửa RRF / dữ liệu |
 | R2 Top-1 accuracy                 | báo cáo                                   |
 | R2 harmful jump rate              | báo cáo — nhảy sai mà không hỏi lại |
 
 ⚠️ **Self-retrieval hiện gần như luôn 100% và KHÔNG nói lên gì.** Câu hỏi lấy từ chính
 văn bản của chunk — đề bài là đáp án. Nó chỉ chứng minh **không có hai chunk trùng nhau**.
-Số đo thật phải lấy từ bộ câu hỏi **người viết** ở `data/eval/queries.json`
-(`src/kb/eval.py`) — đo được: hybrid 4/7 top-1, dense 3/7, sparse 3/7.
+Số đo thật phải lấy từ bộ câu hỏi có nhãn ở `data/eval/<doc_id>.queries.json`
+(`src/kb/eval.py`) — đo 2026-10-02, top-1: Onboarding 200 câu hybrid 157 · dense 131 ·
+sparse 145; Thời gian làm việc 30 câu 28 · 29 · 29. Câu hiện đều do AI viết → số thiên vị,
+vẫn cần bộ câu **người viết**.
 Xem [docs/spec/search.md §10](docs/spec/search.md).
 
 **Proxy tự nhiên — chạy được trong CI:**
@@ -632,10 +633,11 @@ XML · S3 Alignment suy biến nên bỏ qua · độ sâu trả lời giới h�
 embedding qua API **chỉ có dense, mất sparse** của `bge-m3` → phải bù bằng BM25 riêng,
 và tốn 719ms/câu hỏi thay vì 182ms (đo thật, xem [embedding.md §2](docs/spec/embedding.md))
 
-**Chưa có:** S6b TTS · S7 duyệt · toàn bộ runtime R1–R7 · S2 `time_budget` · S6a `deck_map.txt`
+**Chưa có:** S6b TTS · S7 duyệt · S2 `time_budget` · runtime R1–R7 thật (mới có bản chữ
+chạy thử: `src/runtime/`, `scripts/try_ask.py`)
 
-**Đang chờ bên ngoài:** quyền `rerank` trên API key (hiện 403 `capability_not_allowed`).
-Không có nó thì R2 chạy được nhưng **không có confidence gate calibrate được** — xem §6.
+**Reranker: BỎ** (chốt 2026-10-01) → R2 chạy được nhưng **không có confidence gate
+calibrate được**, cổng dùng biên RRF, `calibrated: false` — xem §6.
 
 ### v1 — đích
 

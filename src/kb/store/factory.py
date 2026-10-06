@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import os
 
-from kb.embed import MODEL_ID            # import là nạp .env luôn
+from kb.embed import MODEL_ID, ROOT      # import là nạp .env luôn
 from kb.store.base import VectorStore
 
-DEFAULT_CHROMA_PATH = "out/kb/chroma"
+DEFAULT_CHROMA_PATH = "out/kb/chroma"    # tính từ gốc repo, như CHROMA_PATH trong .env
 
 
 def create_store(kind: str | None = None, *, model_id: str = MODEL_ID) -> VectorStore:
@@ -23,5 +23,5 @@ def create_store(kind: str | None = None, *, model_id: str = MODEL_ID) -> Vector
     if kind == "chroma":
         from kb.store.chroma import ChromaStore
 
-        return ChromaStore(model_id, os.environ.get("CHROMA_PATH") or DEFAULT_CHROMA_PATH)
+        return ChromaStore(model_id, ROOT / (os.environ.get("CHROMA_PATH") or DEFAULT_CHROMA_PATH))
     raise SystemExit(f"VECTOR_DB='{kind}' khong hop le — chon inmem | chroma")

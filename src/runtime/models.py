@@ -20,7 +20,7 @@ class RuntimeConfig(BaseModel):
     calibrated: bool = False            # biên RRF chưa fit trên bộ eval -> chỉ là phanh tạm
     gate_min_margin: float = 0.002      # rrf(top1) - rrf(top2) dưới mức này -> hỏi lại
     top_k: int = 5
-    max_contexts: int = 3               # số trang tìm được đưa vào prompt
+    max_contexts: int = 5               # số trang tìm được đưa vào prompt = cả top-k
     history_turns: int = 3
     max_answer_sentences: int = 4
     llm_timeout_s: float = 30.0
@@ -42,6 +42,7 @@ class Context(BaseModel):
     page_no: int
     text: str
     vlm_ratio: float = 0.0              # bao nhiêu phần do VLM tả — có thể sai (NT2)
+    prev: bool = False                  # đoạn câu trả lời LƯỢT TRƯỚC đã dùng — trạng thái hội thoại
 
 
 class Reply(BaseModel):

@@ -1,14 +1,19 @@
-"""R2 + R3b + R4 — ĐÚNG MỘT lần gọi LLM cho mỗi câu hỏi, rồi CODE kiểm trước khi nói.
+"""R2 + R3 + R4 — tìm, 1 lần gọi LLM trả lời, rồi CODE kiểm trước khi nói.
 
-    tìm trước (retrieve.py) ─► 1 lần gọi LLM ─► LLM chọn 1 trong 4 hành động
+    [có lịch sử] LLM viết lại câu hỏi (r_rewrite.md) ─► tìm (retrieve.py) ─► 1 lần gọi LLM ─► …
                                                   │
                         code kiểm ◄───────────────┘
                           answer   grounding phải trỏ vào đoạn ĐÃ đưa cho nó, sai -> escalate
                           goto     qua CỔNG TIN CẬY: không chắc -> hỏi lại, không nhảy
                           lỗi API  -> escalate + gợi ý trang tìm được (không bịa, không treo)
 
-Vì sao MỘT lần gọi (§6): mỗi lần gọi 1–5s. Tách "phân loại câu hỏi" rồi "trả lời" là chậm
-gấp đôi. Vì sao code kiểm: LLM tự tin thái quá có hệ thống, và bịa nguồn được.
+Viết lại câu hỏi (chốt 2026-10-06, CLAUDE.md §6): câu nối tiếp cụt ("vậy hạn chót là ngày nào")
+tìm bằng chính nó là lạc đề, mà bước tìm chạy TRƯỚC lần gọi trả lời. Không đoán câu nào là nối tiếp
+bằng từ khoá: LLM xem các câu hỏi gần nhất rồi tự quyết. Chỉ gọi khi đã có lịch sử — câu đầu tiên
+không tốn thêm. Đổi lại chậm thêm một lần gọi (~1–2s). Lỗi -> tìm bằng câu gốc, không chặn.
+Câu trả lời vẫn sinh từ câu hỏi GỐC (R3b); câu viết lại chỉ dùng để tìm.
+
+Vì sao code kiểm: LLM tự tin thái quá có hệ thống, và bịa nguồn được.
 """
 
 from __future__ import annotations
@@ -27,6 +32,7 @@ from runtime.retrieve import Retriever
 
 PROMPT_PATH = ROOT / "prompts" / "r_router.md"
 QA_PROMPT_PATH = ROOT / "prompts" / "r_qa.md"       # chỉ hỏi đáp: không trang đang chiếu, không điều hướng
+REWRITE_PROMPT_PATH = ROOT / "prompts" / "r_rewrite.md"
 
 # Robot nói gì khi không trả lời — KHÔNG lặp lại câu hỏi (đọc to câu troll là troll thành công)
 ESCALATE_TEXT = {
@@ -48,6 +54,7 @@ class Router:
         self.deck_map = deck_map.strip()
         self.template = PROMPT_PATH.read_text(encoding="utf-8")
         self.qa_template = QA_PROMPT_PATH.read_text(encoding="utf-8")
+        self.rewrite_template = REWRITE_PROMPT_PATH.read_text(encoding="utf-8")
         self.llm = LLM(model, log_dir, retry=cfg.llm_retry, timeout=cfg.llm_timeout_s,
                        extra=cfg.llm_extra)
         self.llm.json_mode = cfg.json_mode
@@ -55,12 +62,14 @@ class Router:
     async def handle(self, question: str, at_slide: int,
                      history: list[Turn]) -> tuple[Reply, dict[str, int]]:
         ms: dict[str, int] = {}
+        prev = history[-1] if history else None
+        query = await self._rewrite(question, history, ms)
         t0 = time.perf_counter()
-        nav, qa = await asyncio.to_thread(self.retriever.search, question, self.doc.page(at_slide))
+        nav, qa = await asyncio.to_thread(self.retriever.search, query, self.doc.page(at_slide))
         ms["search"] = _ms(t0)
 
         current = self.retriever.page_context(at_slide)
-        found = self._found(nav, qa, at_slide)
+        found = self._found(nav, qa, at_slide, self._carry(prev))
         prompt = self._render(question, at_slide, current, found, history)
 
         t1 = time.perf_counter()
@@ -84,11 +93,13 @@ class Router:
         """
         dbg: dict = {}
         ms: dict[str, int] = {}
+        prev = history[-1] if history else None
+        query = await self._rewrite(question, history, ms)
         t0 = time.perf_counter()
-        _, qa = await asyncio.to_thread(self.retriever.search, question, None)
+        _, qa = await asyncio.to_thread(self.retriever.search, query, None)
         ms["search"] = _ms(t0)
 
-        found = self._found([], qa, 0)
+        found = self._found([], qa, 0, self._carry(prev))
         hist = "\n".join(f"- Hỏi: {t.question} → Đáp: {t.reply.text or t.reply.action}"
                          for t in history[-self.cfg.history_turns:])
         fill = {"deck_map": self.deck_map, "found": _ctx(found) or "(không tìm được đoạn nào)",
@@ -98,7 +109,8 @@ class Router:
             prompt = prompt.replace("{{" + k + "}}", v)
 
         tag = f"qa_{int(time.time() * 1000)}"
-        dbg.update(hits=qa, found=found, prompt=prompt, log=self.llm.log_dir / f"{tag}.json")
+        dbg.update(hits=qa, found=found, prompt=prompt, query=query,
+                   log=self.llm.log_dir / f"{tag}.json")
         t1 = time.perf_counter()
         try:
             raw = await self.llm.chat([{"role": "user", "content": prompt}], tag=tag)
@@ -119,15 +131,49 @@ class Router:
 
     # ------------------------------------------------------------------ dựng prompt
 
-    def _found(self, nav: list[SearchHit], qa: list[SearchHit], at_slide: int) -> list[Context]:
-        """Top vài trang tìm được, BỎ trang đang chiếu (đã có sẵn). qa trước: cần nội dung;
-        nav sau: bù trang mở chương cho câu điều hướng."""
-        out: list[Context] = []
-        seen = {at_slide}
+    async def _rewrite(self, question: str, history: list[Turn], ms: dict[str, int]) -> str:
+        """LLM xem câu hỏi của `history_turns` lượt gần nhất -> câu ĐEM ĐI TÌM. Câu hỏi nối tiếp
+        được viết lại cho đủ ý; câu đủ ý / đổi chủ đề giữ nguyên. Chưa có lịch sử -> không gọi."""
+        recent = history[-self.cfg.history_turns:]
+        if not recent:
+            return question
+        prompt = (self.rewrite_template
+                  .replace("{{history}}", "\n".join(f"- {t.question}" for t in recent))
+                  .replace("{{question}}", question))
+        t0 = time.perf_counter()
+        try:
+            raw = await self.llm.chat([{"role": "user", "content": prompt}],
+                                      tag=f"rw_{int(time.time() * 1000)}")
+            query = str(raw.get("query") or "").strip()
+        except Exception:                      # lỗi API / JSON hỏng -> tìm bằng câu gốc, không chặn
+            query = ""
+        ms["rewrite"] = _ms(t0)
+        return query or question
+
+    def _carry(self, prev: Turn | None) -> list[Context]:
+        """Đoạn câu trả lời LƯỢT TRƯỚC đã dùng — TRẠNG THÁI hội thoại, đưa lại thẳng vào prompt.
+
+        "Giải thích câu trả lời vừa rồi" không có từ khoá nào để tìm: tìm lại thì trang vừa nói
+        rơi khỏi top-5, LLM nhớ câu trả lời (lịch sử) mà không có đoạn nào để trích -> từ chối.
+        """
+        if prev is None or prev.reply.action != "answer":
+            return []
+        return self.retriever.contexts(prev.reply.sources)
+
+    def _found(self, nav: list[SearchHit], qa: list[SearchHit], at_slide: int,
+               carry: list[Context] | None = None) -> list[Context]:
+        """`carry` (đoạn lượt trước) + top `max_contexts` trang tìm được, BỎ trang đang chiếu (đã
+        có sẵn) và trang đã có trong `carry`. qa trước: cần nội dung; nav sau: bù trang mở chương
+        cho câu điều hướng. `carry` KHÔNG tính vào `max_contexts` — nó là trạng thái, không phải
+        kết quả tìm."""
+        out: list[Context] = [c for c in carry or [] if c.page_no != at_slide]
+        seen = {at_slide, *(c.page_no for c in out)}
+        n = 0
         for h in qa + nav:
-            if h.page_no in seen or len(out) >= self.cfg.max_contexts:
+            if h.page_no in seen or n >= self.cfg.max_contexts:
                 continue
             seen.add(h.page_no)
+            n += 1
             out.append(Context(chunk_id=h.chunk_id, page_no=h.page_no,
                                text=h.text_enriched, vlm_ratio=h.vlm_ratio))
         return out
@@ -196,7 +242,8 @@ class Router:
 
         Chỉ nhảy khi trang LLM chọn CŨNG là trang tìm kiếm xếp đầu, VÀ đầu bảng hơn hẳn trang
         thứ hai (biên RRF >= ngưỡng). Chỉ 1 ứng viên -> coi như biên = 0 -> hỏi lại (§6).
-        Biên RRF không phải xác suất; config ghi calibrated=false cho tới khi có reranker.
+        Biên RRF không phải xác suất; không có reranker (bỏ 2026-10-01) nên config ghi
+        calibrated=false — ngưỡng chưa fit trên bộ eval có nhãn.
         """
         pages = [h.page_no for h in nav]
         margin = nav[0].score - nav[1].score if len(nav) > 1 else 0.0
@@ -226,6 +273,7 @@ class Router:
 def _ctx(items: list[Context]) -> str:
     return "\n\n".join(
         f"[{c.chunk_id}] trang {c.page_no}"
+        + (" (vừa dùng ở câu trả lời trước)" if c.prev else "")
         + (f" (có {c.vlm_ratio:.0%} do máy tả ảnh — có thể sai con số)" if c.vlm_ratio else "")
         + f"\n{c.text}"
         for c in items)

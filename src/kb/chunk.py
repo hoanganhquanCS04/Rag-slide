@@ -95,7 +95,6 @@ class _Unit:
     heading: bool = False
     head: str | None = None
     head_tokens: int = 0
-    first_row: bool = False
 
 
 def _units(b: Block, budget: int) -> list[_Unit]:
@@ -127,7 +126,7 @@ def _units(b: Block, budget: int) -> list[_Unit]:
         head = "\n".join(lines[:2])                    # hàng tiêu đề + dòng |---|
         n_head = count_tokens(head)
         return [_Unit(b, ln, count_tokens(ln), "block" if i == 0 else "line",
-                      head=head, head_tokens=n_head, first_row=i == 0)
+                      head=head, head_tokens=n_head)
                 for i, ln in enumerate(lines[2:])]
 
     out: list[_Unit] = []

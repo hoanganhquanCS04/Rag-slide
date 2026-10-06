@@ -34,10 +34,12 @@ from kb.models import ChunkSet
 
 log = logging.getLogger(__name__)
 
+ROOT = Path(__file__).resolve().parents[2]
+
 try:    # cùng cách src/llm.py lấy khoá — phải nạp TRƯỚC khi đọc EMBED_MODEL
     from dotenv import load_dotenv
 
-    load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+    load_dotenv(ROOT / ".env")
 except ImportError:
     pass
 
@@ -101,10 +103,10 @@ class Embedder:
     """
 
     def __init__(self, model_id: str = MODEL_ID, *,
-                 cache_dir: str | Path = "out/kb/.embed_cache", retry: int = RETRY):
+                 cache_dir: str | Path = ROOT / "out" / "kb" / ".embed_cache", retry: int = RETRY):
         import httpx   # KHÔNG dùng urllib: Cloudflare chặn User-Agent Python-urllib (lỗi 1010)
 
-        key =os.environ.get("OPENAI_API_KEY")
+        key = os.environ.get("OPENAI_API_KEY")
         if not key:
             raise SystemExit("thieu OPENAI_API_KEY")
         base = (os.environ.get("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")

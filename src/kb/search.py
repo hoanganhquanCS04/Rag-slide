@@ -7,8 +7,9 @@ Xem docs/spec/search.md. Bốn điểm dễ sai:
      CHỮ; thuật ngữ hiếm là chỗ nó mù. §5 S5 ghi hybrid là BẮT BUỘC.
   2. **Gộp bằng RRF, KHÔNG cộng điểm.** cosine nằm trong [0,1], BM25 không có trần —
      cộng thẳng thì BM25 nuốt sạch dense. RRF chỉ nhìn THỨ HẠNG nên không cần đoán hệ số.
-  3. **`score` là điểm RRF, KHÔNG phải confidence.** Cấm dùng làm gate (§10). Gate phải
-     lấy điểm reranker — xem search.md §9, chỗ đó còn là món nợ chưa trả.
+  3. **`score` là điểm RRF, KHÔNG phải confidence** — chỉ là thứ tự. Reranker đã BỎ
+     (2026-10-01), nên cổng tin cậy ở runtime tạm dùng biên RRF và khai `calibrated: false`
+     (config/runtime.json) — xem search.md §9.
   4. **Nhánh điều hướng (R2) phải TẮT lọc trang phân mục.** Hỏi "quay lại phần đồ thị ba
      chiều" thì trang mở chương mới là đáp án đúng. Lọc là luật của R4, không phải của R2.
 

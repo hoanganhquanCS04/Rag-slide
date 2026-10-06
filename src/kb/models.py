@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 
 class KBChunk(BaseModel):
-    chunk_id: str                 # "onboarding_kit#p018" | "...#p018.2" (trang bị cắt) | "...#p019.b02" (ảnh)
+    chunk_id: str                 # "onboarding_kit#p018" | "...#p018.2" (trang bị cắt) | "...#p019.v02" (ảnh)
     doc_id: str
     page_no: int                  # R2 nhảy tới đây — mọi vector đều trỏ về một trang
     page_hash: str = ""           # copy từ ParsedPage — trang đổi hash thì chỉ nạp lại chunk của trang đó (§8)

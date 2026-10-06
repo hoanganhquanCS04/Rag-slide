@@ -18,9 +18,9 @@ import asyncio
 import logging
 import re
 import time
-from pathlib import Path
 
 from kb.deck_map import page_label
+from llm import ROOT
 from parsing.models import ParsedDocument
 from runtime import fastpath
 from runtime.models import RuntimeConfig, Turn
@@ -36,17 +36,17 @@ PAGE_OF_CHUNK = re.compile(r"#p(\d+)")
 
 class Session:
     def __init__(self, doc_id: str, cfg: RuntimeConfig, model: str, speed: float):
-        deck = Path("out/deck") / doc_id
+        deck = ROOT / "out" / "deck" / doc_id
         for f, how in [(deck / "scenario.json", "src/scenario/cli.py"),
                        (deck / "deck_map.txt", "src/kb/deck_map.py")]:
             if not f.exists():
                 raise SystemExit(f"thieu {f} — chay: python {how} out/parsed/{doc_id}/document.json")
 
-        self.doc = ParsedDocument.load(f"out/parsed/{doc_id}/document.json")
+        self.doc = ParsedDocument.load(ROOT / "out" / "parsed" / doc_id / "document.json")
         sc = Scenario.model_validate_json((deck / "scenario.json").read_text(encoding="utf-8"))
         self.scripts = {s.page_no: s for s in sc.slides}
         self.retriever = Retriever(doc_id, cfg.top_k)
-        logs = Path("logs/runtime") / doc_id
+        logs = ROOT / "logs" / "runtime" / doc_id
         self.router = Router(self.doc, self.retriever, cfg,
                              (deck / "deck_map.txt").read_text(encoding="utf-8"),
                              model, logs / "llm")

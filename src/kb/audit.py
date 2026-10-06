@@ -75,7 +75,7 @@ class AuditReport(BaseModel):
     caveat: str = (
         "Self-retrieval lay cau hoi TU CHINH van ban cua chunk nen gan nhu luon 100%. "
         "No chi chung minh khong co hai chunk trung nhau, KHONG chung minh index tim tot. "
-        "Gate §11 chi co nghia sau khi co S1 sinh `message` (xem docs/spec/search.md §10)."
+        "So do that la bo cau hoi co nhan: src/kb/eval.py (xem docs/spec/search.md §10)."
     )
 
 

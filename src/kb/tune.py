@@ -42,13 +42,12 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from kb.embed import MODEL_ID, embed_chunkset, load_vectors, vectors_file
+from kb.eval import default_queries
 from kb.models import ChunkSet
 from kb.search import POOL, RRF_K, TOP_K, W_DENSE, W_SPARSE, Searcher, rrf_fuse
 
 log = logging.getLogger(__name__)
 
-ROOT = Path(__file__).resolve().parents[2]
-EVAL_DIR = ROOT / "data" / "eval"
 DEFAULT_K = "1,5,10,20,40,60"
 DEFAULT_WD = "0.5,1,1.5,2,3"
 DEFAULT_WS = "1"
@@ -62,12 +61,6 @@ def _floats(s: str) -> list[float]:
 
 def _num(x: float) -> str:
     return f"{x:g}"
-
-
-def default_queries(doc_id: str) -> Path:
-    """data/eval/<doc_id>.queries.json nếu có, không thì bộ chung queries.json."""
-    own = EVAL_DIR / f"{doc_id}.queries.json"
-    return (own if own.exists() else EVAL_DIR / "queries.json").relative_to(ROOT)
 
 
 def ensure_vectors(cs: ChunkSet, kb_dir: Path, model_id: str) -> None:

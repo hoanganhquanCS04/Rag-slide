@@ -27,7 +27,7 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from llm import DEFAULT_MODEL
+from llm import DEFAULT_MODEL, ROOT
 from parsing.cli import parse_pages
 from parsing.models import ParsedDocument
 from scenario.generate import load_prompt, render_prompt, run_deck
@@ -126,7 +126,7 @@ def main(argv: list[str] | None = None) -> int:
             s.reconfigure(encoding="utf-8", errors="replace")
 
     doc = ParsedDocument.load(args.parsed)
-    deck_dir = Path("out/deck") / doc.doc_id
+    deck_dir = ROOT / "out" / "deck" / doc.doc_id
     out = Path(args.out) if args.out else deck_dir / "scenario.json"
     pron = Pronunciation.load(args.pron)
     pages = set(parse_pages(args.page)) if args.page else None
@@ -184,7 +184,7 @@ def main(argv: list[str] | None = None) -> int:
              f"trang {sorted(pages)}" if pages else "cả deck")
     slides = asyncio.run(run_deck(
         doc, pron, model=args.model, existing=existing, only=pages,
-        force=args.force, workers=args.workers, log_dir=Path("logs/s4") / doc.doc_id,
+        force=args.force, workers=args.workers, log_dir=ROOT / "logs" / "s4" / doc.doc_id,
         on_page=checkpoint))
     sc = save(slides)
 

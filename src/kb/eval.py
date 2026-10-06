@@ -1,4 +1,4 @@
-"""Chạy bộ câu hỏi có nhãn ở `data/eval/queries.json`.
+"""Chạy bộ câu hỏi có nhãn ở `data/eval/<doc_id>.queries.json`.
 
 Khác `audit.py`: audit lấy câu hỏi TỪ CHÍNH tài liệu (nhãn không ai bịa được, nhưng bài
 thi quá dễ vì đề bài là đáp án). File này dùng câu hỏi NGƯỜI VIẾT — sát thực tế hơn,
@@ -6,7 +6,7 @@ nhưng nhãn do người gán nên có thể sai, và người gán dễ thiên 
 
 Hai bài bổ sung cho nhau, không thay được nhau.
 
-    python src/kb/eval.py out/kb/<ten>/chunks.json
+    python src/kb/eval.py out/kb/<ten>/chunks.json                # bộ câu hỏi của chính deck
     python src/kb/eval.py out/kb/<ten>/chunks.json --by nguoi     # chi cau nguoi that viet
     python src/kb/eval.py out/kb/<ten>/chunks.json --rrf-k 7 --wd 1.25   # thu cau hinh ★ cua tune
 
@@ -30,7 +30,14 @@ from kb.search import RRF_K, W_DENSE, W_SPARSE, Mode, Searcher
 
 log = logging.getLogger(__name__)
 
-DEFAULT_EVAL = Path("data/eval/queries.json")
+EVAL_DIR = Path(__file__).resolve().parents[2] / "data" / "eval"
+
+
+def default_queries(doc_id: str) -> Path:
+    """data/eval/<doc_id>.queries.json nếu có, không thì bộ chung queries.json (của
+    3_datavisualization). Không truyền `--queries` thì eval / tune / run_deck.sh đều lấy ở đây."""
+    own = EVAL_DIR / f"{doc_id}.queries.json"
+    return own if own.exists() else EVAL_DIR / "queries.json"
 
 
 def load_queries(path: str | Path, by: str | None = None) -> list[dict]:
@@ -70,7 +77,7 @@ def run(se: Searcher, queries: list[dict], *, mode: Mode = "hybrid",
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="eval")
     ap.add_argument("chunks")
-    ap.add_argument("--queries", default=str(DEFAULT_EVAL))
+    ap.add_argument("--queries", default=None, help="mac dinh data/eval/<doc_id>.queries.json")
     ap.add_argument("--vectors", default=None)
     ap.add_argument("--model", default=MODEL_ID)
     ap.add_argument("-k", type=int, default=5)
@@ -88,22 +95,23 @@ def main(argv: list[str] | None = None) -> int:
         if hasattr(s, "reconfigure"):
             s.reconfigure(encoding="utf-8", errors="replace")
 
-    qs = load_queries(args.queries, args.by)
-    if not qs:
-        raise SystemExit("khong co cau hoi nao khop")
-    n_ai = sum(1 for q in qs if q.get("by") == "ai")
-
     se = Searcher(args.chunks, vectors_path=args.vectors, model_id=args.model)
+    qpath = Path(args.queries) if args.queries else default_queries(se.cs.doc_id)
+    qs = load_queries(qpath, args.by)
+    if not qs:
+        raise SystemExit(f"{qpath}: khong co cau hoi nao khop")
+    n_ai = sum(1 for q in qs if q.get("by") == "ai")
     modes: list[Mode] = [args.mode] if args.mode else ["dense", "sparse", "hybrid"]
     # trọng số chỉ có tác dụng ở hybrid — dense/sparse riêng thì thứ hạng là thứ hạng của nhánh đó
     is_default = (args.rrf_k, args.wd, args.ws) == (RRF_K, W_DENSE, W_SPARSE)
     rrf = {"k": args.rrf_k, "w_dense": args.wd, "w_sparse": args.ws, "is_default": is_default}
     report: dict = {"doc_id": se.cs.doc_id, "model": args.model, "k": args.k,
-                    "queries": str(args.queries), "rrf": rrf,
+                    "queries": str(qpath), "rrf": rrf,
                     "n_queries": len(qs), "n_by_ai": n_ai, "modes": {}}
 
     log.info("")
-    log.info("=== %d cau hoi  (%d do AI tu bia, %d nguoi that viet)", len(qs), n_ai, len(qs) - n_ai)
+    log.info("=== %s: %d cau hoi  (%d do AI tu bia, %d nguoi that viet)",
+             qpath.name, len(qs), n_ai, len(qs) - n_ai)
     log.info("=== gop RRF: K=%d dense=%g sparse=%g (%s)", args.rrf_k, args.wd, args.ws,
              "mac dinh search.py" if is_default else "KHAC mac dinh search.py")
     for m in modes:
@@ -118,11 +126,9 @@ def main(argv: list[str] | None = None) -> int:
             log.info("%s", ln)
 
     if args.out:
-        import json as _json
-
         out = Path(args.out)
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(_json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        out.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
         log.info("")
         log.info("ghi -> %s", out)
 

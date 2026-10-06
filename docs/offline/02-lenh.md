@@ -95,8 +95,8 @@ Ghi chú:
   quên vùng) tự quay về docling + cờ `layout_failed`. Gọi lại: `run "<file>" --pages N`.
 - Log ②b `anh chup (chu vlm): [...]` = bảng là ẢNH chụp, chữ trong ô do VLM đọc — chỗ cần soi.
 - ③ tự áp file vá tay `data\patches\<ten>.json` nếu có (xem đầu `src\parsing\patch.py`).
-- `run` thoát mã `1` khi có cờ mức `error` — vẫn ghi file bình thường, mã lỗi để CI bắt.
-  `run_deck.sh` gặp mã 1 vẫn chạy tiếp.
+- `run` thoát mã `3` khi có cờ mức `error` — vẫn ghi file bình thường, mã lỗi để CI bắt.
+  `run_deck.sh` gặp mã 3 vẫn chạy tiếp; mã khác (không thấy file, thiếu khoá API…) thì DỪNG.
 - ④ chữ không đổi thì lấy vector từ cache (`out\kb\.embed_cache\`), không gọi API.
 - ④ `--embed` BẮT BUỘC đi kèm `-o` — vector ghi theo thứ tự chunk, chunk không lưu thì
   vector không khớp file nào.
@@ -227,9 +227,11 @@ Hỏi đáp trọn vòng (tìm → LLM → code kiểm nguồn): `scripts\try_as
 
 ```powershell
 # bộ câu hỏi có nhãn — số đo THẬT. Chạy cả dense / sparse / hybrid
-.venv\Scripts\python.exe src\kb\eval.py out\kb\<ten>\chunks.json --queries data\eval\<ten>.queries.json
+.venv\Scripts\python.exe src\kb\eval.py out\kb\<ten>\chunks.json
+# chỉ BM25 — không gọi API, chạy được khi không có mạng / khoá
+.venv\Scripts\python.exe src\kb\eval.py out\kb\<ten>\chunks.json --mode sparse
 # thử cấu hình gộp khác (mặc định = hằng số của search.py: K=15, dense 1 : sparse 1)
-.venv\Scripts\python.exe src\kb\eval.py out\kb\<ten>\chunks.json --queries data\eval\<ten>.queries.json --rrf-k 7 --wd 1.25
+.venv\Scripts\python.exe src\kb\eval.py out\kb\<ten>\chunks.json --rrf-k 7 --wd 1.25
 
 # self-retrieval — gần như luôn 100%, chỉ chứng minh không có 2 chunk trùng nhau
 .venv\Scripts\python.exe src\kb\audit.py out\kb\<ten>\chunks.json --mode hybrid
@@ -241,8 +243,9 @@ bash scripts/tune.sh out/kb/<ten>/chunks.json
 bash scripts/tune.sh out/kb/<ten>/chunks.json --k 5,10,20 --wd 1,1.5,2
 ```
 
-- `eval.py` không truyền `--queries` thì dùng bộ chung `data\eval\queries.json` (của
-  `3_datavisualization`). `run_deck.sh --eval` tự chọn `data\eval\<ten>.queries.json`.
+- `eval.py`, `tune.sh`, `run_deck.sh --eval` không truyền `--queries` thì cùng lấy
+  `data\eval\<ten>.queries.json` (không có thì bộ chung `queries.json` của `3_datavisualization`).
+  Dòng `===` đầu log in tên file câu hỏi đang dùng.
 - `tune.sh` ra ba file, đặt theo tên file vào, trong `<thư mục chunks>\audit\`:
   `<tên chunks>_tune.md` (người đọc) · `_tune.json` (máy đọc) · `_misses.json` (câu trượt
   top-5 của cấu hình tốt nhất, cùng dạng file câu hỏi — đưa thẳng vào `--queries` được).

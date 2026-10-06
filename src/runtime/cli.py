@@ -20,7 +20,7 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from llm import DEFAULT_MODEL
+from llm import DEFAULT_MODEL, ROOT
 from runtime.models import RuntimeConfig
 from runtime.session import Session
 
@@ -32,7 +32,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--speed", type=float, default=0.0,
                     help="0 = in liền (mặc định) · 1 = đợi đúng thời lượng câu nói")
     ap.add_argument("--model", default=DEFAULT_MODEL, help="mặc định LLM_MODEL trong .env")
-    ap.add_argument("--config", default="config/runtime.json")
+    ap.add_argument("--config", default=str(ROOT / "config" / "runtime.json"))
     args = ap.parse_args(argv)
 
     for s in (sys.stdin, sys.stdout, sys.stderr):

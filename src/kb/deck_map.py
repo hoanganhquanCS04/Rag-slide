@@ -27,6 +27,7 @@ from parsing.models import ParsedDocument, ParsedPage
 
 log = logging.getLogger("deck_map")
 
+ROOT = Path(__file__).resolve().parents[2]
 LINE_CHARS = 48          # cắt dòng chữ đầu khi trang không có tiêu đề
 
 
@@ -77,7 +78,7 @@ def main(argv: list[str] | None = None) -> int:
 
     doc = ParsedDocument.load(args.parsed)
     text = build(doc)
-    out = Path("out/deck") / doc.doc_id / "deck_map.txt"
+    out = ROOT / "out" / "deck" / doc.doc_id / "deck_map.txt"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(text, encoding="utf-8")
     log.info("%s", text.rstrip())

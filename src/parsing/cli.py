@@ -14,7 +14,8 @@
 Bước nào có sẵn thì bỏ qua: docling.json có rồi thì không chạy lại docling (trừ --redo);
 trang có trong layout.json mà không đổi gì thì không gọi VLM lại (trừ khi nêu trong --pages).
 ③ luôn dựng lại. Trang chưa có bố cục VLM dùng block docling.
-Thoát mã 1 khi có cờ mức error (CI bắt được) — file vẫn ghi bình thường.
+Mã thoát: 0 xong · 3 xong nhưng có cờ mức error (file vẫn ghi đủ, CI bắt được) · 1 hỏng thật
+(không thấy file, thiếu khoá API…) — `run_deck.sh` gặp 3 thì chạy tiếp, gặp 1 thì dừng.
 """
 
 from __future__ import annotations
@@ -51,6 +52,10 @@ except ImportError:
     pass
 
 log = logging.getLogger("parsing")
+
+# Riêng cho "có cờ error": mã 1 là mã Python tự trả khi dừng vì lỗi (SystemExit("...")),
+# trùng nhau thì run_deck.sh không phân biệt được — từng chạy tiếp khi không thấy file.
+EXIT_FLAGS = 3
 
 
 # ------------------------------------------------------------------------- chạy
@@ -92,8 +97,9 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     n_err = sum(1 for f in doc.flags if f.severity == "error")
     if n_err:
-        log.info("exit 1: co %d co muc error (de CI bat duoc). File van ghi binh thuong.", n_err)
-    return 1 if n_err else 0
+        log.info("exit %d: co %d co muc error (de CI bat duoc). File van ghi binh thuong.",
+                 EXIT_FLAGS, n_err)
+    return EXIT_FLAGS if n_err else 0
 
 
 def cmd_show(args: argparse.Namespace) -> int:
@@ -192,7 +198,7 @@ def main(argv: list[str] | None = None) -> int:
                      help="chi goi VLM cac trang nay, ke ca da co: '7' | '7,10' | '5-9'")
     run.add_argument("--no-vlm", action="store_true", help="khong goi API, dung layout.json co san")
     run.add_argument("--redo", action="store_true", help="chay lai docling du da co docling.json")
-    run.add_argument("--model", default=os.environ.get("VLM_MODEL", "gemini-3.5-flash-lite"),
+    run.add_argument("--model", default=os.environ.get("VLM_MODEL", "gemini-3.8-flash"),
                      help="mac dinh VLM_MODEL trong .env")
     run.add_argument("--table-model", default=os.environ.get("TABLE_MODEL", "gemini-3.8-flash"),
                      help="model chep bang (②b), mac dinh TABLE_MODEL trong .env")

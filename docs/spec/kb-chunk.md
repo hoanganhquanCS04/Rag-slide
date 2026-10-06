@@ -282,5 +282,5 @@ Nghi ngờ cụ thể cần kiểm:
   [parsed-document.md §0](./parsed-document.md)) — chunk 18 token, chắc chắn trượt
 - **7 trang phân mục** — lọc đúng chưa, hay lọc nhầm trang có nội dung
 
-Kết quả audit quyết định việc tiếp theo: sinh `message` (S1), cứu `p15`, hay thêm
-`slide_type`. **Đừng đoán trước khi có số.**
+Kết quả audit quyết định việc tiếp theo: cứu `p15`, hay thêm `slide_type` (sinh `message`
+ở S1 từng là một lựa chọn — S1 đã bỏ). **Đừng đoán trước khi có số.**

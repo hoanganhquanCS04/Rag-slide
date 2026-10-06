@@ -545,6 +545,8 @@ async def run_tables(doc: ParsedDocument, pdf: Path, layout_path: Path, *, tag: 
     pdf_doc = pdfium.PdfDocument(str(pdf))
     try:
         if len(pdf_doc) != doc.n_pages:
+            log.warning("  bang: %s co %d trang, document %d trang -> bo qua buoc ②b",
+                        pdf.name, len(pdf_doc), doc.n_pages)
             return 0
         for page in doc.pages:
             for t in page.tables:
