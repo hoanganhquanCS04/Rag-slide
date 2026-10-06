@@ -41,7 +41,7 @@ Số hiện tại (2026-10-02), hai deck đang làm:
 data/raw/<file>.pdf
    │ ① docling: chữ + toạ độ + vùng ảnh/bảng                       CPU
    │ ② VLM sắp bố cục từng trang · ②b VLM chép từng bảng            API + cache
-   │ ③ ghép + kiểm + chương + link + vá tay + cờ              
+   │ ③ ghép + kiểm + chương + link + vá tay + cờ            
    ▼
 out/parsed/<ten>/document.json      ParsedDocument — nguồn của mọi bước sau
    │ ④ chunk + nhúng vector + nạp kho                               💰 API+  có cache
@@ -70,7 +70,11 @@ uv venv --python 3.12
 uv pip install -r requirements.txt
 ```
 
-Tạo file `.env` ở gốc repo:
+Tạo file `.env` ở gốc repo từ file mẫu, rồi điền `OPENAI_API_KEY`:
+
+```bash
+cp .env.example .env
+```
 
 | Biến                                   | Ví dụ                       | Dùng ở                                   |
 | --------------------------------------- | ----------------------------- | ------------------------------------------ |
