@@ -21,9 +21,9 @@ trên slide.
 | ✅ | Đo chất lượng | `src/kb/{eval,audit,tune}.py` | bộ câu hỏi có nhãn · self-retrieval + quét chunk trùng · quét tham số RRF                                                                                                                       |
 | ✅ | S6a`deck_map`   | `src/kb/deck_map.py`          | bản đồ chương ~180 token cho prompt runtime, bằng luật                                                                                                                                              |
 | 🟡 | Hỏi đáp thử   | `scripts/try_ask.py`          | tìm → 1 lần gọi LLM → code kiểm nguồn, trong terminal                                                                                                                                               |
-| 🟡 | S4 kịch bản     | `src/scenario/`               | đã code, chạy riêng —**ngoài giai đoạn hiện tại**                                                                                                                                          |
+| 🟡 | S4 kịch bản     | `src/scenario/`               | bước 4 của`run_deck.sh` (`--no-scenario` để bỏ), chỉ viết lại trang đổi                                                                                                                    |
 | ⬜ | Chưa làm        |                                 | S2`time_budget` · S6b TTS · S7 người duyệt · runtime thật (giọng nói, ngắt lời)                                                                                                               |
-| 🚫 | Đã bỏ          |                                 | S1 (gộp vào S0) · S3 Alignment · reranker — lý do ở[CLAUDE.md](./CLAUDE.md)                                                                                                                          |
+|    |                   |                                 |                                                                                                                                                                                                            |
 
 Số hiện tại (2026-10-02), hai deck đang làm:
 
@@ -41,7 +41,7 @@ Số hiện tại (2026-10-02), hai deck đang làm:
 data/raw/<file>.pdf
    │ ① docling: chữ + toạ độ + vùng ảnh/bảng                       CPU
    │ ② VLM sắp bố cục từng trang · ②b VLM chép từng bảng            API + cache
-   │ ③ ghép + kiểm + chương + link + vá tay + cờ                
+   │ ③ ghép + kiểm + chương + link + vá tay + cờ              
    ▼
 out/parsed/<ten>/document.json      ParsedDocument — nguồn của mọi bước sau
    │ ④ chunk + nhúng vector + nạp kho                               💰 API+  có cache
@@ -50,6 +50,9 @@ out/kb/<ten>/chunks.json + vectors__<model>.npy  (+ out/kb/chroma/)
    │ ⑤ deck_map                                                     miễn phí
    ▼
 out/deck/<ten>/deck_map.txt
+   │ ⑥ S4 kịch bản: chỉ trang đổi mới gọi LLM                       💰 API (~1–2 lần/trang)
+   ▼
+out/deck/<ten>/scenario.json · scenario.md
 ```
 
 `<ten>` = tên file bỏ dấu, viết thường: `Thời gian làm việc & Chính sách nhân sự.pdf` →
@@ -89,12 +92,13 @@ Lệnh `bash` chạy trong Git Bash; `python` là Python trong `.venv`
 (`.venv\Scripts\python.exe` trên Windows).
 
 ```bash
-# 1. Cả nhánh offline của một deck: parse -> chunk + nhúng -> deck_map
+# 1. Cả nhánh offline của một deck: parse -> chunk + nhúng -> deck_map -> kịch bản
 bash scripts/run_deck.sh "data/raw/<file>.pdf"
 ## các tuỳ chọn khác 
 bash scripts/run_deck.sh "data/raw/<file>.pdf" --no-vlm     # không gọi VLM, dùng cache
 bash scripts/run_deck.sh "data/raw/<file>.pdf" --pages 22   # gọi lại VLM riêng trang 22
 bash scripts/run_deck.sh "data/raw/<file>.pdf" --eval       # chạy xong thì đo luôn
+bash scripts/run_deck.sh "data/raw/<file>.pdf" --no-scenario  # bỏ bước kịch bản (S4)
 
 # 2. Hỏi đáp thử trên KB vừa dựng (Ctrl+C để thoát)
 python scripts/try_ask.py <ten>
@@ -111,24 +115,29 @@ python src/kb/cli.py out/parsed/<ten>/document.json --page 7 --full
 
 ### Ví dụ — 2 deck đang làm, copy chạy luôn
 
-Chạy ở **thư mục gốc repo**; đường dẫn file luôn kèm `data/raw/`, tên có dấu cách thì bọc ngoặc kép.
+Chạy ở **thư mục gốc repo**; đường dẫn file luôn kèm `data/raw/`. File gốc đã đổi tên đúng bằng
+`<ten>` (2026-10-06) nên tên file và `doc_id` trùng nhau.
 
 > ⚠️ 2 deck này đã dựng bố cục bằng `gemini-3.5-flash-lite`; `VLM_MODEL` nay là `gemini-3.8-flash`
 > (2026-10-06). Cache bố cục khoá theo tên model → chạy lại **không kèm `--no-vlm`** là gọi lại
 > VLM cho CẢ deck (51 + 17 trang). Chỉ cần chunk / nhúng lại thì dùng dòng `--no-vlm`.
+>
+> Bước kịch bản (S4) chạy mặc định: Thời gian làm việc đã có kịch bản → 0 lần gọi LLM;
+> Onboarding **chưa có** → lần đầu viết 51 trang (~1–2 lần gọi LLM mỗi trang). Thêm
+> `--no-scenario` nếu chưa cần.
 
 ```bash
 # Thời gian làm việc & Chính sách nhân sự   ->   <ten> = thoi_gian_lam_viec_chinh_sach_nhan_su
-bash scripts/run_deck.sh "data/raw/Thời gian làm việc & Chính sách nhân sự.pdf"
-bash scripts/run_deck.sh "data/raw/Thời gian làm việc & Chính sách nhân sự.pdf" --no-vlm
+bash scripts/run_deck.sh data/raw/thoi_gian_lam_viec_chinh_sach_nhan_su.pdf
+bash scripts/run_deck.sh data/raw/thoi_gian_lam_viec_chinh_sach_nhan_su.pdf --no-vlm
 python scripts/try_ask.py thoi_gian_lam_viec_chinh_sach_nhan_su
 python scripts/try_ask.py thoi_gian_lam_viec_chinh_sach_nhan_su "làm thêm ngày lễ được tính hệ số bao nhiêu"
 python src/kb/search.py out/kb/thoi_gian_lam_viec_chinh_sach_nhan_su/chunks.json "giờ làm việc ban đêm tính từ mấy giờ" --explain
 python src/parsing/cli.py show thoi_gian_lam_viec_chinh_sach_nhan_su --page 7
 
 # Onboarding Kit   ->   <ten> = onboarding_kit
-bash scripts/run_deck.sh "data/raw/Onboarding Kit.pdf"
-bash scripts/run_deck.sh "data/raw/Onboarding Kit.pdf" --no-vlm
+bash scripts/run_deck.sh data/raw/onboarding_kit.pdf
+bash scripts/run_deck.sh data/raw/onboarding_kit.pdf --no-vlm
 python scripts/try_ask.py onboarding_kit
 python scripts/try_ask.py onboarding_kit "bảo hiểm sức khỏe Vingroup có những gói nào"
 python src/kb/search.py out/kb/onboarding_kit/chunks.json "quy tắc phản hồi email" --explain
@@ -158,10 +167,10 @@ docs/             tài liệu — xem dưới
 
 ## Tài liệu
 
-| Đọc khi                                                                             | File                                                                                            |
-| ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| Muốn hiểu cái **đang chạy thật**: luồng, dữ liệu từng tầng, số đo | [docs/offline/01-hien-trang.md](./docs/offline/01-hien-trang.md)                                 |
-| Cần**lệnh**: chạy, đọc kết quả, chạy lại một phần                    | [docs/offline/02-lenh.md](./docs/offline/02-lenh.md)                                             |
-| Cần schema / lý do từng quyết định                                              | [docs/spec/](./docs/spec/) — `parsed-document` · `kb-chunk` · `embedding` · `search` |
-| Muốn xem thiết kế đích (pptx, runtime R1–R7, TTS, duyệt)                       | [docs/README.md](./docs/README.md)                                                               |
-| Sắp viết code                                                                       | [CLAUDE.md](./CLAUDE.md) — luật bắt buộc của dự án                                        |
+| Đọc khi                                                                           | File                                                                                            |
+| ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Muốn hiểu cái**đang chạy thật**: luồng, dữ liệu từng tầng, số đo | [docs/offline/01-hien-trang.md](./docs/offline/01-hien-trang.md)                                 |
+| Cần**lệnh**: chạy, đọc kết quả, chạy lại một phần                  | [docs/offline/02-lenh.md](./docs/offline/02-lenh.md)                                             |
+| Cần schema / lý do từng quyết định                                            | [docs/spec/](./docs/spec/) — `parsed-document` · `kb-chunk` · `embedding` · `search` |
+| Muốn xem thiết kế đích (pptx, runtime R1–R7, TTS, duyệt)                     | [docs/README.md](./docs/README.md)                                                               |
+| Sắp viết code                                                                     | [CLAUDE.md](./CLAUDE.md) — luật bắt buộc của dự án                                        |

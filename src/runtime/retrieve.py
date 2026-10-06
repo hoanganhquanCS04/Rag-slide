@@ -11,9 +11,6 @@ R3a (mở rộng câu hỏi, bằng CODE, không gọi model): "cái hình bên 
 nào để tìm. Nối thêm tiêu đề trang đang chiếu + chữ của mẩu nằm bên trái/phải (so
 `block.center[0]`) thì tìm mới trúng.
 
-Câu NỐI TIẾP ("vậy hạn chót là ngày nào") thì router đã cho LLM viết lại thành câu đủ ý TRƯỚC khi
-gọi tới đây (`Router._rewrite`) — ở đây chỉ tìm đúng câu được đưa.
-
 API nhúng lỗi (hết quota, rớt mạng) -> lùi về CHỈ BM25 cho cả phiên, không làm khán giả chờ.
 """
 
@@ -60,13 +57,6 @@ class Retriever:
         return [Context(chunk_id=c.chunk_id, page_no=c.page_no, text=c.text_enriched,
                         vlm_ratio=c.vlm_ratio)
                 for c in self.searcher.cs.by_page(page_no) if c.vector_role == "page"]
-
-    def contexts(self, chunk_ids: list[str]) -> list[Context]:
-        """chunk_id -> đoạn đưa vào prompt. Id không có trong KB (vd "deck_map") thì bỏ."""
-        by_id = {c.chunk_id: c for c in self.searcher.cs.chunks}
-        return [Context(chunk_id=c.chunk_id, page_no=c.page_no, text=c.text_enriched,
-                        vlm_ratio=c.vlm_ratio, prev=True)
-                for cid in chunk_ids if (c := by_id.get(cid))]
 
     def search(self, question: str, page: ParsedPage | None) -> tuple[list[SearchHit], list[SearchHit]]:
         """-> (nav_hits, qa_hits), mỗi danh sách đã gộp theo trang, xếp giảm dần."""

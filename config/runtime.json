@@ -4,7 +4,6 @@
   "gate_min_margin": 0.002,
   "top_k": 5,
   "max_contexts": 5,
-  "history_turns": 3,
   "max_answer_sentences": 4,
   "llm_timeout_s": 30,
   "llm_retry": 1,

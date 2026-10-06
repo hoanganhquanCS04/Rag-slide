@@ -347,18 +347,17 @@ input → regex fast-path ──(khớp)──→ goto_slide()          [~5ms]
 
 **Luật cứng:**
 
-- **Đúng 1 lần gọi LLM** cho routing + trả lời + chọn tool. KHÔNG tách router riêng.
+- **Đúng 1 lần gọi LLM** cho routing + rewrite + chọn tool. KHÔNG tách router riêng.
   (R3a là bước deterministic, KHÔNG phải lần gọi model thứ hai.)
-  **Ngoại lệ đã chốt 2026-10-06 — viết lại câu hỏi nối tiếp:** khi đã có lịch sử, 1 lần LLM
-  (`prompts/r_rewrite.md`) xem câu hỏi của 3 lượt gần nhất, viết lại câu cụt ("vậy hạn chót là
-  ngày nào") thành câu đủ ý RỒI MỚI TÌM. Lý do: tìm chạy trước lần gọi trả lời, câu cụt tìm bằng
-  chính nó là lạc đề; đoán câu nối tiếp bằng từ khoá thì sót. Câu đầu phiên không tốn thêm.
-  Chấp nhận chậm thêm ~1–2s. Đây KHÔNG phải router: không phân loại, không chọn tool.
+- **v0: mỗi câu hỏi trả lời ĐỘC LẬP** (chốt 2026-10-06) — không lịch sử hỏi đáp trong prompt,
+  không xử lý câu nối tiếp. Câu cụt ("vậy hạn chót là ngày nào") tìm bằng chính nó là lạc đề;
+  làm cho đúng phải thêm một lần gọi LLM viết lại câu hỏi trước khi tìm (đã thử: đúng nhưng chậm
+  thêm 2–4s) — để sau.
 - **KHÔNG nhồi index hay bảng toàn bộ vào prompt.** Ranh giới phân loại:
 
   ```
   TRẠNG THÁI  -> inline, bounded   "tôi đang nhìn gì" — không index nào trả lời được
-                 KBChunk trang hiện tại · history 3 lượt · deck_map (~150 tok)
+                 KBChunk trang hiện tại · deck_map (~150 tok)   (v0 không có history)
   TRI THỨC    -> TRUY XUẤT         slide_index · concept · section · KB chunk
   ```
 
@@ -393,8 +392,8 @@ input → regex fast-path ──(khớp)──→ goto_slide()          [~5ms]
   - **R3a — mở rộng query, DETERMINISTIC, ~5ms, không gọi model.** Khớp chuỗi từ chỉ trỏ
     vào `relations[].visual` / `visual_elements`, nối thêm `entities` trang hiện tại
     → `query_expanded` dùng để TRUY XUẤT.
-  - **R3b — rewrite thật.** v0: lần gọi viết lại câu hỏi riêng ở trên (chỉ khi có lịch sử) —
-    câu viết lại chỉ dùng để TÌM; `text` GỐC mới là thứ dùng để sinh câu trả lời.
+  - **R3b — rewrite thật, trong lần gọi LLM duy nhất.** `query_rewritten` là tham số tool;
+    `text` GỐC mới là thứ dùng để sinh câu trả lời.
 - **Confidence gate:** `margin = rrf(top1) − rrf(top2) < threshold` → KHÔNG nhảy,
   hỏi lại + thumbnail.
 

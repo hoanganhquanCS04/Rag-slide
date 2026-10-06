@@ -12,6 +12,9 @@ Chạy lại là INCREMENTAL: trang có page_hash + prompt + model không đổi
 không tốn tiền. Đổi kho phát âm data/pronunciation.json thì chỉ đếm lại âm tiết, không gọi LLM.
 Lưu dần sau MỖI trang: dừng giữa chừng thì trang đã viết vẫn còn, chạy lại là đi tiếp.
 Chạy xong -> scripts/extract_terms.py gom từ chưa có cách đọc vào kho -> người chốt -> chạy lại.
+
+Mã thoát: 0 xong · 3 xong nhưng có trang CỜ ĐỎ (file vẫn ghi đủ) · 1 hỏng thật — giống parse,
+`run_deck.sh` gặp 3 thì chạy tiếp.
 """
 
 from __future__ import annotations
@@ -193,7 +196,7 @@ def main(argv: list[str] | None = None) -> int:
     log.info("")
     log.info("ghi -> %s", out)
     log.info("ghi -> %s   (bản đọc — mở Preview: Ctrl+Shift+V)", out.with_suffix(".md"))
-    return 1 if any(s.red_flags for s in sc.slides) else 0
+    return 3 if any(s.red_flags for s in sc.slides) else 0
 
 
 if __name__ == "__main__":

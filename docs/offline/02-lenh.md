@@ -40,8 +40,8 @@ Tên file có dấu cách thì bọc trong ngoặc kép.
 Đặt file vào `data/raw/` (`.pdf`, hoặc `.pptx` kèm bản `.pdf` CÙNG TÊN để có ảnh trang —
 xuất bằng `scripts\pptx2pdf.ps1`).
 
-**Hai lệnh là đủ.** Lệnh 1 làm hết phần offline: parse → chunk + nhúng → `deck_map`. Bước
-nào có cache thì không tốn API — chạy lại thoải mái:
+**Hai lệnh là đủ.** Lệnh 1 làm hết phần offline: parse → chunk + nhúng → `deck_map` → kịch
+bản (S4). Bước nào có cache thì không tốn API — chạy lại thoải mái:
 
 ```bash
 bash scripts/run_deck.sh "data/raw/<file>.pdf"               # -> document.json, chunks.json + vector + kho, deck_map.txt
@@ -107,9 +107,10 @@ Ghi chú:
 - Kho chỉ là BẢN SAO. Nguồn là `chunks.json` + `.npy`: xoá `out\kb\chroma\` thì lần tìm kiếm
   sau tự dựng lại, **không gọi API**.
 
-### Kịch bản (S4) — chạy riêng, không nằm trong `run_deck.sh`
+### Kịch bản (S4) — bước 4 của `run_deck.sh`
 
-Tốn ~1–2 lần gọi LLM mỗi trang, nên chỉ chạy khi cần kịch bản:
+`run_deck.sh` gọi lệnh đầu tiên dưới đây sau `deck_map` (`--no-scenario` để bỏ). Tốn ~1–2 lần gọi
+LLM mỗi trang ĐỔI — trang không đổi thì giữ nguyên. Chạy riêng khi chỉ muốn làm kịch bản:
 
 ```powershell
 # viết kịch bản                       -> out\deck\<ten>\scenario.json + scenario.md   [tốn API]

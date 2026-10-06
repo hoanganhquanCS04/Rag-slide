@@ -105,7 +105,7 @@ class Session:
             t0 = time.perf_counter()
             reply, ms = fastpath.match(q, at_slide, self.doc.n_pages), {}
             if reply is None:
-                reply, ms = await self.router.handle(q, at_slide, self.history)
+                reply, ms = await self.router.handle(q, at_slide)
             ms["total"] = int((time.perf_counter() - t0) * 1000)
             if not reply.text:                            # lời robot cho lệnh không kèm câu nói
                 reply.text = {"goto": f"Mình chuyển sang trang {reply.page} nhé.",

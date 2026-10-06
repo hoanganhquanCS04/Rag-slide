@@ -43,7 +43,7 @@ out/parsed/<ten>/document.json            ★ ParsedDocument — NGUỒN của m
         │      ▼
         │   out/deck/<ten>/deck_map.txt              ~180 token: danh sách chương → prompt runtime
         │
-        └── S4 kịch bản (CHẠY RIÊNG) ─────────────── 💰 LLM
+        └──⑥ S4 kịch bản ──────────────────────────── 💰 LLM, chỉ trang đổi
                đọc: block của trang + kịch bản trang trước cùng chương
                ▼
             out/deck/<ten>/scenario.json · scenario.md
@@ -51,8 +51,8 @@ out/parsed/<ten>/document.json            ★ ParsedDocument — NGUỒN của m
                └─ scripts/extract_terms.py ──► data/pronunciation.json   KHO CHUNG mọi deck
 ```
 
-**`scripts/run_deck.sh` chạy ①→⑤ bằng một lệnh** (thêm `--eval` thì đo luôn). S4 không
-nằm trong script: nó tốn một lần gọi LLM mỗi trang, chạy riêng khi cần kịch bản.
+**`scripts/run_deck.sh` chạy ①→⑥ bằng một lệnh** (thêm `--eval` thì đo luôn, `--no-scenario` thì
+bỏ S4). S4 incremental: trang có `page_hash` / prompt / model không đổi thì không gọi LLM.
 
 KB (④) và kịch bản (S4) **độc lập nhau**. S4 không đọc chunk — nó đọc thẳng block của
 trang, vì mỗi câu phải trỏ về đúng một block.

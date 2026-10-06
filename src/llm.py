@@ -80,7 +80,20 @@ class LLM:
                         {"model": self.model, "sec": round(dt, 1),
                          "messages": messages, "response": content},
                         ensure_ascii=False, indent=2), encoding="utf-8")
-                    return json.loads(_unfence(content))
+                    try:
+                        return json.loads(_unfence(content))
+                    except json.JSONDecodeError:
+                        # 2026-10-06 cổng đổi cách báo lần nữa: flash-lite + JSON mode -> HTTP 200 kèm
+                        # CHỮ "Gemini 3.5 Flash is no longer available…" (~2/3 lần), tắt JSON mode thì
+                        # 9/9 lần qua. Bật JSON mode mà nhận chữ không phải JSON -> bỏ JSON mode cho cả
+                        # phiên, gửi lại NGAY (như nhánh 503 dưới). Đã tắt rồi mà vẫn hỏng -> lỗi thật.
+                        if "response_format" not in payload:
+                            raise
+                        log.warning("  %s: %s bat JSON mode tra chu khong phai JSON -> bo response_format "
+                                    "cho ca phien", tag, self.model)
+                        self.json_mode = False
+                        payload.pop("response_format")
+                        continue
                 last = f"HTTP {r.status_code}: {r.text[:200]}"
                 if "response_format" in payload and ("get_channel_failed" in r.text or r.status_code == 503):
                     # Cổng (key nhóm "starter") không có kênh nào chạy JSON mode cho model này —

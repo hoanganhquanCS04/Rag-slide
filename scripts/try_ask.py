@@ -3,7 +3,7 @@
 Chạy SAU phần offline (`bash scripts/run_deck.sh <file raw>`).
 
     python scripts/try_ask.py onboarding_kit                              # hỏi liên tục, Ctrl+C để thoát
-    python scripts/try_ask.py "data/raw/Onboarding Kit.pdf"               # tên file gốc cũng được
+    python scripts/try_ask.py data/raw/onboarding_kit.pdf                 # tên file gốc cũng được
     python scripts/try_ask.py onboarding_kit "nghỉ phép năm được mấy ngày"
     python scripts/try_ask.py onboarding_kit "..." --prompt               # in NGUYÊN VĂN prompt gửi LLM
     python scripts/try_ask.py onboarding_kit "..." -q                     # chỉ câu trả lời, không log
@@ -37,7 +37,7 @@ from kb.search import RRF_K, W_DENSE, W_SPARSE
 from llm import DEFAULT_MODEL
 from parsing.from_docling import slugify_doc_id
 from parsing.models import ParsedDocument
-from runtime.models import RuntimeConfig, Turn
+from runtime.models import RuntimeConfig
 from runtime.retrieve import Retriever
 from runtime.router import Router
 
@@ -52,10 +52,6 @@ def show_debug(dbg: dict, ms: dict, cfg: RuntimeConfig, mode: str, full_prompt: 
     if not dbg:
         return
     used = {c.chunk_id for c in dbg.get("found", [])}
-    if "rewrite" in ms:
-        same = dbg.get("query") == dbg.get("question")
-        print(f"   [0] LLM viet lai cau hoi ({ms['rewrite'] / 1000:.1f}s): "
-              + ("giu nguyen" if same else f"tim bang \"{dbg.get('query', '')[:150]}\""))
     print(f"   [1] tim: {mode}, RRF K={RRF_K} dense {W_DENSE:g} : bm25 {W_SPARSE:g} · {ms['search'] / 1000:.1f}s"
           f" · top-{cfg.top_k}, {cfg.max_contexts} trang dau vao prompt")
     print("       #  trang  chunk           rrf     dense      bm25   vao prompt")
@@ -70,7 +66,6 @@ def show_debug(dbg: dict, ms: dict, cfg: RuntimeConfig, mode: str, full_prompt: 
         for c in dbg.get("found", []):
             head = c.text.split("] ", 1)[-1].replace("\n", " ⏎ ")
             print(f"       [{c.chunk_id.split('#', 1)[1]}] {count_tokens(c.text)} tok"
-                  + (" · VUA DUNG o cau truoc" if c.prev else "")
                   + (f" · {c.vlm_ratio:.0%} vlm" if c.vlm_ratio else "") + f" · {head[:90]}…")
         if full_prompt:
             print("       ----- prompt -----")
@@ -85,7 +80,6 @@ async def run(doc_id: str, questions: list[str], model: str, cfg: RuntimeConfig,
     doc = ParsedDocument.load(f"out/parsed/{doc_id}/document.json")
     retriever = Retriever(doc_id, cfg.top_k)
     router = Router(doc, retriever, cfg, deck_map.build(doc), model, Path("logs/runtime") / doc_id / "llm")
-    history: list[Turn] = []
     print(f"{doc_id}: {doc.n_pages} trang | LLM {model}" + ("" if questions else " | Ctrl+C de thoat"))
 
     def ask_forever():
@@ -96,10 +90,8 @@ async def run(doc_id: str, questions: list[str], model: str, cfg: RuntimeConfig,
     try:
         for q in questions or ask_forever():
             t0 = time.perf_counter()
-            reply, ms, dbg = await router.answer(q, history)
-            dbg["question"] = q
+            reply, ms, dbg = await router.answer(q)
             ms["total"] = int((time.perf_counter() - t0) * 1000)
-            history.append(Turn(at_slide=0, question=q, reply=reply, ms=ms))
 
             pages = sorted({int(m.group(1)) for s in reply.sources if (m := PAGE_OF_CHUNK.search(s))})
             src = [f"trang {', '.join(map(str, pages))}"] if pages else []
@@ -112,7 +104,6 @@ async def run(doc_id: str, questions: list[str], model: str, cfg: RuntimeConfig,
             print(f"   ↳ {reply.action}"
                   + (f" · nguon: {' + '.join(src)}" if src else "")
                   + f" · {ms['total'] / 1000:.1f}s ("
-                  + (f"viet lai {ms['rewrite'] / 1000:.1f}s, " if "rewrite" in ms else "")
                   + f"tim {ms['search'] / 1000:.1f}s, LLM {ms.get('llm', 0) / 1000:.1f}s)")
     except (EOFError, KeyboardInterrupt):
         print("\n(thoat)")
@@ -122,7 +113,7 @@ async def run(doc_id: str, questions: list[str], model: str, cfg: RuntimeConfig,
 
 def main() -> int:
     ap = argparse.ArgumentParser(prog="try_ask")
-    ap.add_argument("doc", help="doc_id (vd onboarding_kit) hoac ten file goc (vd \"data/raw/Onboarding Kit.pdf\")")
+    ap.add_argument("doc", help="doc_id (vd onboarding_kit) hoac ten file goc (vd data/raw/onboarding_kit.pdf)")
     ap.add_argument("question", nargs="*", help="cau hoi; bo trong = hoi lien tuc")
     ap.add_argument("--model", default=DEFAULT_MODEL, help="mac dinh LLM_MODEL trong .env")
     ap.add_argument("--config", default="config/runtime.json")

@@ -5,10 +5,10 @@
        └ ②b bảng      cắt ảnh từng bảng, VLM chép ra cells — TỐN API (lần đầu) layout.py
     ③ document.json   ParsedDocument chuẩn — KB, kịch bản, runtime đọc file này build.py
 
-    python src/parsing/cli.py run "data/raw/Onboarding Kit.pdf"                # đủ 3 bước
-    python src/parsing/cli.py run "data/raw/Onboarding Kit.pdf" --pages 7,10   # chỉ gọi VLM 2 trang
-    python src/parsing/cli.py run "data/raw/Onboarding Kit.pdf" --no-vlm       # không gọi API
-    python src/parsing/cli.py run "data/raw/Onboarding Kit.pdf" --redo         # chạy lại docling
+    python src/parsing/cli.py run data/raw/onboarding_kit.pdf                  # đủ 3 bước
+    python src/parsing/cli.py run data/raw/onboarding_kit.pdf   --pages 7,10   # chỉ gọi VLM 2 trang
+    python src/parsing/cli.py run data/raw/onboarding_kit.pdf   --no-vlm       # không gọi API
+    python src/parsing/cli.py run data/raw/onboarding_kit.pdf   --redo         # chạy lại docling
     python src/parsing/cli.py show onboarding_kit --page 7 --full
 
 Bước nào có sẵn thì bỏ qua: docling.json có rồi thì không chạy lại docling (trừ --redo);

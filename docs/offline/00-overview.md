@@ -276,7 +276,7 @@ RA   DeckStructure  ──> S4
 > **Không gọi model.** Bản trước cho LLM sinh `concept_map` / `dependencies` / `arc`.
 > Bỏ hết — chúng phục vụ việc bơm ngữ cảnh toàn cục vào prompt.
 
-#### S4 · Scenario — từng trang → `Scenario`  🟡 ĐÃ CÓ, chạy riêng
+#### S4 · Scenario — từng trang → `Scenario`  🟡 ĐÃ CÓ, bước 4 của `run_deck.sh`
 
 `src/scenario/` · xem [scenario.md](../spec/scenario.md)
 

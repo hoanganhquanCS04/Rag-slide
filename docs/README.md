@@ -23,8 +23,8 @@
 ✅ S5  chunk + vector + kho        src/kb/               1536 chiều · cache · chroma | inmem
 ✅     tìm hybrid + đo             src/kb/{search,eval,tune,audit}.py
 ✅ S6a deck_map                    src/kb/deck_map.py
-   ─── cả bốn dòng trên: MỘT lệnh  bash scripts/run_deck.sh "<file>"
-🟡 S4  kịch bản                    src/scenario/         chạy riêng, nhịp chưa đạt gate
+   ─── bốn dòng trên + S4: MỘT lệnh  bash scripts/run_deck.sh "<file>"
+🟡 S4  kịch bản                    src/scenario/         bước 4 của run_deck.sh, nhịp chưa đạt gate
 🟡     runtime bản chữ             src/runtime/          hỏi đáp + thuyết trình thử trong terminal
 🚫 S1, S3                          BỎ — xem bảng dưới
 ⬜ S2 time_budget · S6b TTS · S7 duyệt · R5 giọng nói · R7 ngắt lời
@@ -55,7 +55,7 @@ Muốn biết thiết kế đích: đọc [`offline/00-overview.md`](./offline/0
 | ✅ | [S5 KB Construction](./offline/s5-kb-construction.md) | Chunk theo trang + embed qua API + hybrid dense/BM25 gộp RRF |
 | ✅ | S6a deck_map | Bản đồ chương ~180 token cho prompt runtime — luật, không gọi model |
 | ⬜ | [S2 Deck Structure](./offline/s2-deck-structure.md) | Chỉ còn `time_budget` — `sections` đã có từ S0 |
-| 🟡 | [S4 Scenario](./offline/s4-scenario.md) | Kịch bản nói · `content` vs `delivery` · 7 đòn bẩy tự nhiên — đã code, chạy riêng |
+| 🟡 | [S4 Scenario](./offline/s4-scenario.md) | Kịch bản nói · `content` vs `delivery` · 7 đòn bẩy tự nhiên — đã code, bước 4 của `run_deck.sh` |
 | ⬜ | S6b Precompute | TTS theo câu, một giọng duy nhất, qa_cache, bản nghe thử |
 | ⬜ | [S7 HITL Review](./offline/s7-hitl-review.md) | Duyệt **chỉ phần bị flag** · vòng ĐỌC + vòng **NGHE** (MOS) |
 | 🚫 | ~~S1 Slide Understanding~~ | **BỎ** — gộp vào S0. `message`/`relations` sinh ra để nhồi prompt, không dùng |

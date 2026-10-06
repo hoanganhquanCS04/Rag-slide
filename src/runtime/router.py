@@ -1,19 +1,17 @@
-"""R2 + R3 + R4 — tìm, 1 lần gọi LLM trả lời, rồi CODE kiểm trước khi nói.
+"""R2 + R3a + R4 — ĐÚNG MỘT lần gọi LLM cho mỗi câu hỏi, rồi CODE kiểm trước khi nói.
 
-    [có lịch sử] LLM viết lại câu hỏi (r_rewrite.md) ─► tìm (retrieve.py) ─► 1 lần gọi LLM ─► …
+    tìm trước (retrieve.py) ─► 1 lần gọi LLM ─► LLM chọn 1 trong 4 hành động
                                                   │
                         code kiểm ◄───────────────┘
                           answer   grounding phải trỏ vào đoạn ĐÃ đưa cho nó, sai -> escalate
                           goto     qua CỔNG TIN CẬY: không chắc -> hỏi lại, không nhảy
                           lỗi API  -> escalate + gợi ý trang tìm được (không bịa, không treo)
 
-Viết lại câu hỏi (chốt 2026-10-06, CLAUDE.md §6): câu nối tiếp cụt ("vậy hạn chót là ngày nào")
-tìm bằng chính nó là lạc đề, mà bước tìm chạy TRƯỚC lần gọi trả lời. Không đoán câu nào là nối tiếp
-bằng từ khoá: LLM xem các câu hỏi gần nhất rồi tự quyết. Chỉ gọi khi đã có lịch sử — câu đầu tiên
-không tốn thêm. Đổi lại chậm thêm một lần gọi (~1–2s). Lỗi -> tìm bằng câu gốc, không chặn.
-Câu trả lời vẫn sinh từ câu hỏi GỐC (R3b); câu viết lại chỉ dùng để tìm.
+Mỗi câu hỏi trả lời ĐỘC LẬP — không đưa lịch sử hỏi đáp vào prompt (chốt 2026-10-06): câu nối
+tiếp cụt thì bước tìm (chạy trước LLM) không có chủ đề, xử lý cho đúng phải thêm một lần gọi LLM.
 
-Vì sao code kiểm: LLM tự tin thái quá có hệ thống, và bịa nguồn được.
+Vì sao MỘT lần gọi (§6): mỗi lần gọi 1–5s. Tách "phân loại câu hỏi" rồi "trả lời" là chậm
+gấp đôi. Vì sao code kiểm: LLM tự tin thái quá có hệ thống, và bịa nguồn được.
 """
 
 from __future__ import annotations
@@ -27,12 +25,11 @@ from kb.deck_map import page_label
 from kb.models import SearchHit
 from llm import LLM, ROOT
 from parsing.models import ParsedDocument
-from runtime.models import Context, Reply, RuntimeConfig, Turn
+from runtime.models import Context, Reply, RuntimeConfig
 from runtime.retrieve import Retriever
 
 PROMPT_PATH = ROOT / "prompts" / "r_router.md"
 QA_PROMPT_PATH = ROOT / "prompts" / "r_qa.md"       # chỉ hỏi đáp: không trang đang chiếu, không điều hướng
-REWRITE_PROMPT_PATH = ROOT / "prompts" / "r_rewrite.md"
 
 # Robot nói gì khi không trả lời — KHÔNG lặp lại câu hỏi (đọc to câu troll là troll thành công)
 ESCALATE_TEXT = {
@@ -54,23 +51,19 @@ class Router:
         self.deck_map = deck_map.strip()
         self.template = PROMPT_PATH.read_text(encoding="utf-8")
         self.qa_template = QA_PROMPT_PATH.read_text(encoding="utf-8")
-        self.rewrite_template = REWRITE_PROMPT_PATH.read_text(encoding="utf-8")
         self.llm = LLM(model, log_dir, retry=cfg.llm_retry, timeout=cfg.llm_timeout_s,
                        extra=cfg.llm_extra)
         self.llm.json_mode = cfg.json_mode
 
-    async def handle(self, question: str, at_slide: int,
-                     history: list[Turn]) -> tuple[Reply, dict[str, int]]:
+    async def handle(self, question: str, at_slide: int) -> tuple[Reply, dict[str, int]]:
         ms: dict[str, int] = {}
-        prev = history[-1] if history else None
-        query = await self._rewrite(question, history, ms)
         t0 = time.perf_counter()
-        nav, qa = await asyncio.to_thread(self.retriever.search, query, self.doc.page(at_slide))
+        nav, qa = await asyncio.to_thread(self.retriever.search, question, self.doc.page(at_slide))
         ms["search"] = _ms(t0)
 
         current = self.retriever.page_context(at_slide)
-        found = self._found(nav, qa, at_slide, self._carry(prev))
-        prompt = self._render(question, at_slide, current, found, history)
+        found = self._found(nav, qa, at_slide)
+        prompt = self._render(question, at_slide, current, found)
 
         t1 = time.perf_counter()
         try:
@@ -82,8 +75,7 @@ class Router:
         ms["llm"] = _ms(t1)
         return self._check(raw, current + found, nav), ms
 
-    async def answer(self, question: str,
-                     history: list[Turn]) -> tuple[Reply, dict[str, int], dict]:
+    async def answer(self, question: str) -> tuple[Reply, dict[str, int], dict]:
         """CHỈ hỏi đáp (scripts/try_ask.py): không trang đang chiếu, không điều hướng.
 
         Tìm (lọc trang phân mục) -> top `max_contexts` trang vào prompt r_qa.md -> 1 lần LLM ->
@@ -93,24 +85,19 @@ class Router:
         """
         dbg: dict = {}
         ms: dict[str, int] = {}
-        prev = history[-1] if history else None
-        query = await self._rewrite(question, history, ms)
         t0 = time.perf_counter()
-        _, qa = await asyncio.to_thread(self.retriever.search, query, None)
+        _, qa = await asyncio.to_thread(self.retriever.search, question, None)
         ms["search"] = _ms(t0)
 
-        found = self._found([], qa, 0, self._carry(prev))
-        hist = "\n".join(f"- Hỏi: {t.question} → Đáp: {t.reply.text or t.reply.action}"
-                         for t in history[-self.cfg.history_turns:])
+        found = self._found([], qa, 0)
         fill = {"deck_map": self.deck_map, "found": _ctx(found) or "(không tìm được đoạn nào)",
-                "history": hist or "(chưa có)", "question": question}
+                "question": question}
         prompt = self.qa_template
         for k, v in fill.items():
             prompt = prompt.replace("{{" + k + "}}", v)
 
         tag = f"qa_{int(time.time() * 1000)}"
-        dbg.update(hits=qa, found=found, prompt=prompt, query=query,
-                   log=self.llm.log_dir / f"{tag}.json")
+        dbg.update(hits=qa, found=found, prompt=prompt, log=self.llm.log_dir / f"{tag}.json")
         t1 = time.perf_counter()
         try:
             raw = await self.llm.chat([{"role": "user", "content": prompt}], tag=tag)
@@ -131,65 +118,27 @@ class Router:
 
     # ------------------------------------------------------------------ dựng prompt
 
-    async def _rewrite(self, question: str, history: list[Turn], ms: dict[str, int]) -> str:
-        """LLM xem câu hỏi của `history_turns` lượt gần nhất -> câu ĐEM ĐI TÌM. Câu hỏi nối tiếp
-        được viết lại cho đủ ý; câu đủ ý / đổi chủ đề giữ nguyên. Chưa có lịch sử -> không gọi."""
-        recent = history[-self.cfg.history_turns:]
-        if not recent:
-            return question
-        prompt = (self.rewrite_template
-                  .replace("{{history}}", "\n".join(f"- {t.question}" for t in recent))
-                  .replace("{{question}}", question))
-        t0 = time.perf_counter()
-        try:
-            raw = await self.llm.chat([{"role": "user", "content": prompt}],
-                                      tag=f"rw_{int(time.time() * 1000)}")
-            query = str(raw.get("query") or "").strip()
-        except Exception:                      # lỗi API / JSON hỏng -> tìm bằng câu gốc, không chặn
-            query = ""
-        ms["rewrite"] = _ms(t0)
-        return query or question
-
-    def _carry(self, prev: Turn | None) -> list[Context]:
-        """Đoạn câu trả lời LƯỢT TRƯỚC đã dùng — TRẠNG THÁI hội thoại, đưa lại thẳng vào prompt.
-
-        "Giải thích câu trả lời vừa rồi" không có từ khoá nào để tìm: tìm lại thì trang vừa nói
-        rơi khỏi top-5, LLM nhớ câu trả lời (lịch sử) mà không có đoạn nào để trích -> từ chối.
-        """
-        if prev is None or prev.reply.action != "answer":
-            return []
-        return self.retriever.contexts(prev.reply.sources)
-
-    def _found(self, nav: list[SearchHit], qa: list[SearchHit], at_slide: int,
-               carry: list[Context] | None = None) -> list[Context]:
-        """`carry` (đoạn lượt trước) + top `max_contexts` trang tìm được, BỎ trang đang chiếu (đã
-        có sẵn) và trang đã có trong `carry`. qa trước: cần nội dung; nav sau: bù trang mở chương
-        cho câu điều hướng. `carry` KHÔNG tính vào `max_contexts` — nó là trạng thái, không phải
-        kết quả tìm."""
-        out: list[Context] = [c for c in carry or [] if c.page_no != at_slide]
-        seen = {at_slide, *(c.page_no for c in out)}
-        n = 0
+    def _found(self, nav: list[SearchHit], qa: list[SearchHit], at_slide: int) -> list[Context]:
+        """Top `max_contexts` trang tìm được, BỎ trang đang chiếu (đã có sẵn). qa trước: cần nội
+        dung; nav sau: bù trang mở chương cho câu điều hướng."""
+        out: list[Context] = []
+        seen = {at_slide}
         for h in qa + nav:
-            if h.page_no in seen or n >= self.cfg.max_contexts:
+            if h.page_no in seen or len(out) >= self.cfg.max_contexts:
                 continue
             seen.add(h.page_no)
-            n += 1
             out.append(Context(chunk_id=h.chunk_id, page_no=h.page_no,
                                text=h.text_enriched, vlm_ratio=h.vlm_ratio))
         return out
 
     def _render(self, question: str, at_slide: int, current: list[Context],
-                found: list[Context], history: list[Turn]) -> str:
-        recent = history[-self.cfg.history_turns:]
-        hist = "\n".join(f"- (trang {t.at_slide}) Hỏi: {t.question} → Đáp: "
-                         f"{t.reply.text or t.reply.action}" for t in recent)
+                found: list[Context]) -> str:
         fill = {
             "page_no": str(at_slide),
             "n_pages": str(self.doc.n_pages),
             "deck_map": self.deck_map,
             "current": _ctx(current) or "(trang này không có nội dung chữ)",
             "found": _ctx(found) or "(không tìm được trang nào)",
-            "history": hist or "(chưa có)",
             "question": question,
         }
         out = self.template
@@ -273,7 +222,6 @@ class Router:
 def _ctx(items: list[Context]) -> str:
     return "\n\n".join(
         f"[{c.chunk_id}] trang {c.page_no}"
-        + (" (vừa dùng ở câu trả lời trước)" if c.prev else "")
         + (f" (có {c.vlm_ratio:.0%} do máy tả ảnh — có thể sai con số)" if c.vlm_ratio else "")
         + f"\n{c.text}"
         for c in items)

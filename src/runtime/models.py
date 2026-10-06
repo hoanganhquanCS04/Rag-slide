@@ -21,7 +21,6 @@ class RuntimeConfig(BaseModel):
     gate_min_margin: float = 0.002      # rrf(top1) - rrf(top2) dưới mức này -> hỏi lại
     top_k: int = 5
     max_contexts: int = 5               # số trang tìm được đưa vào prompt = cả top-k
-    history_turns: int = 3
     max_answer_sentences: int = 4
     llm_timeout_s: float = 30.0
     llm_retry: int = 1                  # khán giả đang chờ: lỗi là escalate, không đợi
@@ -42,7 +41,6 @@ class Context(BaseModel):
     page_no: int
     text: str
     vlm_ratio: float = 0.0              # bao nhiêu phần do VLM tả — có thể sai (NT2)
-    prev: bool = False                  # đoạn câu trả lời LƯỢT TRƯỚC đã dùng — trạng thái hội thoại
 
 
 class Reply(BaseModel):
