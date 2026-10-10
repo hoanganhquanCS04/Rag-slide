@@ -1,0 +1,236 @@
+{
+  "note": "Bộ câu hỏi có nhãn cho tài liệu NGUỒN paper_finance.docx. TOÀN BỘ do AI viết SAU KHI đã đọc toàn văn -> câu hỏi gần chữ trong bài hơn khán giả thật. Dùng được để SO các cách chunk với nhau, CHƯA đủ để kết luận đạt chất lượng. Người thật viết thêm vào đây (by: nguoi).",
+  "doc_id": "paper_finance",
+  "fields": {
+    "q": "câu hỏi, gõ CÓ DẤU (gõ không dấu thì BM25 về 0)",
+    "section": "mục chứa đáp án — chỉ để người đọc, KHÔNG dùng để chấm",
+    "anchors": "câu trích NGUYÊN VĂN trong tài liệu. Kết quả trúng nếu text_raw CHỨA anchor. Nhãn không gắn vào chunk_id -> cùng một bộ đề chấm được mọi cách chunk. Anchor không được vắt qua chỗ thủng công thức, số trích dẫn, hay ranh giới chữ đậm/nghiêng",
+    "need": "any = top-k có MỘT anchor là đủ · all = top-k phải có ĐỦ mọi anchor (đáp án trải nhiều đoạn)",
+    "type": "tong_quan · dien_dai · chi_tiet · vat_ranh_gioi · bang · cong_thuc · tu_khoa · ngoai_tai_lieu",
+    "by": "ai viết câu này — ai | nguoi",
+    "why": "vì sao anchor đó là đáp án, và câu này đo cái gì"
+  },
+  "queries": [
+    {
+      "q": "Big Data gây ra những khó khăn gì cho nghiên cứu tài chính?",
+      "section": "1",
+      "anchors": [
+        "Thứ nhất, tỷ lệ tín hiệu trên nhiễu",
+        "Thứ hai, sự bùng nổ của",
+        "Thứ ba, sự thay đổi liên tục của các rủi ro"
+      ],
+      "need": "all",
+      "type": "tong_quan",
+      "by": "ai",
+      "why": "ba thách thức nằm ở ba đoạn liền nhau trong mục 1 (1.461 token) — mục bị cắt thì dễ rơi mất một đoạn"
+    },
+    {
+      "q": "Học máy trong định giá tài sản còn những hạn chế gì?",
+      "section": "5 | bảng 1",
+      "anchors": [
+        "Mạng nơ-ron sâu có thể phát hiện một yếu tố rủi ro",
+        "Học máy nội suy tương lai dựa trên dữ liệu quá khứ",
+        "Khó giải thích bản chất kinh tế (hộp đen), nguy cơ quá khớp"
+      ],
+      "need": "any",
+      "type": "tong_quan",
+      "by": "ai",
+      "why": "mục 5 có phần hạn chế; bảng 1 dòng Nhược điểm cột Mô hình Học máy cũng trả lời được"
+    },
+    {
+      "q": "Một công ty đổi ngành kinh doanh qua nhiều thập kỷ thì mô hình nào đo rủi ro của nó cho đúng?",
+      "section": "2.2",
+      "anchors": ["Hãy xem xét lịch sử của tập đoàn Nokia"],
+      "need": "any",
+      "type": "dien_dai",
+      "by": "ai",
+      "why": "ví dụ Nokia minh hoạ IPCA — câu hỏi không có chữ Nokia lẫn IPCA, đo nhánh dense"
+    },
+    {
+      "q": "Muốn biết thị trường có trả thêm tiền cho việc giữ cổ phiếu khó bán không thì làm thế nào?",
+      "section": "3.3",
+      "anchors": ["rủi ro thanh khoản có được định giá hay không"],
+      "need": "any",
+      "type": "dien_dai",
+      "by": "ai",
+      "why": "ví dụ minh hoạ Fama-MacBeth với rủi ro thanh khoản; 'khó bán' = thanh khoản thấp, không trùng chữ"
+    },
+    {
+      "q": "Lạm phát đâu có mua bán được, vậy đo phần bù rủi ro của nó kiểu gì?",
+      "section": "3.3",
+      "anchors": ["ta phải xây dựng một danh mục mô phỏng yếu tố"],
+      "need": "any",
+      "type": "dien_dai",
+      "by": "ai",
+      "why": "đoạn Danh mục Mô phỏng Yếu tố — yếu tố vĩ mô không giao dịch được"
+    },
+    {
+      "q": "Làm sao biết một yếu tố mới công bố có thật sự mới hay chỉ là yếu tố cũ đổi tên?",
+      "section": "3.4",
+      "anchors": [
+        "làm thế nào để biết một công bố yếu tố mới có thực sự mang lại sức mạnh giải thích mới",
+        "Để đánh giá tải trọng SDF của một yếu tố mới"
+      ],
+      "need": "any",
+      "type": "dien_dai",
+      "by": "ai",
+      "why": "DML; bài dùng chữ 'rượu cũ bình mới', câu hỏi dùng 'đổi tên'"
+    },
+    {
+      "q": "Thử hàng nghìn chiến lược thì kiểu gì cũng có cái trông như thắng, xử lý thế nào?",
+      "section": "3.6",
+      "anchors": [
+        "chắc chắn sẽ có 5% số chiến lược",
+        "kiểm soát Tỷ lệ Khám phá Giả"
+      ],
+      "need": "any",
+      "type": "dien_dai",
+      "by": "ai",
+      "why": "Multiple Testing và FDR — câu hỏi không có thuật ngữ nào"
+    },
+    {
+      "q": "Dữ liệu chỉ có vài năm nhưng rất nhiều công ty thì ước lượng thế nào?",
+      "section": "4.3",
+      "anchors": [
+        "ta có hàng triệu điểm dữ liệu cắt ngang",
+        "Giải pháp của khung này là chuyển sang ước lượng"
+      ],
+      "need": "any",
+      "type": "dien_dai",
+      "by": "ai",
+      "why": "khung N lớn, T cố định -> phần bù rủi ro hậu kỳ"
+    },
+    {
+      "q": "Làm sao để mạng nơ-ron không bị học vẹt khi định giá tài sản?",
+      "section": "3.2",
+      "anchors": ["Để ngăn chặn mạng nơ-ron"],
+      "need": "any",
+      "type": "chi_tiet",
+      "by": "ai",
+      "why": "một đoạn điều chuẩn autoencoder chôn trong mục 3.2 dài 2.370 token — đo độ loãng vector, quyết định có cần vector theo đoạn không"
+    },
+    {
+      "q": "Công ty phá sản hay mới lên sàn làm dữ liệu bị thiếu thì xử lý sao?",
+      "section": "3.2 | bảng 2",
+      "anchors": [
+        "dữ liệu lợi suất không bao giờ là một hình chữ nhật hoàn hảo",
+        "Giglio, Liao, và Xiu (2021) áp dụng thuật toán Hoàn thành Ma trận"
+      ],
+      "need": "any",
+      "type": "chi_tiet",
+      "by": "ai",
+      "why": "Matrix Completion, đoạn cuối mục 3.2"
+    },
+    {
+      "q": "Nếu mô hình bỏ sót một yếu tố quan trọng thì hậu quả là gì?",
+      "section": "3.3",
+      "anchors": ["Một lỗ hổng chết người của hồi quy Fama-MacBeth"],
+      "need": "any",
+      "type": "chi_tiet",
+      "by": "ai",
+      "why": "Omitted Factor Bias, giữa mục 3.3 dài 1.711 token"
+    },
+    {
+      "q": "RP-PCA sửa cái gì mà PCA thường làm không được?",
+      "section": "3.2",
+      "anchors": [
+        "nó hoàn toàn bỏ qua thông tin từ lợi suất kỳ vọng trung bình",
+        "Để khắc phục khiếm khuyết trên"
+      ],
+      "need": "all",
+      "type": "vat_ranh_gioi",
+      "by": "ai",
+      "why": "đoạn RP-PCA mở bằng 'khiếm khuyết trên' trỏ ngược về đoạn nhược điểm PCA — đo overlap: tách hai đoạn vào hai chunk thì phải lấy được cả hai"
+    },
+    {
+      "q": "Fama-MacBeth gồm mấy bước, mỗi bước làm gì?",
+      "section": "3.3",
+      "anchors": [
+        "Đối với mỗi tài sản, nhà nghiên cứu chạy một hồi quy OLS",
+        "tiến hành hồi quy lợi suất của tất cả tài sản trong tháng đó"
+      ],
+      "need": "all",
+      "type": "vat_ranh_gioi",
+      "by": "ai",
+      "why": "hai giai đoạn là hai list item liền nhau, chunker dễ cắt đôi"
+    },
+    {
+      "q": "Kỹ thuật nào chịu được dữ liệu khuyết tốt nhất?",
+      "section": "bảng 2 | 3.2",
+      "anchors": [
+        "Cực kỳ xuất sắc",
+        "Giglio, Liao, và Xiu (2021) áp dụng thuật toán Hoàn thành Ma trận"
+      ],
+      "need": "any",
+      "type": "bang",
+      "by": "ai",
+      "why": "bảng 2 cột 'Linh hoạt với dữ liệu khuyết', dòng Matrix Completion — đáp án trực tiếp là một Ô BẢNG"
+    },
+    {
+      "q": "Mô hình tĩnh với IPCA khác nhau ở giả định về beta thế nào?",
+      "section": "bảng 1 | 2.2",
+      "anchors": [
+        "Biến đổi theo đặc điểm doanh nghiệp (tuyến tính)",
+        "ép chúng phải là các kết hợp tuyến tính của các đặc điểm công ty"
+      ],
+      "need": "any",
+      "type": "bang",
+      "by": "ai",
+      "why": "bảng 1 dòng 'Giả định hệ số beta'"
+    },
+    {
+      "q": "RP-PCA làm SVD trên ma trận nào?",
+      "section": "3.2",
+      "anchors": ["RP-PCA thực hiện SVD trên ma trận"],
+      "need": "any",
+      "type": "cong_thuc",
+      "by": "ai",
+      "why": "ĐÁP ÁN NẰM TRONG ẢNH công thức. Chưa sửa lỗ thủng thì retrieval vẫn TRÚNG đoạn, nhưng đoạn không chứa đáp án — R4 mà vẫn trả lời được là BỊA. Chấm retrieval không bắt được lỗi này, phải chấm câu trả lời"
+    },
+    {
+      "q": "Lợi suất kỳ vọng trong mô hình yếu tố tĩnh được tách thành mấy phần?",
+      "section": "2.1",
+      "anchors": ["phần định giá sai (pricing error hay alpha) và phần bù rủi ro (risk premium)"],
+      "need": "any",
+      "type": "cong_thuc",
+      "by": "ai",
+      "why": "chữ có đủ nhưng phương trình là ảnh; đo xem công thức LaTeX sau khi sửa có kéo điểm lên không"
+    },
+    {
+      "q": "Điều chỉnh Shanken là gì?",
+      "section": "4.1",
+      "anchors": ["Shanken adjustment"],
+      "need": "any",
+      "type": "tu_khoa",
+      "by": "ai",
+      "why": "BẪY: mục 4.2 cũng nhắc tên Shanken nhưng chỉ nói nó 'rơi rụng' — top-1 phải là 4.1"
+    },
+    {
+      "q": "CAPM do ai đề xuất?",
+      "section": "1",
+      "anchors": ["Mô hình Định giá Tài sản Vốn (CAPM) do Sharpe (1964) đề xuất"],
+      "need": "any",
+      "type": "tu_khoa",
+      "by": "ai",
+      "why": "một câu duy nhất trong mục 1 dài 1.461 token"
+    },
+    {
+      "q": "Mô hình Black-Scholes định giá quyền chọn thế nào?",
+      "section": null,
+      "anchors": [],
+      "need": "any",
+      "type": "ngoai_tai_lieu",
+      "by": "ai",
+      "why": "KHÔNG có trong bài. Cùng lĩnh vực, đầy chữ 'định giá' -> điểm sẽ không thấp. Dùng để đặt ngưỡng từ chối: so điểm top-1 với nhóm có đáp án"
+    },
+    {
+      "q": "Bài của Giglio, Kelly, Xiu đăng ở tạp chí nào?",
+      "section": null,
+      "anchors": [],
+      "need": "any",
+      "type": "ngoai_tai_lieu",
+      "by": "ai",
+      "why": "KHÔNG có trong bài — tên tác giả có (mục 5) nhưng tên tạp chí thì không. BM25 sẽ khớp mạnh vào tên riêng"
+    }
+  ]
+}

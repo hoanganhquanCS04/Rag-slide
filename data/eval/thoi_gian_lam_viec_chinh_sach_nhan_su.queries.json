@@ -1,0 +1,43 @@
+{
+  "note": "Bộ câu hỏi thử luồng search cho thoi_gian_lam_viec_chinh_sach_nhan_su. TOÀN BỘ do AI viết -> câu hỏi sát chữ slide (trung bình 70% chữ có sẵn trên trang đáp án), dễ hơn khán giả thật. Nhãn đã đối chiếu lại với chunks.json + PDF gốc (bản đầu lệch 1 trang từ p12 trở đi do sót p11). Người thật viết thêm vào đây (by: nguoi).",
+  "doc_id": "thoi_gian_lam_viec_chinh_sach_nhan_su",
+  "fields": {
+    "q": "câu hỏi, gõ CÓ DẤU (gõ không dấu thì BM25 về 0)",
+    "page": "trang đúng; dùng list nếu nhiều trang cùng đúng",
+    "type": "chi_tiet · dien_dai · tu_khoa — chỉ để người đọc, eval.py chưa chấm theo loại",
+    "by": "ai viết câu này — ai | nguoi",
+    "why": "vì sao trang đó là đáp án (để người sau kiểm được nhãn)"
+  },
+  "queries": [
+    {"q": "lịch làm việc hàng tuần quy định bao nhiêu giờ", "page": 3, "type": "chi_tiet", "by": "ai", "why": "p3: NLĐ làm việc theo lịch hằng tuần ON/OFF T7 (44h/tuần)"},
+    {"q": "xin vắng mặt tại nơi làm việc phải thực hiện qua những kênh nào", "page": 3, "type": "dien_dai", "by": "ai", "why": "p3: xin phép qua cả tin nhắn và ILoveVinGroup"},
+    {"q": "cấp bậc nào không bắt buộc phải chấm công bằng FaceID hoặc vân tay", "page": 4, "type": "chi_tiet", "by": "ai", "why": "p4: 100% CBNV bắt buộc chấm công FaceID/vân tay ngoại trừ từ cấp T3 trở lên"},
+    {"q": "làm thêm giờ không nối tiếp ca chính thì chấm công như thế nào", "page": 4, "type": "chi_tiet", "by": "ai", "why": "p4: Chấm công đầu giờ và kết thúc giờ làm thêm"},
+    {"q": "đi muộn dưới 30 phút có bị trừ phép năm không", "page": 5, "type": "dien_dai", "by": "ai", "why": "p5: Nếu đi muộn/về sớm < 30 phút thì không tính trừ phép năm"},
+    {"q": "đi muộn từ 30 phút trở lên thì trừ phép năm như thế nào", "page": 5, "type": "chi_tiet", "by": "ai", "why": "p5: tính trừ phép năm và làm tròn theo khung 30 phút, 60 phút, 90 phút..."},
+    {"q": "thời gian đăng ký làm thêm giờ tối thiểu một ca là bao nhiêu", "page": 6, "type": "chi_tiet", "by": "ai", "why": "p6: thời gian đăng ký làm thêm tối thiểu 150 phút/ca"},
+    {"q": "cán bộ quản lý từ cấp T4 trở lên có được tính tiền OT không", "page": 6, "type": "dien_dai", "by": "ai", "why": "p6: Chế độ làm thêm giờ không áp dụng đối với các chức danh CBLĐ từ cấp T4 trở lên"},
+    {"q": "hệ số tính lương làm thêm giờ ban đêm vào ngày thường là bao nhiêu", "page": 8, "type": "chi_tiet", "by": "ai", "why": "p7 bảng hệ số: ban đêm ngày thường hệ số 2.1; p8 trường hợp 3 cũng ghi hệ số 2,1"},
+    {"q": "giờ làm việc ban đêm được tính từ mấy giờ đến mấy giờ", "page": 7, "type": "chi_tiet", "by": "ai", "why": "p7: Giờ làm việc ban đêm được tính từ 22 giờ đến 06 giờ sáng ngày hôm sau"},
+    {"q": "làm thêm 8 tiếng vào ngày lễ Giỗ tổ Hùng Vương được tính bao nhiêu tiếng", "page": 8, "type": "chi_tiet", "by": "ai", "why": "p8: Ghi nhận giờ làm thêm cho CBNV (x hệ số 3) là 24 tiếng và vẫn hưởng lương ngày lễ"},
+    {"q": "làm thêm 3 tiếng vào ngày OFF được quy đổi thành mấy tiếng", "page": 8, "type": "chi_tiet", "by": "ai", "why": "p8: Làm thêm 3 tiếng ngày OFF ghi nhận x2 là 6 tiếng"},
+    {"q": "tỷ lệ lương cơ bản và thưởng YTCLCV trong tổng thu nhập là bao nhiêu", "page": 9, "type": "chi_tiet", "by": "ai", "why": "p9: Lương cơ bản 70%, Thưởng YTCLCV 30%"},
+    {"q": "điều kiện về thời gian làm việc để được nhận thưởng tháng 13", "page": 9, "type": "dien_dai", "by": "ai", "why": "p9: làm việc tối thiểu 3 tháng liên tục tại công ty tính đến 31/12"},
+    {"q": "bắt quả tang nhà cung cấp đưa hối lộ được thưởng bao nhiêu tiền", "page": 10, "type": "chi_tiet", "by": "ai", "why": "p10: Bắt quả tang nhà thầu/cung cấp đưa tiền hối lộ, tặng quà, trích hoa hồng: Thưởng 75tr/lần"},
+    {"q": "báo cáo thông tin lãng phí lớn qua email hoặc đường dây nóng nào", "page": 10, "type": "tu_khoa", "by": "ai", "why": "p10: hòm thư gopy@vingroup.net hoặc đường dây nóng 0988428787"},
+    {"q": "cung cấp thông tin cho an ninh nội bộ về hành vi trích hoa hồng được thưởng bao nhiêu", "page": 10, "type": "chi_tiet", "by": "ai", "why": "p10: Cung cấp thông tin cho ANNB về việc hối lộ, trích hoa hồng cho đồng nghiệp thưởng 20tr/lần"},
+    {"q": "tiền ăn ca của chức danh chuyên môn hàng tháng là bao nhiêu", "page": 12, "type": "chi_tiet", "by": "ai", "why": "p12: Ăn ca chức danh Chuyên môn: 960.000 VNĐ/tháng (730k miễn thuế, 230k chịu thuế)"},
+    {"q": "phép năm chưa sử dụng hết được kéo dài đến ngày nào năm sau", "page": 12, "type": "dien_dai", "by": "ai", "why": "p12: Ngày phép chưa sử dụng hết được gia hạn đến 31/3 của năm tiếp theo"},
+    {"q": "tỷ lệ đóng bảo hiểm xã hội của người lao động bị trừ vào lương là bao nhiêu", "page": 13, "type": "chi_tiet", "by": "ai", "why": "p13: Người lao động đóng 10,5% (BHXH 8%, BHYT 1,5%, BHTN 1%)"},
+    {"q": "bảo hiểm sức khỏe Vingroup áp dụng cho nhân viên đến độ tuổi nào", "page": 13, "type": "chi_tiet", "by": "ai", "why": "p13: Bảo hiểm sức khỏe áp dụng cho các CBNV đến 70 tuổi"},
+    {"q": "tổng tiền quà các ngày lễ tết trong một năm là bao nhiêu", "page": 14, "type": "chi_tiet", "by": "ai", "why": "p14: Quà ngày Lễ, Tết: 3,500,000 đồng/người/năm"},
+    {"q": "trung thu có nằm trong danh mục các ngày lễ tết được tặng quà không", "page": 14, "type": "dien_dai", "by": "ai", "why": "p14: Có liệt kê Trung thu [quà dành cho con]"},
+    {"q": "bị tai nạn tại nơi làm việc phải nằm viện bao nhiêu ngày thì được trợ cấp", "page": 15, "type": "dien_dai", "by": "ai", "why": "p15: Nằm viện quá 3 ngày do tai nạn nơi làm việc được thăm hỏi từ 5 - 30 triệu đồng"},
+    {"q": "nhân viên bị tai nạn lao động mất hoàn toàn khả năng làm việc thì được hỗ trợ bao nhiêu", "page": 15, "type": "chi_tiet", "by": "ai", "why": "p15: CBNV bị tai nạn làm mất hoàn toàn khả năng lao động hoặc tử vong hỗ trợ từ 36 tháng lương"},
+    {"q": "sau khi nhận việc thì phải cung cấp mã số thuế cho phòng nhân sự trong mấy ngày", "page": 16, "type": "chi_tiet", "by": "ai", "why": "p16: cung cấp cho PNS sau 3 ngày nhận việc"},
+    {"q": "thay đổi thẻ căn cước công dân thì phải cập nhật mã số thuế trong bao lâu", "page": 16, "type": "chi_tiet", "by": "ai", "why": "p16: cập nhật thông tin thay đổi trong vòng 10 ngày tại cơ quan cấp MST"},
+    {"q": "mức giảm trừ gia cảnh cho bản thân người nộp thuế là bao nhiêu một tháng", "page": 16, "type": "chi_tiet", "by": "ai", "why": "p16: Mức giảm trừ đối với người nộp thuế là 11 triệu đồng/tháng (132 triệu/năm)"},
+    {"q": "mức giảm trừ thuế thu nhập cá nhân đối với mỗi người phụ thuộc là bao nhiêu", "page": 16, "type": "chi_tiet", "by": "ai", "why": "p16: Mức giảm trừ gia cảnh đối với mỗi người phụ thuộc là 4,4 triệu đồng/tháng"},
+    {"q": "trang web tra cứu mã số thuế cá nhân của tổng cục thuế là gì", "page": 16, "type": "tu_khoa", "by": "ai", "why": "p16: Trang web tra cứu MST: http://tracuunnt.gdt.gov.vn"}
+  ]
+}
