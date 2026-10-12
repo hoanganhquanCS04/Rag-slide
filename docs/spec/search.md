@@ -1,6 +1,6 @@
 # Search — từ câu hỏi ra số trang
 
-**Vào:** `out/kb/*/chunks.json` + `out/kb/*/vectors__<model>.npy` · **Ra:** `SearchHit[]` · **Code:** `src/kb/search.py` + `src/kb/sparse/` (BM25) + `src/kb/audit.py`
+**Vào:** `out/kb/*/chunks.json` + `out/index/*/vectors__<model>.npy` · **Ra:** `SearchHit[]` · **Code:** `src/kb/search.py` + `src/index/sparse/` (BM25) + `src/kb/audit.py`
 
 ---
 
@@ -104,7 +104,7 @@ bỏ chữ quá ngắn (1 ký tự)      trừ chữ số
    được mờ mờ, BM25 thì bằng không. Đã đo: gõ không dấu, cả 4 câu thử đều trượt.
    → Nếu kênh hỏi là form web (kế hoạch v1) thì phải tính tới chuyện người gõ không dấu.
    Cách xử: index **hai bản** — có dấu và bỏ dấu — chưa làm ở v0, ghi lại ở §9.
-3. **Chunk 0 điểm KHÔNG được xếp hạng** (đã sửa, `src/kb/sparse/rankbm25.py`). Bản đầu lấy
+3. **Chunk 0 điểm KHÔNG được xếp hạng** (đã sửa, `src/index/sparse/variants/rankbm25.py`). Bản đầu lấy
    top-50 bất kể điểm: câu hỏi toàn từ hiếm thì gần hết pool là chunk 0 điểm, hoà nhau nên
    giữ thứ tự file — p1 hạng 2, p2 hạng 3… — và trang đầu deck ăn điểm RRF không vì lý do
    gì. Đo trên onboarding_kit: `VGRFOC`, `VGRDBIZ`, `kscv` trước ra **p1 (trang bìa) top-1**,
@@ -237,14 +237,15 @@ class SearchHit(BaseModel):
     score_dense: float        # cosine thô, để debug
     score_sparse: float       # BM25 thô, để debug
     text_enriched: str        # đưa thẳng cho LLM ở R4
-    vlm_ratio: float          # bao nhiêu phần do model bịa ra (NT2)
+    image_ratio: float        # bao nhiêu phần là mô tả ảnh do VLM viết
 ```
 
 **Giữ cả hạng lẫn điểm thô của từng nhánh.** Nhìn `rank_dense=11, rank_sparse=1` là biết
 ngay kết quả này do BM25 kéo lên — chẩn đoán được. Chỉ trả mỗi điểm RRF thì mù.
 
-`vlm_ratio` đi kèm vì NT2: R4 phải biết phần nội dung nó đang dựa vào là text layer (đúng
-100%) hay mô tả do VLM sinh (có thể bịa).
+`image_ratio` đi kèm vì NT2: R4 phải biết phần nội dung nó đang dựa vào là chữ slide hay mô tả
+ảnh do VLM tự viết (dễ bịa bối cảnh hơn). Không tính theo `provenance`: từ 2026-10-08 mọi chữ đều
+`vlm`.
 
 **Nhiều chunk cùng một trang thì gộp.** Trang 34 có 3 chunk; trả về 3 dòng cùng trỏ p34 là
 lãng phí top-k. Gộp theo `page_no`, giữ chunk **điểm cao nhất**.
@@ -315,8 +316,8 @@ nhận: cổng tin cậy ở runtime dùng **biên RRF** — chỉ là thứ t�
 nên config khai `calibrated: false` và §11 `harmful_jump` chỉ báo cáo, không làm gate.
 
 **Multi-field — BỎ.** `v_message`, `v_desc`… riêng cần `message` / `relations` do S1 sinh,
-mà S1 đã bỏ (CLAUDE.md §5). Một vector cho mỗi chunk, cộng vector phụ cho từng ảnh khi trang
-có ≥ 2 ảnh ([kb-chunk.md §4](./kb-chunk.md)).
+mà S1 đã bỏ (CLAUDE.md §5). Một vector cho mỗi chunk, không có vector ảnh phụ
+(bỏ 2026-10-10, [kb-chunk.md §4](./kb-chunk.md)).
 
 **Bỏ dấu.** Chưa index bản không dấu. Người gõ thiếu dấu thì BM25 về 0.
 

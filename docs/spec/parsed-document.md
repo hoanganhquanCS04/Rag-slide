@@ -13,9 +13,10 @@ chỉ trả lời ở mức **mô tả slide**. Lối thoát duy nhất là đư
 
 ```
 data/raw/<file>.pdf                      file gốc
-out/parsed/<doc_id>/docling.json         ① docling: chữ + toạ độ + vùng ảnh/bảng      docling_run.py
-out/parsed/<doc_id>/layout.json          ② VLM sắp bố cục từng trang (chỉ trỏ id)      layout.py
-out/parsed/<doc_id>/document.json        ③ ParsedDocument — FILE NÀY                   build.py
+out/parsed/<doc_id>/docling_vlmpipeline.json  cache ① VLM đọc từng trang       parser/variants/docling.py
+out/parsed/<doc_id>/tables.json · pictures.json  cache ②b chép bảng · ② xét ảnh  parsing/tables.py · pictures.py
+logs/vlm_pipeline/<doc_id>/pNNN.txt           phản hồi thô của VLM từng trang
+out/parsed/<doc_id>/document.json             ParsedDocument — FILE NÀY        parser/base.py (save)
 ```
 
 `<doc_id>` = tên file bỏ dấu, viết thường: `Thời gian làm việc & Chính sách nhân sự.pdf` →
@@ -30,8 +31,8 @@ ParsedDocument
 ├── doc_id
 ├── source      {path, sha256}
 ├── parser      {docling_version, vlm_model, picture_area_threshold}
-├── sections[]  {id, title, pages: [đầu, cuối], source, confidence}
-├── flags[]     {kind, severity, page_no, block_id, detail}
+├── sections[]  {id, title, pages: [đầu, cuối], source, confidence}   ← enrich(), không ghi file
+├── flags[]     {kind, severity, page_no, block_id, detail}           ← enrich(), không ghi file
 └── pages[]
      ├── page_no · title · section_id · page_hash
      ├── layout_error    chỉ có khi VLM sắp bố cục trượt kiểm tra -> trang dùng block docling
@@ -40,7 +41,7 @@ ParsedDocument
 ```
 
 Header / footer / số trang lặp ở mọi trang **không có trong file** — docling gắn nhãn
-`page_header` / `page_footer`, `from_docling` bỏ luôn: không phải nội dung, chương đã lấy từ
+`page_header` / `page_footer`, parser bỏ luôn: không phải nội dung, chương đã lấy từ
 mục lục.
 
 ### Tầng tài liệu
@@ -49,7 +50,7 @@ mục lục.
 |---|---|
 | `doc_id` | định danh — chui vào mọi `chunk_id`, tên thư mục `out/parsed/<doc_id>/` |
 | `source` | file gốc + hash |
-| `parser.vlm_model` | model đã sắp bố cục trang (`layout.json`) — mọi khối `vlm` đến từ nó |
+| `parser.vlm_model` | model đã đọc trang (VlmPipeline) — mọi khối `vlm` đến từ nó |
 | `sections` | chương — xem dưới |
 | `flags` | chỗ người cần xem — §4 |
 
@@ -75,9 +76,9 @@ mục lục.
 
 | giá trị | nghĩa |
 |---|---|
-| `text_layer` | chữ đọc thẳng từ text layer PDF — **đúng 100%**. Kể cả khối VLM sắp (`vNN`): VLM chỉ trỏ id, chữ vẫn là chữ docling nguyên văn |
-| `vlm` | chữ VLM **tự đọc từ ảnh** (bảng chụp màn hình, dòng chữ nằm trong ảnh) hoặc **mô tả hình** — CÓ THỂ SAI, chỗ người cần soi |
-| `manual` | người gõ tay (`data/patches/`) — tin được như `text_layer` |
+| `vlm` | MỌI chữ của luồng hiện tại: VLM đọc từ ảnh trang (chữ slide, bảng) hoặc **mô tả hình** — CÓ THỂ SAI. Chữ slide hay mô tả ảnh: xem `kind` (`image` = mô tả), không xem `provenance` |
+| `manual` | người gõ tay (`data/patches/`) — tin được |
+| `text_layer` | chỉ còn trong document.json cũ (đọc text layer PDF — bỏ 2026-10-08) |
 
 **`id`**: `p<trang>.<loại><số>`, ổn định — chunk và câu kịch bản trỏ vào đây.
 
@@ -242,8 +243,6 @@ Luật dễ quên:
   (`structure_provenance`, do TableFormer hoặc VLM dựng — có thể xếp nhầm hàng).
 - **`content` của bảng, `urls` và `role: links` được tính lại mỗi lần NẠP** — không lệch được
   với `cells` / chữ gốc / `hrefs`. `content` của bảng không ghi vào `document.json`.
-- **Toạ độ `.pptx`**: docling gắn nhãn `BOTTOMLEFT` nhưng số thật đo từ ĐỈNH — `from_docling`
-  không tin nhãn với `.pptx`.
 
 ---
 
@@ -254,7 +253,7 @@ Luật dễ quên:
 | `empty_page` | error | không chữ, không mô tả ảnh → vào KB gần như rỗng. Không bắn ở trang `section_divider` |
 | `image_not_described` | error | ảnh đủ to không có mô tả (trang chưa có bố cục VLM) |
 | `table_empty` | error | docling khoanh được bảng mà 0 ô có chữ — thường là ảnh chụp bảng. Trang có bố cục VLM thì VLM đọc bảng từ ảnh |
-| `layout_failed` | warn | VLM sắp bố cục trượt kiểm tra → trang dùng docling. Gọi lại: `run <file> --pages N` |
+| `layout_failed` | warn | chỉ còn trong document.json cũ (`--mode layout`, đã bỏ 2026-10-08) — luồng hiện tại không bắn |
 | `no_sections` | info | không tìm thấy trang mục lục khớp → không có chương |
 
 ---
@@ -262,28 +261,26 @@ Luật dễ quên:
 ## 5. Chạy
 
 ```powershell
-# ①②③ file gốc -> out\parsed\<doc_id>\document.json   (② gọi VLM, 1 lần/trang, có cache)
-.venv\Scripts\python.exe src\parsing\cli.py run "data\raw\<file>.pdf"
-.venv\Scripts\python.exe src\parsing\cli.py run "data\raw\<file>.pdf" --pages 7   # VLM 1 trang
-.venv\Scripts\python.exe src\parsing\cli.py run "data\raw\<file>.pdf" --no-vlm    # không gọi API
+# ①②b② file gốc -> out\parsed\<doc_id>\document.json   (gọi VLM; có cache thì không gọi)
+.venv\Scripts\python.exe src\parser\cli.py "data\raw\<file>.pdf"
+.venv\Scripts\python.exe src\parser\cli.py "data\raw\<file>.pdf" --redo               # gọi lại VLM cả file
+.venv\Scripts\python.exe src\parser\cli.py "data\raw\<file>.pdf" --table-pages 21,22  # chỉ chép lại bảng 2 trang
 
-# xem
+# xem (đã enrich: link · chương · vá tay · cờ)
 .venv\Scripts\python.exe src\parsing\cli.py show <doc_id> --page 9-11
 ```
 
 ```
-docling.json ─► from_docling.py   theo body.children → thứ tự đọc; đổi toạ độ; bỏ header/footer lặp
-layout.json  ─► layout.py         trang có bố cục VLM hợp lệ -> thay block (trượt -> giữ docling + cờ)
-PDF gốc      ─► links.py          link ẩn -> hrefs; block >= nửa dòng là link -> role "links"
-             ─► sections.py       trang mục lục → chương
-             ─► patch.py          vá tay (nếu có)
-             ─► flags.py          soi luật → cờ; block rỗng không cờ bị bỏ
-             ─► build.py          ghi document.json  ─► S5 KB · S4 kịch bản
+parser.run(src, pdf)                       parser/base.py
+  ① parse_layout     VLM -> DoclingDocument -> ParsedDocument (thứ tự đọc docling, toạ độ [0,1], bỏ header/footer)
+  ② post_processing  ②b tables.py chép lại bảng · ② pictures.py xét ảnh -> áp vào doc
+parser.save(doc)  -> document.json
+
+enrich(ParsedDocument.load(...))           parsing/enrich.py — KB / S4 / runtime tự gọi khi nạp
+  links.py → sections.py → patch.py → flags.py → bỏ block rỗng không cờ
 ```
 
-- ③ tự áp `data\patches\<doc_id>.json` nếu có. `document.json` luôn dựng mới từ `docling.json`
-  nên vá không bị áp chồng.
-- `run` thoát mã `1` khi có cờ mức `error` — vẫn ghi file, mã lỗi để CI bắt.
+- `enrich` áp `data\patches\<doc_id>.json` mỗi lần nạp, không ghi lại file nên vá không bị áp chồng.
 
 ---
 

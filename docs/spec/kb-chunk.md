@@ -1,11 +1,13 @@
 # KBChunk — cắt tài liệu thành mẩu để tìm
 
 **Vào:** `out/parsed/<doc_id>/document.json` (`ParsedDocument`) — file DUY NHẤT, không đọc
-`docling.json` / `layout.json` / `data/patches/` (đã gộp vào đó ở S0) · **Ra:**
-`out/kb/<doc_id>/chunks.json` · **Code:** [src/kb/chunk.py](../../src/kb/chunk.py)
+`docling_vlmpipeline.json` / `data/patches/` (đã gộp vào đó ở S0) · **Ra:**
+`out/kb/<doc_id>/chunks.json` · **Code:** [src/chunker/](../../src/chunker/) — `BaseChunker`
+([base.py](../../src/chunker/base.py)) + biến thể `page` ([variants/page.py](../../src/chunker/variants/page.py))
 
 ```
-python src/kb/cli.py out/parsed/<doc_id>/document.json -o out/kb/<doc_id>/chunks.json [--embed]
+python src/chunker/cli.py out/parsed/<doc_id>/document.json   # -> out/kb/<doc_id>/chunks.json
+python src/index/cli.py out/kb/<doc_id>/chunks.json            # -> out/index/<doc_id>/vectors__<model>.*
 ```
 
 ---
@@ -92,38 +94,25 @@ Header/footer lặp không có trong `ParsedDocument` — S0 đã bỏ.
 
 ---
 
-## 4. Nhiều ảnh trên một trang → nhiều vector, cùng một trang
+## 4. Nhiều ảnh trên một trang → vẫn MỘT chunk trang (bỏ vector phụ 2026-10-10)
 
-Đo được **5/40 trang** có từ 2 ảnh được mô tả trở lên, và mẫu rất rõ:
+Mô tả ảnh là một block có chữ như mọi block khác → nằm trong chunk trang. Không tách vector
+riêng cho từng ảnh nữa.
 
-```
-p19  code Python vẽ bubble chart  +  biểu đồ tán xạ kết quả
-p24  code Python                  +  biểu đồ có thanh sai số
-p34  code matplotlib + numpy      +  biểu đồ 3D scatter
-p37  code cartopy                 +  quả địa cầu bán cầu Bắc
-p20  3 ảnh hoa iris (setosa · versicolor · virginica)
-```
-
-Bốn trang đầu là **cùng một thứ**: đây là code, đây là cái nó vẽ ra. Tách đôi thì hỏng —
-hỏi *"làm sao vẽ scatter 3D"* cần cả hai.
-
-Nhưng gộp một vector thì **loãng**: chunk 338 token của p19 trộn từ ngữ của code lẫn mô
-tả hình, vector ra là bình quân hai chủ đề.
-
-Gỡ bằng đúng nguyên tắc §5 S6a đã dùng cho slide (*multi-field embed, KHÔNG gộp một
-vector*):
+Bản trước có tách: trang >= 2 ảnh có mô tả thì mỗi ảnh thêm 1 vector phụ cùng trỏ về
+`page_no`. Lý do lúc đó đo trên `3_datavisualization` (5/40 trang dạng "code + biểu đồ nó vẽ
+ra" — gộp một vector thì bình quân hai chủ đề, loãng). Bỏ vì vector phụ chỉ **nhân bản chữ đã
+có** trong chunk trang, và deck nhân sự không có kiểu trang đó. Đo trên Onboarding, 200 câu
+(hybrid):
 
 ```
-trang 19  ──┬── vector A : cả trang           338 tok
-            ├── vector B : mô tả ảnh code     212 tok
-            └── vector C : mô tả ảnh biểu đồ  108 tok
-
-            cả ba trỏ về  page_no = 19
+                          chunk   top-1     top-5
+có vector ảnh phụ          152    156/200   191/200
+chỉ chunk trang             89    149/200   193/200
 ```
 
-Khớp vector nào cũng ra trang 19 — điều hướng không đổi, mà không loãng.
-
-Chi phí: 40 chunk trang + ~33 mô tả ảnh ≈ **73 vector**. Chưa tới một xu.
+top-5 (gate §11, R2 đưa cả top-5 cho LLM chọn) không tụt; top-1 tụt 7 câu — chấp nhận. Câu hỏi
+đều do AI viết, số thiên vị. Deck có nhiều trang "code + kết quả" thì đo lại.
 
 ---
 
@@ -141,7 +130,7 @@ khỏi parse lại (parse lại **tốn tiền API**).
 ## 6. Metadata
 
 ```python
-chunk_id       "3_datavisualization#p011"    ← "#p011.2" mảnh cắt · "#p019.b02" ảnh
+chunk_id       "3_datavisualization#p011"    ← "#p011.2" mảnh cắt
 page_no        11
 page_hash      "ed0af3583bd451dc"            ← copy từ ParsedPage: trang đổi -> chỉ nạp lại trang đó (§8)
 section_id     "sec_00"
@@ -150,7 +139,7 @@ block_ids      ["p011.b00", "p011.b01"]      ← truy ngược về đúng mẩu
 provenance     {"text_layer": 1, "vlm": 1}   ← phần nào chắc đúng, phần nào model sinh
 content_type   "content" | "section_divider"
 token_count    178
-vector_role    "page" | "image"              ← multi-vector, xem §4
+vector_role    "page"                        ← "image" không còn sinh, xem §4
 ```
 
 **`provenance` đếm theo mẩu** là chỗ cố ý khác luật gốc. NT2 đòi mọi field khai nguồn,
@@ -232,7 +221,7 @@ Vì sao: nhồi đầy cắt ngang chủ đề — Onboarding p29 bảng gói b�
   `3-large` ăn 54% ngân sách chỉ để nhúng một câu. Đổi 11 điểm chất lượng lấy 633ms là
   không đáng, nhất là khi nút thắt hiện tại là **chất lượng parse**, không phải model nhúng.
 
-Đổi model sau chỉ là một dòng config + nhúng lại 73 vector, mất vài giây.
+Đổi model sau chỉ là một dòng config + nhúng lại cả bộ vector, mất vài giây.
 
 **Hai điều phải nhớ:**
 
@@ -254,8 +243,7 @@ Vì sao: nhồi đầy cắt ngang chủ đề — Onboarding p29 bảng gói b�
 
 ```
 vào           out/parsed/<doc_id>/document.json — file duy nhất
-đơn vị        1 trang = 1 chunk chính
-+ phụ         trang >= 2 ảnh có mô tả -> mỗi ảnh 1 vector phụ, cùng trỏ về page_no
+đơn vị        1 trang = 1 chunk (mô tả ảnh nằm trong đó, KHÔNG có vector ảnh phụ)
 tiền tố       [<chương> · <tiêu đề trang> · trang N/M], thiếu phần nào bỏ phần đó
 nội dung      mọi block có content, đúng thứ tự page.blocks
 đánh dấu      trang phân mục (slide_type) -> section_divider, lọc lúc tìm, KHÔNG xoá

@@ -34,7 +34,8 @@ from pydantic import BaseModel, Field
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from kb.embed import MODEL_ID, load_vectors
+from index.config import MODEL_ID
+from index.vectors import load_vectors
 from kb.search import Mode, Searcher
 
 log = logging.getLogger(__name__)

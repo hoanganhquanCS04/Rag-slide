@@ -39,7 +39,7 @@ Trộn hai loại vào một file thì mỗi lần parse lại là đe doạ k�
 dính với trang 15, phải đẻ ra `data/patches/` để nội dung gõ tay sống sót.
 
 **Lưu tách, xem chung:** `src/scenario/cli.py <parsed> --show --page 11` in kịch bản của trang,
-mỗi câu content kèm `block_id` nó trỏ tới — mở `parsing/cli.py --page 11` cạnh bên là đối chiếu được.
+mỗi câu content kèm `block_id` nó trỏ tới — mở `parsing/cli.py show <ten> --page 11` cạnh bên là đối chiếu được.
 
 ---
 
@@ -190,13 +190,9 @@ delivery   dẫn dắt, chuyển ý, hỏi tu từ  KHÔNG được mang sự th
 **Tầng 2 — `grounding` trỏ vào `block_id` có thật.** Code kiểm: id phải tồn tại trong
 `ParsedDocument`, và phải thuộc **đúng trang đang viết**. Trỏ sang trang khác → cờ.
 
-**Tầng 3 — dè dặt theo `vlm_ratio`.** Deck này:
-
-```
-vlm_ratio = 0     12 chunk   toàn text layer — đúng 100%, nói chắc được
-0 < x < 1         22 chunk   lẫn
-vlm_ratio = 1     11 chunk   TOÀN mô tả do VLM sinh
-```
+**Tầng 3 — dè dặt với MÔ TẢ ẢNH (`image_ratio`).** Từ 2026-10-08 S0 không đọc text layer: mọi chữ
+là `vlm`, nên phân biệt theo LOẠI khối — chữ VLM chép từ slide vs mô tả VLM tự viết về hình (số
+đo 2026-10-02 dưới `vlm_ratio` cũ không còn đúng).
 
 §10: VLM **đo được là có sai** (chép `0x1675e5550` thành `0x1675e550`). Bản trước cấm
 nói mọi con số từ block `provenance: vlm`.
@@ -207,7 +203,7 @@ việc: 1.5 / 2.1 / 2 / 2,7 / 3 / 3.9), tỉ lệ đóng bảo hiểm (p13), gi�
 p20). Cấm số thì các trang đó mất hết nội dung, trái luật ĐỦ Ý (§4).
 
 - số từ block `vlm` được nói và **phải nói đủ** (`number_missing` tính cả block `vlm`)
-- câu nêu số từ block `vlm` mang cờ **vàng** `vlm_number` — chỉ đánh dấu để ai muốn đối
+- câu nêu số từ block ẢNH mang cờ **vàng** `vlm_number` (chưa có code) — chỉ đánh dấu để ai muốn đối
   chiếu với ảnh thì biết câu nào, KHÔNG bắt pass 2
 - vẫn cấm nêu tên riêng / dịp lễ mà chữ trên slide không nhắc — đó là VLM đoán bối cảnh ảnh
 - block `provenance: manual` (vá tay) tin như `text_layer`, không mang cờ

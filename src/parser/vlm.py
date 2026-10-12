@@ -1,0 +1,71 @@
+"""Hàm dùng chung cho mọi lượt gọi VLM: cổng API + đọc mảng JSON trong phản hồi."""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+from typing import Any
+
+from docling.utils.dots_utils import _clean_json
+
+FENCE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$")
+
+
+def vlm_endpoint() -> tuple[str, str | None, int | None]:
+    """-> (base_url, api_key, soft_tokens). Có `VLM_BASE_URL` thì đi cổng riêng, không thì `OPENAI_BASE_URL`."""
+    if base := os.environ.get("VLM_BASE_URL"):
+        key = os.environ.get("VLM_API_KEY")       # không gửi OPENAI_API_KEY sang host khác
+    else:
+        base = os.environ.get("OPENAI_BASE_URL") or "https://api.openai.com/v1"
+        key = os.environ.get("OPENAI_API_KEY")
+    # Gemma 4 trên vLLM: mặc định 280 token ảnh đọc sai dấu ("Ánh xạ" -> "Ảnh xá"); 1120 thì đúng
+    soft = os.environ.get("VLM_SOFT_TOKENS")
+    return base, key, int(soft) if soft else None
+
+
+def escape_stray_quotes(text: str) -> str:
+    """Escape dấu `"` nằm GIỮA chuỗi JSON mà VLM quên escape.
+
+    Onboarding p20: HTML bảng `<td colspan=4">` -> JSON vỡ -> mất CẢ trang. Trong chuỗi, `"` chỉ
+    được coi là đóng chuỗi khi ký tự kế (bỏ khoảng trắng) là `, } ] :` hoặc hết văn bản.
+    """
+    out: list[str] = []
+    in_str = False
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if not in_str:
+            in_str = c == '"'
+        elif c == "\\":
+            out.append(text[i:i + 2])
+            i += 2
+            continue
+        elif c == '"':
+            j = i + 1
+            while j < n and text[j] in " \t\r\n":
+                j += 1
+            if j < n and text[j] not in ",}]:":
+                c = '\\"'
+            else:
+                in_str = False
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def load_json_array(content: str) -> list[Any] | None:
+    """Mảng JSON trong phản hồi; mảng bọc trong object thì lấy mảng. Hỏng -> None."""
+    # đọc NGUYÊN khối trước: _clean_json cắt từ "[" đầu tiên -> object bọc mảng thừa "}" -> hỏng cả trang
+    # vá `"` lạc chỉ là đường lùi cuối — JSON đúng thì không đụng tới
+    bare = FENCE.sub("", content)
+    for text in (bare, _clean_json(content), escape_stray_quotes(bare)):
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict):
+            data = next((v for v in data.values() if isinstance(v, list)), None)
+        if isinstance(data, list):
+            return data
+    return None

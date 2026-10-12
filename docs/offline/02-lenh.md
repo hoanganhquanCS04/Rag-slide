@@ -22,12 +22,12 @@ $env:PYTHONIOENCODING = "utf-8"      # không có thì lỗi in chữ Việt
 | Biến | Ví dụ | Dùng ở |
 |---|---|---|
 | `OPENAI_API_KEY`, `OPENAI_BASE_URL` | `https://api.yescale.io/v1` | mọi lần gọi API (VLM, LLM, embedding) |
-| `VLM_MODEL` | `gemini-3.5-flash-lite` | ② bố cục trang |
-| `TABLE_MODEL` | `gemini-3.8-flash` | ②b chép bảng từ ảnh bảng — bảng ô gộp cần model mạnh hơn |
+| `VLM_MODEL` | `gemma4` | ① VlmPipeline đọc cả trang: bố cục + chữ + bảng + mô tả ảnh |
+| `VLM_BASE_URL`, `VLM_SOFT_TOKENS` | `http://localhost:8000/v1`, `1120` | cổng VLM riêng (Gemma local qua vLLM) |
 | `LLM_MODEL` | `gpt-5-mini` | S4 kịch bản, hỏi đáp |
 | `EMBED_MODEL` | `text-embedding-3-small` | ④ nhúng vector, tìm kiếm |
 | `VECTOR_DB` | `chroma` hoặc `inmem` | ④ + tìm kiếm — kho vector (`src\kb\store\`), bỏ trống = `inmem` |
-| `CHROMA_PATH` | `out/kb/chroma` | chỗ Chroma ghi đĩa (bỏ trống = giá trị này) |
+| `CHROMA_PATH` | `out/index/chroma` | chỗ Chroma ghi đĩa (bỏ trống = giá trị này) |
 
 Trong các lệnh dưới, `<ten>` = tên file bỏ dấu, viết thường:
 `Thời gian làm việc & Chính sách nhân sự.pdf` → `thoi_gian_lam_viec_chinh_sach_nhan_su`.
@@ -45,8 +45,7 @@ bản (S4). Bước nào có cache thì không tốn API — chạy lại thoả
 
 ```bash
 bash scripts/run_deck.sh "data/raw/<file>.pdf"               # -> document.json, chunks.json + vector + kho, deck_map.txt
-bash scripts/run_deck.sh "data/raw/<file>.pdf" --no-vlm      # không gọi VLM, dùng cache layout + bảng
-bash scripts/run_deck.sh "data/raw/<file>.pdf" --pages 22    # gọi lại VLM riêng trang 22 (trang + bảng)
+bash scripts/run_deck.sh "data/raw/<file>.pdf" --redo        # gọi lại VLM cả file (mặc định dùng cache)
 bash scripts/run_deck.sh "data/raw/<file>.pdf" --eval        # thêm bước đo bộ câu hỏi có nhãn -> audit/eval.json
 ```
 
@@ -62,44 +61,41 @@ lời, `--prompt` in nguyên văn prompt:
 Từng bước riêng lẻ (chính là những gì `run_deck.sh` gọi):
 
 ```powershell
-# ①②②b③ đọc file -> out\parsed\<ten>\{docling.json, layout.json, document.json}   [② ②b tốn API]
-.venv\Scripts\python.exe src\parsing\cli.py run "data\raw\<file>.pdf"
+# ①③ đọc file -> out\parsed\<ten>\{docling_vlmpipeline.json, document.json}   [① tốn API]
+.venv\Scripts\python.exe src\parser\cli.py "data\raw\<file>.pdf"
 
-# ④ chunk + nhúng vector + nạp kho -> out\kb\<ten>\{chunks.json, vectors__<model>.npy} + out\kb\chroma\  [tốn API]
-.venv\Scripts\python.exe src\kb\cli.py out\parsed\<ten>\document.json -o out\kb\<ten>\chunks.json --embed
+# ④a chunk -> out\kb\<ten>\chunks.json
+.venv\Scripts\python.exe src\chunker\cli.py out\parsed\<ten>\document.json
+
+# ④b nhúng vector + nạp kho -> out\index\<ten>\vectors__<model>.{npy,json} + out\index\chroma\  [tốn API]
+.venv\Scripts\python.exe src\index\cli.py out\kb\<ten>\chunks.json
 
 # ⑤ bản đồ bộ slide cho prompt runtime -> out\deck\<ten>\deck_map.txt
 .venv\Scripts\python.exe src\kb\deck_map.py out\parsed\<ten>\document.json
 ```
 
-Bên trong `parsing\cli.py run`:
+Bên trong `parser\cli.py`:
 
 | Bước | Ra | Tốn | Bỏ qua khi |
 |---|---|---|---|
-| ① docling: chữ + toạ độ + vùng ảnh/bảng | `docling.json` | ~2s/trang CPU | đã có file (trừ `--redo`) |
-| ② VLM nhìn cả trang, sắp chữ thành khối | `layout.json` (`pages`) | 1 lần gọi/trang | trang đã có, chữ và model không đổi |
-| ②b cắt ảnh từng bảng, VLM chép ra `cells`, chữ nắn về text layer | `layout.json` (`tables`) | 1 lần gọi/bảng | bảng đã có, khung bảng và model không đổi |
-| ③ ghép + kiểm + bảng + link + chương + vá tay + cờ | `document.json` | không | không bao giờ — luôn dựng lại |
+| ① docling VlmPipeline: VLM đọc cả trang — bố cục + chữ + bảng (HTML) + mô tả ảnh | `docling_vlmpipeline.json` (raw: `logs\vlm_pipeline\<ten>\`) | 1 lần gọi/trang | đã có file (trừ `--redo`) |
+| ③ đối chiếu text layer + link + chương + vá tay + cờ | `document.json` | không | không bao giờ — luôn dựng lại |
 
 Ghi chú:
 
-- Thử trước vài trang cho đỡ tốn: `run "<file>" --pages 7,10` — CHỈ gọi VLM các trang đó,
-  trang khác dùng block docling. `--no-vlm` = không gọi API, dùng `layout.json` sẵn có.
-  **Nhớ chạy lại `run "<file>"` không kèm `--pages` để phủ cả deck** — Onboarding từng chỉ có
-  8/51 trang qua VLM vì quên bước này.
-- ② ②b ghi `layout.json` ngay sau MỖI trang / bảng — đứt giữa chừng vẫn giữ phần đã xong.
-- Sửa prompt `s0_page_layout.md` / `s0_table.md` KHÔNG làm cache cũ mất hiệu lực: trang đã có
-  vẫn dùng bố cục cũ, log ③ in `prompt cu [...]` để biết trang nào chưa hưởng luật mới. Muốn
-  áp luật mới cho trang nào thì `run "<file>" --pages N`.
-- VLM chỉ SẮP XẾP, chữ vẫn lấy nguyên văn từ docling. Trang VLM sắp sai (sót chữ, bịa id, bỏ
-  quên vùng) tự quay về docling + cờ `layout_failed`. Gọi lại: `run "<file>" --pages N`.
-- Log ②b `anh chup (chu vlm): [...]` = bảng là ẢNH chụp, chữ trong ô do VLM đọc — chỗ cần soi.
+- ① chạy CẢ file (VlmPipeline không chạy từng trang lẻ); cache là cả file `docling_vlmpipeline.json`.
+  Sửa `prompts\s0_vlm_layout_prompt.md` hoặc `VLM_MODEL` KHÔNG tự gọi lại — phải `run "<file>" --redo`.
+- Mọi chữ do VLM đọc (`vlm`), KHÔNG đối chiếu text layer PDF — chữ sai chỉ thấy khi người soi
+  (ảnh khung `--draw-only`, `show --page N --full`).
+- Log ① `vlm pN: ...` = đã nắn khung nhiều dòng / bỏ Markdown. Trang hỏng JSON thành trang rỗng
+  + cờ `empty_page`: xem phản hồi thô `logs\vlm_pipeline\<ten>\pNNN.txt`.
+- Xem khung vẽ lên trang: `python scripts\try_docling_gemma.py "<file>" --draw-only` ->
+  `out\try_docling_gemma\<ten>\pages\`.
 - ③ tự áp file vá tay `data\patches\<ten>.json` nếu có (xem đầu `src\parsing\patch.py`).
 - `run` thoát mã `3` khi có cờ mức `error` — vẫn ghi file bình thường, mã lỗi để CI bắt.
   `run_deck.sh` gặp mã 3 vẫn chạy tiếp; mã khác (không thấy file, thiếu khoá API…) thì DỪNG.
-- ④ chữ không đổi thì lấy vector từ cache (`out\kb\.embed_cache\`), không gọi API.
-- ④ `--embed` BẮT BUỘC đi kèm `-o` — vector ghi theo thứ tự chunk, chunk không lưu thì
-  vector không khớp file nào.
+- ④ chữ không đổi thì lấy vector từ cache (`out\index\.embed_cache\`), không gọi API.
+- ④ luôn ghi `out\kb\<doc_id>\chunks.json` (kể cả khi chỉ `--page` / `--stats`), vector ghi cạnh nó.
 - ④ nạp kho theo `VECTOR_DB`:
   - `chroma` — nạp luôn ở bước này. Cuối lệnh in `kho chroma (kb__<model>): nap N vector`
     hoặc `da khop, khong doi`. Mọi tài liệu chung MỘT collection, tách bằng `doc_id`.
@@ -158,8 +154,8 @@ Xem cả deck bằng mắt: mở thẳng `out\parsed\<ten>\document.json` trong 
 ### Chunk trong KB
 
 ```powershell
-.venv\Scripts\python.exe src\kb\cli.py out\parsed\<ten>\document.json --page 9 --full   # chunk của trang 9
-.venv\Scripts\python.exe src\kb\cli.py out\parsed\<ten>\document.json --stats           # thống kê cả KB
+.venv\Scripts\python.exe src\chunker\cli.py out\parsed\<ten>\document.json --page 9 --full   # chunk của trang 9
+.venv\Scripts\python.exe src\chunker\cli.py out\parsed\<ten>\document.json --stats           # thống kê cả KB
 ```
 
 ```
@@ -218,7 +214,7 @@ nap 18 chunk | kho chroma | tu khoa rank_bm25 | model text-embedding-3-small    
 nap 18 chunk | kho chroma (nap lai 18 vector) | tu khoa rank_bm25 | model text-embedding-3-small  <- vừa tự nạp lại từ .npy
 ```
 
-`nap lai` lặp lại MỌI lần chạy = `chunks.json` bị đổi mà chưa chạy ④ `--embed`.
+`nap lai` lặp lại MỌI lần chạy = `chunks.json` bị đổi mà chưa chạy ④b `src\index\cli.py`.
 
 Hỏi đáp trọn vòng (tìm → LLM → code kiểm nguồn): `scripts\try_ask.py`, xem mục A.
 
@@ -271,9 +267,9 @@ bash scripts/tune.sh out/kb/<ten>/chunks.json --k 5,10,20 --wd 1,1.5,2
 | Vừa sửa | Chạy lại |
 |---|---|
 | file slide gốc | `run_deck.sh "<file>" --redo` (→ S4 nếu cần kịch bản) |
-| `data\patches\<ten>.json` (vá tay) | `run_deck.sh "<file>" --no-vlm` → S4 |
-| `prompts\s0_page_layout.md` / `s0_table.md` | `run_deck.sh "<file>" --pages N` cho trang muốn áp luật mới |
-| luật chunk (`src\kb\chunk.py`) | `run_deck.sh "<file>" --no-vlm` — chỉ chunk có chữ đổi mới gọi API nhúng |
+| `data\patches\<ten>.json` (vá tay) | `run_deck.sh "<file>"` → S4 (không gọi VLM) |
+| `prompts\s0_vlm_layout_prompt.md` / `VLM_MODEL` | `run_deck.sh "<file>" --redo` — gọi lại VLM cả file |
+| luật chunk (`src\kb\chunk.py`) | `run_deck.sh "<file>"` — chỉ chunk có chữ đổi mới gọi API nhúng |
 | `EMBED_MODEL` | `run_deck.sh` — nhúng lại TOÀN BỘ, ra file vector + collection mới mang tên model mới |
 | `VECTOR_DB` / xoá `out\kb\chroma\` | không cần chạy gì — lần tìm sau tự nạp kho từ `.npy`, 0 lần gọi API |
 | `data\pronunciation.json` | S4 — trang không đổi chỉ được đếm lại âm tiết, không gọi LLM |

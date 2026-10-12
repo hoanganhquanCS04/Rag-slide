@@ -9,10 +9,12 @@ Mỗi block trả lời ba câu, loại nào cũng vậy:
 
     content      nói gì           chữ · mô tả VLM · markdown bảng
     polygon      nằm đâu          4 góc, [0,1], gốc TRÊN-TRÁI
-    provenance   tin được không   text_layer đúng 100% · vlm có thể bịa (NT2)
+    provenance   tin được không   vlm có thể bịa · manual người vá tay (NT2)
 
 Ghi ra JSON: trường rỗng (None / [] / {}) KHÔNG ghi — trừ `content`, để nhìn là thấy
-block nào không có nội dung. Nạp lại thì trường vắng lấy giá trị mặc định.
+block nào không có nội dung. `provenance` / `structure_provenance` = `vlm` cũng KHÔNG ghi: từ khi
+bỏ text layer (2026-10-08) mọi block là `vlm`, chỉ khối vá tay (`manual`) mới ghi ra.
+Nạp lại thì trường vắng lấy giá trị mặc định.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ import difflib
 import hashlib
 import json
 import re
+import unicodedata
 from enum import Enum
 from pathlib import Path
 from typing import Annotated, Any, ClassVar, Literal
@@ -46,6 +49,21 @@ DIVIDER_CX_RANGE = (0.35, 0.65)
 EXERCISE_TITLE = re.compile(r"^\s*bài tập", re.I)
 
 Point = tuple[float, float]
+Box = tuple[float, float, float, float]   # (trái, trên, phải, dưới), [0,1], gốc trên-trái
+
+
+def norm_text(s: str | None) -> str:
+    return re.sub(r"\s+", " ", s or "").strip()
+
+
+def slugify_doc_id(stem: str) -> str:
+    """Tên file gốc -> doc_id sạch: "3_DataVisualization (1)" -> "3_datavisualization"."""
+    stem = re.sub(r"\s*\(\d+\)\s*$", "", stem)         # bỏ "(1)" của bản tải trùng
+    # bỏ dấu TRƯỚC khi lọc ký tự: không thì "Thời gian" -> "th_i_gian"
+    stem = unicodedata.normalize("NFD", stem.replace("đ", "d").replace("Đ", "D"))
+    stem = "".join(c for c in stem if not unicodedata.combining(c))
+    stem = re.sub(r"[^0-9A-Za-z]+", "_", stem).strip("_")
+    return stem.lower() or "doc"
 
 
 class _Base(BaseModel):
@@ -59,9 +77,14 @@ class _Base(BaseModel):
     def _compact(self, handler: Any) -> dict[str, Any]:
         data = handler(self)
         data = {k: v for k, v in data.items()
-                if k not in self._DERIVED and (k in self._KEEP_EMPTY or v not in (None, [], {}))}
+                if k not in self._DERIVED and (k in self._KEEP_EMPTY or v not in (None, [], {}))
+                and not (k in _DEFAULT_VLM and v == Provenance.VLM)}
         rank = {k: i for i, k in enumerate(self._ORDER)}
         return dict(sorted(data.items(), key=lambda kv: rank.get(kv[0], len(rank))))
+
+
+# provenance mặc định — bằng `vlm` thì không ghi ra JSON (xem docstring module)
+_DEFAULT_VLM = {"provenance", "structure_provenance"}
 
 
 class Provenance(str, Enum):
@@ -76,7 +99,8 @@ class Provenance(str, Enum):
 
 
 class Href(_Base):
-    """Một link ẩn: `text` = chữ nằm dưới vùng link ("Cẩm nang phân quyền"), `url` = đích.
+    """Một link ẩn: `text` = dòng chữ VLM mà vùng link phủ gần hết ("Cẩm nang phân quyền"); rỗng =
+    link chỉ phủ một cụm trong câu (dòng đó không tính là dòng link — links.py). `url` = đích.
 
     Một block list có thể mang nhiều link (p3 Onboarding: 7) — `text` mới chọn được đúng cái.
     """
@@ -90,7 +114,7 @@ class Block(_Base):
 
     Không có `page_no` / `reading_order` / `layer`: block nằm trong `page.blocks` là đã nói
     lên trang nào, thứ tự đọc là thứ tự trong mảng. Header/footer lặp của docling bị bỏ ở
-    from_docling — không phải nội dung, chương đã lấy từ mục lục.
+    parser — không phải nội dung, chương đã lấy từ mục lục.
     """
 
     _KEEP_EMPTY: ClassVar[set[str]] = {"content"}
@@ -102,7 +126,7 @@ class Block(_Base):
     id: str                     # "p010.b03" — ổn định, chunk và câu kịch bản trỏ vào
     content: str | None = None
     polygon: list[Point]
-    provenance: Provenance
+    provenance: Provenance = Provenance.VLM
     # Link ẨN sau chữ (annotation PDF, parsing/links.py) — khác `urls` là URL IN RA thành chữ.
     # Không vào hash / KB: robot không đọc URL, runtime chỉ hiện ra khi được hỏi.
     hrefs: list[Href] = Field(default_factory=list)
@@ -219,8 +243,8 @@ def fill_down(cells: list[list[str]]) -> list[list[str]]:
 class ParsedTable(Block):
     """Bảng. `cells` là bản gốc, hàng đầu là header; `content` là markdown SINH từ `cells`.
 
-    Hai nguồn, hai `provenance` (NT2): chữ trong ô từ text layer (`provenance`, đúng), lưới
-    hàng/cột do TableFormer dựng (`structure_provenance`, CÓ THỂ SAI — số đặt nhầm hàng).
+    Hai `provenance` (NT2): chữ trong ô (`provenance`) và lưới hàng/cột (`structure_provenance`,
+    CÓ THỂ SAI — số đặt nhầm hàng). Cả hai `vlm` trừ khi người vá tay bảng (`manual`).
 
     `content` tính lại mỗi lần NẠP và KHÔNG ghi ra file (trùng với `cells`). Sửa `cells` trong bộ
     nhớ thì phải dựng lại object. Nạp vào là chép tên ô gộp dọc xuống hàng trống (`fill_down`).
@@ -254,6 +278,10 @@ class ParsedImage(Block):
 
     kind: Literal["image"] = "image"
     why_empty: Literal["decorative", "area_below_threshold", "not_described", "api_error"] | None = None
+    # Bước ② (parsing/pictures.py, prompts/s0_vlm_picture_prompt.md): VLM xét ảnh trên ảnh CẢ trang
+    # -> loại ảnh + lý do ngắn, giữ lại để người duyệt (S7) soi phân loại.
+    picture_type: Literal["TRANG_TRI", "SO_DO", "ANH_CO_CHU", "MINH_HOA"] | None = None
+    reason: str | None = None
 
     @property
     def needs_review(self) -> bool:
@@ -328,6 +356,21 @@ class ParsedPage(_Base):
             h.update(f"{b.kind}|{b.polygon}|{b.content or ''}".encode("utf-8"))
         return h.hexdigest()[:16]
 
+    def cache_hash(self) -> str:
+        """Khoá cache của ②b / ② — như `compute_hash` nhưng DỒN khoảng trắng trong chữ đoạn.
+
+        Hai bước đó nhìn ẢNH trang, xuống dòng trong chữ không đổi kết quả. Parser từng dồn mọi
+        `\\n` thành dấu cách; giữ lại xuống dòng mà dùng `compute_hash` thì mất sạch cache, gọi lại
+        VLM cả deck. Chữ đã dồn sẵn -> trùng đúng `compute_hash` cũ.
+        """
+        h = hashlib.sha256()
+        for b in self.blocks:
+            c = b.content or ""
+            if b.kind == "paragraph":
+                c = " ".join(c.split())
+            h.update(f"{b.kind}|{b.polygon}|{c}".encode("utf-8"))
+        return h.hexdigest()[:16]
+
 
 # ------------------------------------------------------------------ tầng tài liệu
 
@@ -377,7 +420,7 @@ class SourceInfo(_Base):
 class ParserInfo(_Base):
     """Parse bằng gì — để biết dữ liệu trong file đến từ đâu.
 
-    `vlm_model` là model sắp bố cục trang (parsing/layout.py) — mọi khối `vlm` đến từ nó.
+    `vlm_model` là model đọc trang (parser/variants/docling.py) — mọi khối `vlm` đến từ nó.
     """
 
     docling_version: str = ""
@@ -425,7 +468,7 @@ class ParsedDocument(_Base):
         except ValidationError as e:
             raise SystemExit(
                 f"{path}: khong nap duoc ({e.error_count()} loi) — co the la dinh dang cu.\n"
-                f"Dung lai (khong ton API): python src/parsing/cli.py run <file raw> --no-vlm"
+                "Dung lai (co docling_vlmpipeline.json thi khong ton API): python src/parser/cli.py <file raw>"
             ) from None
 
     def to_json(self) -> str:

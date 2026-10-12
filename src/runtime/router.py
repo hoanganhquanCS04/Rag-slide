@@ -128,7 +128,7 @@ class Router:
                 continue
             seen.add(h.page_no)
             out.append(Context(chunk_id=h.chunk_id, page_no=h.page_no,
-                               text=h.text_enriched, vlm_ratio=h.vlm_ratio))
+                               text=h.text_enriched, image_ratio=h.image_ratio))
         return out
 
     def _render(self, question: str, at_slide: int, current: list[Context],
@@ -222,7 +222,7 @@ class Router:
 def _ctx(items: list[Context]) -> str:
     return "\n\n".join(
         f"[{c.chunk_id}] trang {c.page_no}"
-        + (f" (có {c.vlm_ratio:.0%} do máy tả ảnh — có thể sai con số)" if c.vlm_ratio else "")
+        + (f" (có {c.image_ratio:.0%} là mô tả ảnh do máy viết — có thể sai con số)" if c.image_ratio else "")
         + f"\n{c.text}"
         for c in items)
 

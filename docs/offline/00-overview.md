@@ -163,21 +163,19 @@ R2  hỏi điều hướng   →  KHÔNG lọc            (trang mở chương l
 Chưa dựng Qdrant và **chưa cần**: 52 vector quét vét cạn hết **0.01ms**, 100.000 vector
 cũng chỉ 25ms — trong khi gọi API nhúng câu hỏi đã mất ~700ms. Kho vector mua về metadata
 filter và nhiều deck, **không phải tốc độ**. v0 dùng Chroma (ghi đĩa, một collection cho mọi
-tài liệu, lọc bằng `doc_id`) hoặc RAM — chọn bằng `VECTOR_DB`, xem `src/kb/store/`.
+tài liệu, lọc bằng `doc_id`) hoặc RAM — chọn bằng `VECTOR_DB`, xem `src/index/store/`.
 
 ### 3.2 Thời gian thật (đo 2026-10-02)
 
 ```
-① docling          ~2s/trang CPU, miễn phí
-② bố cục VLM       ~4–5s/lần gọi, 1 lần/trang   ┐ 4 luồng song song
-②b chép bảng       ~9s/lần gọi, 1 lần/bảng      ┘ Onboarding: 51 trang + 18 bảng
+① VlmPipeline      ~9s/trang (Gemma local, 8 luồng) — 1 lần/trang, đo 2026-10-08 Thời gian làm việc
 ③ document.json    vài giây
 ④ chunk + nhúng    vài giây (lô 64 chunk/lần gọi API)
 ⑤ deck_map         tức thì
 S4 kịch bản        1–2 lần gọi LLM/trang, song song theo CHƯƠNG, tuần tự trong chương
 ```
 
-Build lần đầu bị chi phối bởi ① và ②. Chạy lại khi không đổi gì: Onboarding (51 trang)
+Build lần đầu bị chi phối bởi ①. Chạy lại khi không đổi gì: Onboarding (51 trang)
 **22 giây, 0 lần gọi API** — mọi bước tốn tiền đều có cache theo nội dung (§6).
 
 ### 3.3 Bên trong từng stage
@@ -189,23 +187,22 @@ Build lần đầu bị chi phối bởi ① và ②. Chạy lại khi không đ
 ```
 VÀO  data/raw/<ten>.pdf
   │
-  ├─> [docling]  layout + TableFormer chạy local
-  │              thứ tự đọc theo body.children   <- KHÔNG đọc tuần tự texts[]
-  │              bbox gốc DƯỚI-TRÁI ──> TRÊN-TRÁI, [0,1]
-  │              bỏ header / footer / số trang lặp (không phải nội dung)
-  │              OCR TẮT: đo được bật chậm 8.4×, markdown GIỐNG HỆT
+  ├─> [① parse_layout]   parser/variants/docling.py, prompt s0_vlm_layout_prompt.md
+  │              mỗi TRANG một request, nhìn ảnh CẢ trang -> bố cục + chữ + bảng (HTML)
+  │              — chữ là vlm  <- CÓ THỂ BỊA (NT2)
+  │              normalize_elements: khoá `paragraph` + loại viết thường -> dạng dots_ocr
+  │              (prompt tiếng Việt từng làm Gemma trả [y,x] -> polygon chuyển vị, im lặng)
+  │              GemmaVlmPipeline: toạ độ 0–1000 · bbox nhiều khung -> hộp bao · bỏ Markdown
+  │              DoclingDocument -> ParsedDocument: thứ tự đọc docling, polygon TRÊN-TRÁI [0,1],
+  │              bỏ header / footer; JSON hỏng -> mất cả trang; raw -> logs/vlm_pipeline/<ten>/
   │
-  ├─> [VLM qua API]  mỗi TRANG một request, nhìn ảnh CẢ trang, prompt s0_page_layout.md
-  │                  VLM chỉ TRỎ ID mẩu chữ docling -> chữ vẫn là text_layer
-  │                  ảnh trang trí ─> VLM xếp vào decorative, không thành block
-  │                  chỉ ô bảng / mô tả hình đọc từ ảnh là vlm   <- CÓ THỂ BỊA (NT2)
-  │                  code kiểm: sót id / id bịa / bỏ quên vùng ─> dùng docling + cờ
+  ├─> [② post_processing]  parser/base.py
+  │              ②b tables.py chép lại bảng · ② pictures.py xét ảnh (TRANG_TRI / SO_DO / ANH_CO_CHU)
   │
-  ├─> [VLM bảng]     cắt ảnh TỪNG bảng, prompt s0_table.md, TABLE_MODEL
-  │                  chữ trong ô nắn về text layer của trang (khớp >= 0.85)
-  │                  khớp hết -> text_layer · còn mảnh không khớp (ảnh chụp bảng) -> vlm
+  ├─> parser.save -> document.json.  Phần dưới: enrich() lúc KB / S4 / runtime nạp
   │
-  ├─> [link ẩn]      annotation PDF -> hrefs của block chồng lên
+  ├─> [link ẩn]      annotation PDF (URL) -> hrefs của block chồng lên; nhãn = dòng chữ VLM
+  │                  KHÔNG đọc text layer PDF (bỏ 2026-10-08) — mọi chữ là vlm
   │                  >= nửa số dòng là link -> role "links", robot không đọc địa chỉ
   │
   ├─> [luật] sections   từ trang mục lục: trang đầu tiên có tiêu đề khớp mục = mở chương
@@ -213,15 +210,15 @@ VÀO  data/raw/<ten>.pdf
   │          KHÔNG gọi model cho hai thứ này
   │
   ├─> [patch tay]  data/patches/<ten>.json ─> provenance = manual
-  │                cho trang docling bỏ sót (p15: ảnh chụp màn hình)
+  │                cho trang mọi đường đều đọc sai
   │
   └─> [hash]  page_hash = SHA(nội dung + bbox từng mẩu)   <- incremental
                     │
                     v
               ParsedDocument ─> [cờ]  empty_page · image_not_described · table_empty
-                                      layout_failed · no_sections
-RA   out/parsed/<doc_id>/{docling,layout,document}.json  ──> S5
-     layout.json = cache phản hồi VLM (trang + bảng) — chạy lại không gọi lại
+                                      no_sections
+RA   out/parsed/<doc_id>/{docling_vlmpipeline,tables,pictures,document}.json  ──> S5
+     docling_vlmpipeline.json = cache phản hồi VLM — chạy lại không gọi lại (trừ --redo)
 ```
 
 > **S1 cũ nằm ở đây.** Bản trước có một stage riêng gọi LLM sinh `message` / `relations`.
@@ -236,8 +233,7 @@ RA   out/parsed/<doc_id>/{docling,layout,document}.json  ──> S5
 ```
 VÀO  out/parsed/<doc_id>/document.json
   │
-  ├─> [chunk]  1 trang = 1 chunk chính            <- vì R2 nhảy tới TRANG
-  │            trang >= 2 ảnh có mô tả ─> mỗi ảnh thêm 1 vector phụ
+  ├─> [chunk]  1 trang = 1 chunk                  <- vì R2 nhảy tới TRANG
   │            tiền tố "[<chương> · <tiêu đề trang> · trang N/M]"   <- KHÔNG gọi LLM
   │            > 500 token ─> cắt ÍT khúc nhất, chọn chỗ cắt: trước đề mục > giữa block
   │                           > giữa dòng / hàng bảng > giữa câu; bảng lặp hàng tiêu đề
@@ -252,10 +248,10 @@ VÀO  out/parsed/<doc_id>/document.json
   │            nhúng CẢ BỘ, kể cả phân mục — lọc là việc của lúc TRUY VẤN
   │
   └─> [index]  dense: kho vector chroma | inmem (BẢN SAO của .npy, tự đồng bộ)
-               sparse: BM25 dựng trong RAM lúc khởi động (src/kb/sparse/)
+               sparse: BM25 dựng trong RAM lúc khởi động (src/index/sparse/)
                gộp bằng RRF K=15, dense 1 : sparse 1   <- đo bằng scripts/tune.sh
                KHÔNG cộng điểm: hai thang đo không so được
-RA   out/kb/<doc_id>/{chunks.json, vectors__<model_id>.npy} + out/kb/chroma/
+RA   out/kb/<doc_id>/chunks.json · out/index/<doc_id>/vectors__<model_id>.npy + out/index/chroma/
 ```
 
 Đo được (2026-10-02, câu hỏi do AI viết — thiên vị): Onboarding 200 câu **hybrid 157 top-1 /
@@ -492,7 +488,7 @@ trang người sửa tay (edited_by: "nguoi") -> không bao giờ viết lại, 
 
 - Python 3.11+, type hints bắt buộc, Pydantic v2 cho schema.
 - Mỗi stage là một module độc lập, **chạy riêng được qua CLI**:
-  `python src/kb/cli.py out/parsed/<ten>/document.json -o out/kb/<ten>/chunks.json --embed`
+  `python src/index/cli.py out/kb/<ten>/chunks.json`
 - Gọi LLM/VLM: retry exponential backoff, log **full prompt + response** vào `logs/`.
   Không log thì không bao giờ debug được vì sao model bịa.
 - Mọi prompt nằm trong `prompts/*.md`. **Không hardcode prompt trong file `.py`.**

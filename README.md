@@ -39,14 +39,17 @@ Số hiện tại (2026-10-02), hai deck đang làm:
 
 ```
 data/raw/<file>.pdf
-   │ ① docling: chữ + toạ độ + vùng ảnh/bảng                       CPU
-   │ ② VLM sắp bố cục từng trang · ②b VLM chép từng bảng            API + cache
-   │ ③ ghép + kiểm + chương + link + vá tay + cờ          
+   │ ① docling VlmPipeline: VLM đọc từng trang — bố cục + chữ        API + cache
+   │   + bảng (HTML) + mô tả ảnh          (raw -> logs/vlm_pipeline/)
+   │ ③ đối chiếu text layer + link + chương + vá tay + cờ              CPU
    ▼
 out/parsed/<ten>/document.json      ParsedDocument — nguồn của mọi bước sau
-   │ ④ chunk + nhúng vector + nạp kho                               💰 API+  có cache
+   │ ④a chunk                                                        miễn phí
    ▼
-out/kb/<ten>/chunks.json + vectors__<model>.npy  (+ out/kb/chroma/)
+out/kb/<ten>/chunks.json
+   │ ④b index: nhúng vector + nạp kho                               💰 API+  có cache
+   ▼
+out/index/<ten>/vectors__<model>.npy  (+ out/index/chroma/)
    │ ⑤ deck_map                                                     miễn phí
    ▼
 out/deck/<ten>/deck_map.txt
@@ -79,12 +82,11 @@ cp .env.example .env
 | Biến                                   | Ví dụ                       | Dùng ở                                   |
 | --------------------------------------- | ----------------------------- | ------------------------------------------ |
 | `OPENAI_API_KEY`, `OPENAI_BASE_URL` | `https://api.yescale.io/v1` | mọi lần gọi API                         |
-| `VLM_MODEL`                           | `gemini-3.8-flash`          | ② bố cục trang                          |
-| `TABLE_MODEL`                         | `gemini-3.8-flash`          | ②b chép bảng                            |
+| `VLM_MODEL`                           | `gemini-3.8-flash`          | ① đọc trang (bố cục, chữ, bảng, ảnh)    |
 | `LLM_MODEL`                           | `gemini-3.5-flash-lite`     | hỏi đáp thử, kịch bản                |
 | `EMBED_MODEL`                         | `text-embedding-3-small`    | ④ nhúng vector, tìm kiếm               |
 | `VECTOR_DB`                           | `chroma` hoặc `inmem`    | kho vector (bỏ trống =`inmem`)         |
-| `CHROMA_PATH`                         | `out/kb/chroma`             | chỗ Chroma ghi đĩa, tính từ gốc repo |
+| `CHROMA_PATH`                         | `out/index/chroma`          | chỗ Chroma ghi đĩa, tính từ gốc repo |
 
 Windows: terminal PowerShell mới cần `$env:PYTHONIOENCODING = "utf-8"` (script `.sh` tự đặt).
 
@@ -99,8 +101,7 @@ Lệnh `bash` chạy trong Git Bash; `python` là Python trong `.venv`
 # 1. Cả nhánh offline của một deck: parse -> chunk + nhúng -> deck_map -> kịch bản
 bash scripts/run_deck.sh "data/raw/<file>.pdf"
 ## các tuỳ chọn khác 
-bash scripts/run_deck.sh "data/raw/<file>.pdf" --no-vlm     # không gọi VLM, dùng cache
-bash scripts/run_deck.sh "data/raw/<file>.pdf" --pages 22   # gọi lại VLM riêng trang 22
+bash scripts/run_deck.sh "data/raw/<file>.pdf" --redo       # gọi lại VLM cả file (mặc định dùng cache)
 bash scripts/run_deck.sh "data/raw/<file>.pdf" --eval       # chạy xong thì đo luôn
 bash scripts/run_deck.sh "data/raw/<file>.pdf" --no-scenario  # bỏ bước kịch bản (S4)
 
@@ -114,7 +115,7 @@ python src/kb/search.py out/kb/<ten>/chunks.json "làm thêm ngày lễ hệ s�
 
 # Xem nội dung đã parse / chunk của một trang
 python src/parsing/cli.py show <ten> --page 7
-python src/kb/cli.py out/parsed/<ten>/document.json --page 7 --full
+python src/chunker/cli.py out/parsed/<ten>/document.json --page 7 --full
 ```
 
 ### Ví dụ — 2 deck đang làm, copy chạy luôn
@@ -122,9 +123,8 @@ python src/kb/cli.py out/parsed/<ten>/document.json --page 7 --full
 Chạy ở **thư mục gốc repo**; đường dẫn file luôn kèm `data/raw/`. File gốc đã đổi tên đúng bằng
 `<ten>` (2026-10-06) nên tên file và `doc_id` trùng nhau.
 
-> ⚠️ 2 deck này đã dựng bố cục bằng `gemini-3.5-flash-lite`; `VLM_MODEL` nay là `gemini-3.8-flash`
-> (2026-10-06). Cache bố cục khoá theo tên model → chạy lại **không kèm `--no-vlm`** là gọi lại
-> VLM cho CẢ deck (51 + 17 trang). Chỉ cần chunk / nhúng lại thì dùng dòng `--no-vlm`.
+> ⚠️ Có `out/parsed/<ten>/docling_vlmpipeline.json` rồi thì parse KHÔNG gọi VLM (chỉ dựng lại ③);
+> `--redo` mới gọi lại VLM cho CẢ deck (51 + 17 trang).
 >
 > Bước kịch bản (S4) chạy mặc định: Thời gian làm việc đã có kịch bản → 0 lần gọi LLM;
 > `--no-scenario` nếu chưa cần.
@@ -133,7 +133,7 @@ Chạy ở **thư mục gốc repo**; đường dẫn file luôn kèm `data/raw/
 # Thời gian làm việc & Chính sách nhân sự   ->   <ten> = thoi_gian_lam_viec_chinh_sach_nhan_su
 bash scripts/run_deck.sh data/raw/thoi_gian_lam_viec_chinh_sach_nhan_su.pdf
 
-bash scripts/run_deck.sh data/raw/thoi_gian_lam_viec_chinh_sach_nhan_su.pdf --no-vlm
+bash scripts/run_deck.sh data/raw/thoi_gian_lam_viec_chinh_sach_nhan_su.pdf --redo
 
 python scripts/try_ask.py thoi_gian_lam_viec_chinh_sach_nhan_su
 
@@ -142,7 +142,7 @@ python scripts/try_ask.py thoi_gian_lam_viec_chinh_sach_nhan_su
 # Onboarding Kit   ->   <ten> = onboarding_kit
 bash scripts/run_deck.sh data/raw/onboarding_kit.pdf
 
-bash scripts/run_deck.sh data/raw/onboarding_kit.pdf --no-vlm
+bash scripts/run_deck.sh data/raw/onboarding_kit.pdf --redo
 python scripts/try_ask.py onboarding_kit
 ```
 
@@ -150,10 +150,14 @@ python scripts/try_ask.py onboarding_kit
 
 ```
 src/
-├── parsing/      S0 — file gốc -> ParsedDocument          cli.py run | show
-├── kb/           S5 — chunk, nhúng, kho vector, BM25, tìm, đo
+├── parser/       S0 — file gốc -> ParsedDocument          cli.py (đường DUY NHẤT để parse)
+├── parsing/      ParsedDocument + enrich (link · chương · vá tay · cờ)   cli.py show
+├── chunker/      S5 — ParsedDocument -> chunks.json
+├── index/        S5 — chunks.json -> vector + kho           cli.py
+│   ├── embedder/ chữ -> vector: openai (EMBEDDER), cache bọc ngoài
 │   ├── store/    kho vector: inmem | chroma (VECTOR_DB)
 │   └── sparse/   index từ khoá: rank_bm25 (SPARSE_INDEX)
+├── kb/           tìm (hybrid + RRF) · đo (audit, eval, tune) · deck_map
 ├── runtime/      hỏi đáp thử bản chữ (try_ask.py dùng retrieve + router)
 ├── scenario/     S4 kịch bản — ngoài giai đoạn hiện tại
 └── llm.py        gọi LLM/VLM qua API, retry, log vào logs/
@@ -161,7 +165,7 @@ scripts/          run_deck.sh · try_ask.py · tune.sh · pptx2pdf.ps1 · extrac
 prompts/          mọi prompt (không hardcode trong .py)
 config/           runtime.json — tham số hỏi đáp
 data/             raw/ file gốc · eval/ câu hỏi có nhãn · patches/ vá tay · pronunciation.json
-out/              mọi thứ sinh ra: parsed/ · kb/ · deck/                     (gitignore)
+out/              mọi thứ sinh ra: parsed/ · kb/ · index/ · deck/            (gitignore)
 docs/             tài liệu — xem dưới
 ```
 

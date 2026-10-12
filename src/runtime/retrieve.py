@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 import re
 
-from kb.embed import EmbedError
+from index.embedder.base import EmbedError
 from kb.models import SearchHit
 from kb.search import Searcher
 from llm import ROOT
@@ -55,7 +55,7 @@ class Retriever:
     def page_context(self, page_no: int) -> list[Context]:
         """Chunk CHÍNH của trang đang chiếu — TRẠNG THÁI, đưa thẳng vào prompt."""
         return [Context(chunk_id=c.chunk_id, page_no=c.page_no, text=c.text_enriched,
-                        vlm_ratio=c.vlm_ratio)
+                        image_ratio=c.image_ratio)
                 for c in self.searcher.cs.by_page(page_no) if c.vector_role == "page"]
 
     def search(self, question: str, page: ParsedPage | None) -> tuple[list[SearchHit], list[SearchHit]]:

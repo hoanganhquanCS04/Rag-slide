@@ -22,7 +22,8 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from kb.chunk import count_tokens
+from chunker.tokens import count_tokens
+from parsing.enrich import enrich
 from parsing.models import ParsedDocument, ParsedPage
 
 log = logging.getLogger("deck_map")
@@ -76,7 +77,7 @@ def main(argv: list[str] | None = None) -> int:
         if hasattr(s, "reconfigure"):
             s.reconfigure(encoding="utf-8", errors="replace")
 
-    doc = ParsedDocument.load(args.parsed)
+    doc = enrich(ParsedDocument.load(args.parsed))
     text = build(doc)
     out = ROOT / "out" / "deck" / doc.doc_id / "deck_map.txt"
     out.parent.mkdir(parents=True, exist_ok=True)

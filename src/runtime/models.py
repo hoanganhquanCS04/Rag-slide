@@ -40,7 +40,7 @@ class Context(BaseModel):
     chunk_id: str
     page_no: int
     text: str
-    vlm_ratio: float = 0.0              # bao nhiêu phần do VLM tả — có thể sai (NT2)
+    image_ratio: float = 0.0            # bao nhiêu phần là mô tả ảnh do VLM viết — có thể sai
 
 
 class Reply(BaseModel):

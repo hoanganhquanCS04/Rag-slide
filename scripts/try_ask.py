@@ -31,12 +31,12 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 os.chdir(ROOT)                                       # out/, logs/, config/ trong file này tính từ gốc repo
 
+from chunker.tokens import count_tokens
 from kb import deck_map
-from kb.chunk import count_tokens
 from kb.search import RRF_K, W_DENSE, W_SPARSE
 from llm import DEFAULT_MODEL
-from parsing.from_docling import slugify_doc_id
-from parsing.models import ParsedDocument
+from parsing.enrich import enrich
+from parsing.models import ParsedDocument, slugify_doc_id
 from runtime.models import RuntimeConfig
 from runtime.retrieve import Retriever
 from runtime.router import Router
@@ -66,7 +66,7 @@ def show_debug(dbg: dict, ms: dict, cfg: RuntimeConfig, mode: str, full_prompt: 
         for c in dbg.get("found", []):
             head = c.text.split("] ", 1)[-1].replace("\n", " ⏎ ")
             print(f"       [{c.chunk_id.split('#', 1)[1]}] {count_tokens(c.text)} tok"
-                  + (f" · {c.vlm_ratio:.0%} vlm" if c.vlm_ratio else "") + f" · {head[:90]}…")
+                  + (f" · {c.image_ratio:.0%} anh" if c.image_ratio else "") + f" · {head[:90]}…")
         if full_prompt:
             print("       ----- prompt -----")
             print("\n".join("       " + ln for ln in p.splitlines()))
@@ -77,7 +77,7 @@ def show_debug(dbg: dict, ms: dict, cfg: RuntimeConfig, mode: str, full_prompt: 
 
 async def run(doc_id: str, questions: list[str], model: str, cfg: RuntimeConfig,
               quiet: bool, full_prompt: bool) -> None:
-    doc = ParsedDocument.load(f"out/parsed/{doc_id}/document.json")
+    doc = enrich(ParsedDocument.load(f"out/parsed/{doc_id}/document.json"))
     retriever = Retriever(doc_id, cfg.top_k)
     router = Router(doc, retriever, cfg, deck_map.build(doc), model, Path("logs/runtime") / doc_id / "llm")
     print(f"{doc_id}: {doc.n_pages} trang | LLM {model}" + ("" if questions else " | Ctrl+C de thoat"))

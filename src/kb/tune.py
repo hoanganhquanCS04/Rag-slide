@@ -41,7 +41,10 @@ import numpy as np
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from kb.embed import MODEL_ID, embed_chunkset, load_vectors, vectors_file
+from index.cli import embed_chunkset
+from index.config import MODEL_ID
+from index.embedder.factory import create_embedder
+from index.vectors import load_vectors, vectors_file
 from kb.eval import default_queries
 from kb.models import ChunkSet
 from kb.search import POOL, RRF_K, TOP_K, W_DENSE, W_SPARSE, Searcher, rrf_fuse
@@ -63,14 +66,14 @@ def _num(x: float) -> str:
     return f"{x:g}"
 
 
-def ensure_vectors(cs: ChunkSet, kb_dir: Path, model_id: str) -> None:
+def ensure_vectors(cs: ChunkSet, model_id: str) -> None:
     """Bộ chunk mới chưa nhúng (hoặc nhúng lệch) -> nhúng luôn. Cache theo nội dung: chữ không
-    đổi thì không gọi API — đổi file chunk là chạy được ngay, không phải nhớ bước --embed."""
+    đổi thì không gọi API — đổi file chunk là chạy được ngay, không phải nhớ chạy src/index/cli.py."""
     try:
-        load_vectors(cs, vectors_file(kb_dir, model_id), model_id)
+        load_vectors(cs, vectors_file(cs.doc_id, model_id), model_id)
     except SystemExit as e:
         log.info("vector chua khop bo chunk (%s) -> nhung", str(e).splitlines()[0])
-        embed_chunkset(cs, kb_dir, model_id=model_id)
+        embed_chunkset(cs, create_embedder(model_id=model_id))
 
 
 def page_order(fused: dict[int, float], page_of: list[int]) -> list[int]:
@@ -91,7 +94,7 @@ def chroma_check(se: Searcher, queries: list[dict[str, Any]]) -> int:
     where = se.where(True)
     bad = 0
     for spec in queries:
-        qv = np.asarray(se.embedder.embed([spec["q"]], use_cache=True)[0], dtype=np.float64)
+        qv = np.asarray(se.embedder.embed([spec["q"]])[0], dtype=np.float64)
         sims = mat @ (qv / np.linalg.norm(qv))
         exact = [ids[j] for j in np.argsort(-sims, kind="stable") if ok[j]][:POOL]
         bad += exact != [cid for cid, _ in se.store.query(qv, POOL, where)]
@@ -270,9 +273,9 @@ def main(argv: list[str] | None = None) -> int:
     queries = json.loads(qpath.read_text(encoding="utf-8"))["queries"]
     log.info("%s: %d chunk | %s: %d cau", cp, len(cs.chunks), qpath.name, len(queries))
 
-    ensure_vectors(cs, cp.parent, args.model)
+    ensure_vectors(cs, args.model)
     se = Searcher(cp, model_id=args.model)
-    for name in ("kb.embed", "httpx"):                 # 200 dòng "cache: dung lai 1/1" -> tắt
+    for name in ("index.embedder", "httpx"):                 # 200 dòng "cache: dung lai 1/1" -> tắt
         logging.getLogger(name).setLevel(logging.WARNING)
 
     page_of = [c.page_no for c in se.chunks]

@@ -15,27 +15,21 @@ thời gian, nên mọi thứ tính trước được đều làm ở đây.
 ```
 data/raw/<file>.pdf  (| .pptx + .pdf CÙNG TÊN)     MỘT file vừa là DECK vừa là KB
         │
-        │ ① docling: chữ + toạ độ + vùng ảnh/bảng, TẮT OCR      miễn phí, CPU
+        │ ① docling VlmPipeline: VLM nhìn CẢ trang, đọc bố cục     💰 1 lần gọi/trang
+        │    + chữ + bảng (HTML) + mô tả ảnh trong cùng lượt
         ▼
-out/parsed/<ten>/docling.json                       docling thô — không ai đọc trực tiếp
+out/parsed/<ten>/docling_vlmpipeline.json           cache phản hồi VLM (raw: logs/vlm_pipeline/)
         │
-        │ ② VLM nhìn CẢ trang, sắp mẩu chữ thành khối          💰 1 lần gọi/trang
-        │    (chỉ TRỎ id mẩu chữ, không chép lại chữ)
-        │ ②b cắt ảnh từng bảng, VLM chép ra ô,                 💰 1 lần gọi/bảng
-        │    chữ trong ô nắn về text layer
-        ▼
-out/parsed/<ten>/layout.json                        cache phản hồi VLM: "pages" + "tables"
-        │
-        │ ③ ghép + kiểm bố cục · thay ô bảng · link ẩn trong PDF   miễn phí
-        │    · chương từ trang mục lục · vá tay data/patches/ · cờ
+        │ ③ đối chiếu text layer (khớp nguyên văn -> text_layer)   miễn phí
+        │    · link ẩn trong PDF · chương từ trang mục lục · vá tay data/patches/ · cờ
         ▼
 out/parsed/<ten>/document.json            ★ ParsedDocument — NGUỒN của mọi bước sau
         │
-        ├──④ chunk + nhúng vector + nạp kho ─────── 💰 embedding (cache theo nội dung)
+        ├──④a chunk ──► out/kb/<ten>/chunks.json      KBChunk[]  → để TÌM
+        │   ④b index: nhúng + nạp kho ────────────── 💰 embedding (cache theo nội dung)
         │      ▼
-        │   out/kb/<ten>/chunks.json                 KBChunk[]  → để TÌM
-        │   out/kb/<ten>/vectors__<model>.{npy,json}
-        │   out/kb/chroma/                           kho vector — BẢN SAO từ .npy
+        │   out/index/<ten>/vectors__<model>.{npy,json}
+        │   out/index/chroma/                        kho vector — BẢN SAO từ .npy
         │      │
         │      └─ eval.py / tune.sh ──► out/kb/<ten>/audit/   đo chất lượng tìm
         │
@@ -64,16 +58,14 @@ trang, vì mỗi câu phải trỏ về đúng một block.
 Đủ lệnh chạy, đọc kết quả, chạy lại một phần: [02-lenh.md](./02-lenh.md).
 
 ```bash
-bash scripts/run_deck.sh "data/raw/<file>.pdf"            # ①②②b③ ④ ⑤ — phần offline của một deck
+bash scripts/run_deck.sh "data/raw/<file>.pdf"            # ①③ ④ ⑤ — phần offline của một deck
 bash scripts/run_deck.sh "data/raw/<file>.pdf" --eval     # + đo bộ câu hỏi có nhãn
 .venv/Scripts/python.exe scripts/try_ask.py <ten>         # hỏi đáp thử trên KB vừa dựng
 ```
 
 | Bước | Tốn | Chạy lại khi nào |
 |---|---|---|
-| ① docling | ~2s/trang CPU, miễn phí | đổi file gốc (`--redo`) |
-| ② bố cục VLM | 1 lần gọi/trang; đã có trong cache → 0 | đổi file gốc, `VLM_MODEL`, hoặc ép bằng `--pages` |
-| ②b chép bảng | 1 lần gọi/bảng; đã có → 0 | khung bảng đổi, `TABLE_MODEL`, hoặc `--pages` |
+| ① VlmPipeline | 1 lần gọi/trang (~9s/trang Gemma local); có `docling_vlmpipeline.json` → 0 | đổi file gốc, `VLM_MODEL`, prompt — ép bằng `--redo` (cả file) |
 | ③ dựng document.json | vài giây, miễn phí | luôn dựng lại |
 | ④ chunk + nhúng + nạp kho | vài giây; chữ không đổi → 0 lần gọi API | sau ③, đổi luật chunk, đổi `EMBED_MODEL` |
 | ⑤ deck_map | tức thì | luôn dựng lại |
@@ -122,10 +114,10 @@ kiểm tra bố cục), `p015.m00` = vá tay.
 ### ④ `KBChunk` + vector — để TÌM
 
 Chi tiết: [spec/kb-chunk.md](../spec/kb-chunk.md) · [spec/embedding.md](../spec/embedding.md) ·
-[spec/search.md](../spec/search.md) · code: `src/kb/`
+[spec/search.md](../spec/search.md) · code: `src/chunker/` (chunk) · `src/kb/` (nhúng, tìm)
 
 ```
-1 trang = 1 chunk chính   (+ 1 vector phụ mỗi ảnh, nếu trang có ≥ 2 ảnh được mô tả)
+1 trang = 1 chunk        (mô tả ảnh nằm trong chunk trang, không có vector ảnh phụ)
 text_enriched = "[<chương> · <tiêu đề trang> · trang N/M] " + các block.content nối lại
 > 500 token   -> cắt ÍT khúc nhất, chọn chỗ cắt: trước đề mục > giữa block > giữa dòng /
                  hàng bảng > giữa câu. Bảng cắt theo hàng, khúc nào cũng lặp hàng tiêu đề
@@ -141,22 +133,22 @@ KHÔNG overlap · trang phân mục -> content_type "section_divider", lọc lú
  "provenance": {"text_layer": 1, "vlm": 2}}
 ```
 
-Trang bị cắt thì chunk mang đuôi `.1`, `.2` (`…#p009.1`); vector phụ của ảnh mang id block
-(`…#p019.v02`). Mọi chunk đều trỏ về `page_no` — điều hướng theo TRANG.
+Trang bị cắt thì chunk mang đuôi `.1`, `.2` (`…#p009.1`). Mọi chunk đều trỏ về `page_no` —
+điều hướng theo TRANG.
 
 Chữ và vector ở **hai file riêng**, nối bằng thứ tự hàng:
 
 ```
 out/kb/<ten>/chunks.json                              chữ + metadata
-out/kb/<ten>/vectors__text-embedding-3-small.npy      ma trận (số chunk × 1536), chuẩn hoá L2
-out/kb/<ten>/vectors__text-embedding-3-small.json     rows[i] = chunk_id của hàng i
-out/kb/.embed_cache/<model>/<sha1>.npy                cache dùng chung, khoá = hash(model + chữ)
+out/index/<ten>/vectors__text-embedding-3-small.npy   ma trận (số chunk × 1536), chuẩn hoá L2
+out/index/<ten>/vectors__text-embedding-3-small.json  rows[i] = chunk_id, keys[i] = hash chữ của hàng i
+out/index/.embed_cache/<model>/<sha1>.npy             cache dùng chung, khoá = hash(model + chữ)
 ```
 
 Tên model nằm trong tên file vector: đổi model mà quên nhúng lại thì tìm kiếm trả rác
 **không báo lỗi** — nhúng tên vào là để không lẫn được.
 
-**Kho vector** (`src/kb/store/`, chọn bằng `VECTOR_DB`): `chroma` ghi đĩa, một collection
+**Kho vector** (`src/index/store/`, chọn bằng `VECTOR_DB`): `chroma` ghi đĩa, một collection
 `kb__<model>` cho mọi tài liệu, lọc bằng `doc_id` · `inmem` giữ trong RAM, nạp lại mỗi lần
 chạy. Kho chỉ lo nhánh vector và là BẢN SAO của `.npy` — lệch với `chunks.json` thì tự nạp
 lại, xoá đi thì tự dựng lại, không gọi API.
@@ -165,7 +157,7 @@ lại, xoá đi thì tự dựng lại, không gọi API.
 
 ```
 câu hỏi ─┬─ dense: nhúng câu hỏi (API) → kho vector → top 50 ─┐
-         └─ sparse: BM25 (src/kb/sparse/, dựng trong RAM) → top 50 ┴─ RRF K=15, dense 1 : sparse 1
+         └─ sparse: BM25 (src/index/sparse/, dựng trong RAM) → top 50 ┴─ RRF K=15, dense 1 : sparse 1
                                                                     → gộp theo trang (điểm max)
                                                                     → top-5
 ```
@@ -243,10 +235,9 @@ slide: nó là chữ thật (`text_layer`) hay máy đọc từ ảnh (`vlm`), n
 
 | Cơ chế | Nằm ở | Tác dụng |
 |---|---|---|
-| khoá trang = hash(model + mẩu chữ của trang) | `layout.json` `pages` | chữ trang không đổi → không gọi lại VLM. Sửa prompt KHÔNG làm cache mất hiệu lực — log ③ báo `prompt cu [...]` |
-| khoá bảng = hash(model + id + khung bảng) | `layout.json` `tables` | bảng không đổi → không gọi lại |
+| có `docling_vlmpipeline.json` | `out/parsed/<ten>/` | không gọi lại VLM. Cache theo FILE, không theo trang: đổi model / prompt phải `--redo` cả file |
 | `page_hash` = hash(nội dung + vị trí mọi block) | `ParsedPage` | S4 chỉ viết lại trang có hash đổi |
-| cache vector theo hash(model + `text_enriched`) | `out/kb/.embed_cache/` | chữ không đổi → 0 lần gọi API |
+| cache vector theo hash(model + `text_enriched`) | `out/index/.embed_cache/` | chữ không đổi → 0 lần gọi API |
 | `sync` so metadata từng chunk | kho vector, BM25 | lệch thì nạp lại từ `.npy`, khớp thì thôi |
 | `edited_by: "nguoi"` | `SlideScript` | câu người sửa không bị máy ghi đè |
 | `pronunciation_hash` | `Scenario` | đổi bảng phát âm → biết timing đã lệch |

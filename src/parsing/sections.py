@@ -32,9 +32,30 @@ def _strip(s: str) -> str:
     return " ".join(re.sub(r"^\W*\d+\s*[.):\-]?\s+", "", s.strip()).split())
 
 
+_NUMBERED = re.compile(r"^\W*\d+\s*[.):\-]?(\s|$)")
+
+
+def _toc_items(lines: list[str]) -> list[str]:
+    """Dòng của MỘT khối -> các mục: dòng mở bằng số thứ tự mở mục mới, dòng khác nối vào mục đang dở.
+
+    Hai kiểu deck: Onboarding p2 cả mục lục một khối, mỗi mục một dòng ("1. …\\n2. Nhân sự");
+    Thời gian làm việc p2 mỗi mục một ô, tên NGẮT DÒNG trong ô ("03\\nLÀM THÊM\\nGIỜ"). Tách theo
+    từng dòng thì gãy kiểu sau, gộp cả khối thì gãy kiểu trước.
+    """
+    items: list[list[str]] = []
+    for ln in lines:
+        if not items or _NUMBERED.match(ln):
+            items.append([ln])
+        else:
+            items[-1].append(ln)
+    return [" ".join(it) for it in items]
+
+
 def _key(s: str) -> str:
-    """Khoá so tên mục với tiêu đề — không phân biệt hoa thường."""
-    return _strip(s).lower()
+    """Khoá so tên mục với tiêu đề — không phân biệt hoa thường, BỎ mọi dấu cách: docling dính
+    chữ ở trang mục lục (Thời gian làm việc p2 "CHẤMCÔNG", text layer là "CHẤM CÔNG") ->
+    không khớp tiêu đề p4 "02. CHẤM CÔNG", mất chương."""
+    return re.sub(r"\s+", "", _strip(s).lower())
 
 
 def detect_sections(doc: ParsedDocument) -> tuple[list[SectionSpan], list[str]]:
@@ -46,7 +67,7 @@ def detect_sections(doc: ParsedDocument) -> tuple[list[SectionSpan], list[str]]:
     """
     titled = [(p.page_no, _key(p.title)) for p in doc.pages if p.title]
     for toc in doc.pages[:TOC_MAX_PAGE]:
-        items = [ln for b in toc.paragraphs if b.role in ("list", "body") for ln in b.lines]
+        items = [it for b in toc.paragraphs if b.role in ("list", "body") for it in _toc_items(b.lines)]
         items = [ln for ln in items if len(_key(ln)) >= 3]
         if len(items) < 3:
             continue

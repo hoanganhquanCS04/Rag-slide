@@ -1,6 +1,6 @@
 # Embedding — biến chunk thành vector để tìm
 
-**Vào:** `out/kb/*/chunks.json` · **Ra:** `out/kb/*/vectors__<model_id>.{npy,json}` · **Code:** `src/kb/embed.py`
+**Vào:** `out/kb/*/chunks.json` · **Ra:** `out/index/*/vectors__<model_id>.{npy,json}` · **Code:** `src/index/` (`embedder/` · `vectors.py` · `cli.py`)
 
 ---
 
@@ -100,7 +100,7 @@ Kể cả 7 trang phân mục và `p15` (trang docling bỏ sót nội dung, nay
 **Lọc ở bước TRUY VẤN, không phải ở bước nhúng.** Đây là hai việc khác nhau:
 
 ```
-embed.py     nhúng cả 51 chunk
+index/cli.py nhúng cả 51 chunk
 search.py    mặc định lọc content_type != "section_divider"
              có cờ --no-filter để bật lại mà so
 audit.py     chạy CẢ HAI kiểu, in ra chênh lệch
@@ -149,7 +149,7 @@ là chất lượng truy xuất tụt mà không ai biết vì sao.
 
 ## 6. Chuẩn hoá L2
 
-OpenAI trả sẵn vector đã chuẩn hoá, nhưng `embed.py` vẫn ép lại một lần — rẻ, và không
+OpenAI trả sẵn vector đã chuẩn hoá, nhưng `index/embedder/base.py` vẫn ép lại một lần — rẻ, và không
 phải tin vào lời hứa của nhà cung cấp.
 
 Chuẩn hoá rồi thì cosine similarity chỉ còn là phép nhân vô hướng — nhanh hơn, và ngưỡng
@@ -163,7 +163,7 @@ Ghi `normalized: true` vào file meta để bên tìm kiếm biết không phả
 
 ```
 khoá = sha1(model_id + "\0" + text_enriched)
-đĩa  = out/kb/.embed_cache/<model_slug>/<sha1>.npy
+đĩa  = out/index/.embed_cache/<model_slug>/<sha1>.npy   (index/embedder/cache.py)
 ```
 
 Sửa mô tả ảnh của một trang → chỉ nhúng lại chunk đó, 50 cái kia lấy từ cache.
@@ -178,8 +178,8 @@ nguyên tắc `tts_hash` ở §5 S6b: *"phần tốn tiền nhất, phải reuse
 ## 8. File sinh ra
 
 ```
-out/kb/3_datavisualization/vectors__text-embedding-3-small.npy   ma trận (51, 1536) float32
-out/kb/3_datavisualization/vectors__text-embedding-3-small.json  {model, backend, dim, normalized, rows:[chunk_id...]}
+out/index/3_datavisualization/vectors__text-embedding-3-small.npy   ma trận (51, 1536) float32
+out/index/3_datavisualization/vectors__text-embedding-3-small.json  {model, backend, dim, normalized, rows:[chunk_id...], keys:[hash chữ...]}
 ```
 
 **`model_id` nằm trong TÊN FILE.** Đây là luật §5 S6a áp cho file thay vì Qdrant
@@ -217,7 +217,7 @@ gộp bằng RRF (reciprocal rank fusion)
 
 Thêm một thư viện, thêm một chỉ mục phải đồng bộ. Đó là cái giá của việc bỏ `bge-m3`.
 
-`embed.py` ghi `"sparse": false` vào file meta và **bắn cảnh báo mỗi lần chạy** — để
+`index/vectors.py` ghi `"sparse": false` vào file meta và **bắn cảnh báo mỗi lần chạy** — để
 không ai tưởng đã đủ hybrid trong khi mới có một nửa.
 
 ---
@@ -273,13 +273,12 @@ tiền tố `· trang N/40` tách được bao nhiêu phần?
 
 ```bash
 # cần OPENAI_API_KEY (và OPENAI_BASE_URL nếu đi qua proxy)
-.venv/Scripts/python.exe src/kb/cli.py out/parsed/3_datavisualization/document.json \
-    -o out/kb/3_datavisualization/chunks.json --embed --stats
+.venv/Scripts/python.exe src/index/cli.py out/kb/3_datavisualization/chunks.json
+                         # -> out/index/3_datavisualization/vectors__<model>.*
 ```
 
 | cờ | nghĩa |
 |---|---|
-| `--embed` | nhúng qua API sau khi cắt chunk |
-| `--embed-model` | mặc định `text-embedding-3-small` |
-| `-o` | `out/kb/<ten>/chunks.json` — vector ghi cùng thư mục, bắt buộc khi `--embed` |
+| `--embedder` | biến thể, mặc định `EMBEDDER` trong .env (`openai`) |
+| `--model` | mặc định `EMBED_MODEL` trong .env (`text-embedding-3-small`) |
 | `--no-cache` | bỏ qua cache trên đĩa, gọi API lại từ đầu |

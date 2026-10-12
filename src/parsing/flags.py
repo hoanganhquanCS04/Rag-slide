@@ -89,7 +89,7 @@ def _layout_failed(doc: ParsedDocument) -> list[Flag]:
     """VLM sắp bố cục mà trượt kiểm tra (sót chữ, bịa id, bỏ quên vùng) -> trang dùng docling.
 
     Docling có thể trộn cột, băm vụn chữ (Onboarding p10: đảo nghĩa quy định xe xăng) —
-    trang này cần người xem lại, hoặc gọi lại VLM: `cli.py run <file> --pages N`.
+    trang này cần người xem lại, hoặc gọi lại VLM: `python src/parser/cli.py <file> --redo`.
     """
     return [
         Flag(kind="layout_failed", page_no=p.page_no, detail=p.layout_error, severity="warn")

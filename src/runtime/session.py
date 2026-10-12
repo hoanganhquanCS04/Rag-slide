@@ -21,6 +21,7 @@ import time
 
 from kb.deck_map import page_label
 from llm import ROOT
+from parsing.enrich import enrich
 from parsing.models import ParsedDocument
 from runtime import fastpath
 from runtime.models import RuntimeConfig, Turn
@@ -42,7 +43,7 @@ class Session:
             if not f.exists():
                 raise SystemExit(f"thieu {f} — chay: python {how} out/parsed/{doc_id}/document.json")
 
-        self.doc = ParsedDocument.load(ROOT / "out" / "parsed" / doc_id / "document.json")
+        self.doc = enrich(ParsedDocument.load(ROOT / "out" / "parsed" / doc_id / "document.json"))
         sc = Scenario.model_validate_json((deck / "scenario.json").read_text(encoding="utf-8"))
         self.scripts = {s.page_no: s for s in sc.slides}
         self.retriever = Retriever(doc_id, cfg.top_k)

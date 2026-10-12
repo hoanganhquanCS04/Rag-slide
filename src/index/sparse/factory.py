@@ -1,0 +1,23 @@
+"""Chọn index từ khoá theo `SPARSE_INDEX` trong .env — cùng kiểu `index/store/factory.py`."""
+
+from __future__ import annotations
+
+import importlib
+import os
+
+import index.config  # noqa: F401 — import là nạp .env luôn
+from index.sparse.base import SparseIndex
+
+# import lúc chọn — biến thể này hỏng không kéo biến thể kia theo
+SPARSE = {
+    "rank_bm25": "index.sparse.variants.rankbm25:RankBM25Index",
+}
+
+
+def create_sparse(kind: str | None = None) -> SparseIndex:
+    """`kind` bỏ trống -> đọc SPARSE_INDEX (mặc định rank_bm25)."""
+    kind = (kind or os.environ.get("SPARSE_INDEX") or "rank_bm25").lower()
+    if kind not in SPARSE:
+        raise SystemExit(f"SPARSE_INDEX='{kind}' khong hop le — chon {' | '.join(SPARSE)}")
+    module, cls = SPARSE[kind].split(":")
+    return getattr(importlib.import_module(module), cls)()

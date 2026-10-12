@@ -30,7 +30,8 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from llm import DEFAULT_MODEL, ROOT
-from parsing.cli import parse_pages
+from parser.cli import parse_pages
+from parsing.enrich import enrich
 from parsing.models import ParsedDocument
 from scenario.generate import load_prompt, render_prompt, run_deck
 from scenario.models import Scenario, SlideScript
@@ -124,7 +125,7 @@ def main(argv: list[str] | None = None) -> int:
         if hasattr(s, "reconfigure"):
             s.reconfigure(encoding="utf-8", errors="replace")
 
-    doc = ParsedDocument.load(args.parsed)
+    doc = enrich(ParsedDocument.load(args.parsed))
     deck_dir = ROOT / "out" / "deck" / doc.doc_id
     out = Path(args.out) if args.out else deck_dir / "scenario.json"
     pron = Pronunciation.load(args.pron)

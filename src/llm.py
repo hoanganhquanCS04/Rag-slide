@@ -32,6 +32,18 @@ except ImportError:
 DEFAULT_MODEL = os.environ.get("LLM_MODEL", "gpt-5-mini")     # sửa trong .env, không sửa ở đây
 
 
+def _loggable(messages: list[dict]) -> list[dict]:
+    """Bản để GHI LOG: ảnh base64 (vài MB mỗi trang) thay bằng một dòng mô tả — log giữ prompt + response."""
+    out = []
+    for m in messages:
+        c = m.get("content")
+        if isinstance(c, list):
+            c = [{**x, "image_url": {"url": f"<anh base64, {len(x['image_url']['url'])} ky tu>"}}
+                 if x.get("type") == "image_url" else x for x in c]
+        out.append({**m, "content": c})
+    return out
+
+
 def _unfence(s: str) -> str:
     """Gemini qua cổng OpenAI vẫn bọc JSON trong ```json ... ``` dù đã bật JSON mode."""
     s = s.strip()
@@ -43,13 +55,19 @@ def _unfence(s: str) -> str:
 
 class LLM:
     def __init__(self, model: str, log_dir: Path, *, retry: int = 4, timeout: float = 180.0,
-                 backoff: float = 1.0, extra: dict[str, Any] | None = None):
+                 backoff: float = 1.0, extra: dict[str, Any] | None = None,
+                 base_url: str | None = None, api_key: str | None = None):
         import httpx
 
-        key = os.environ.get("OPENAI_API_KEY")
-        if not key:
-            raise SystemExit("thieu OPENAI_API_KEY")
-        base = (os.environ.get("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
+        if base_url:
+            # Cổng riêng (vd Gemma local qua vLLM): KHÔNG gửi OPENAI_API_KEY sang host khác.
+            # vLLM không bật --api-key thì nhận khoá nào cũng được.
+            key = api_key or "EMPTY"
+        else:
+            key = os.environ.get("OPENAI_API_KEY")
+            if not key:
+                raise SystemExit("thieu OPENAI_API_KEY")
+        base = (base_url or os.environ.get("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
         self.url = f"{base}/chat/completions"
         self.model = model
         self.retry = retry
@@ -62,7 +80,9 @@ class LLM:
         self.n_calls = 0
         self.json_mode = True                      # cổng không có kênh JSON mode -> tắt, nhớ cho cả phiên
 
-    async def chat(self, messages: list[dict], tag: str) -> dict:
+    async def chat(self, messages: list[dict], tag: str, *, raw: bool = False) -> Any:
+        """-> JSON đã đọc. `raw=True`: trả NGUYÊN VĂN phản hồi (vẫn log) — người gọi tự đọc, vd VLM
+        trả MẢNG JSON mà JSON mode ép thành object (parsing/pictures.py)."""
         payload = {"model": self.model, "messages": messages, **self.extra}
         if self.json_mode:
             payload["response_format"] = {"type": "json_object"}
@@ -78,8 +98,10 @@ class LLM:
                     self.n_calls += 1
                     (self.log_dir / f"{tag}.json").write_text(json.dumps(
                         {"model": self.model, "sec": round(dt, 1),
-                         "messages": messages, "response": content},
+                         "messages": _loggable(messages), "response": content},
                         ensure_ascii=False, indent=2), encoding="utf-8")
+                    if raw:
+                        return content
                     try:
                         return json.loads(_unfence(content))
                     except json.JSONDecodeError:

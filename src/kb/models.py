@@ -2,8 +2,8 @@
 
 Xem [docs/spec/kb-chunk.md](../../docs/spec/kb-chunk.md) cho lý do từng quyết định.
 
-Tóm tắt: 1 trang = 1 chunk chính, trang >= 2 ảnh thì mỗi mô tả ảnh thêm 1 vector phụ,
-tất cả cùng trỏ về `page_no` vì R2 điều hướng theo TRANG.
+Tóm tắt: 1 trang = 1 chunk (dài thì cắt `.1`, `.2`…), mọi chunk trỏ về `page_no` vì R2
+điều hướng theo TRANG. Cắt ở `src/chunker/`.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 
 class KBChunk(BaseModel):
-    chunk_id: str                 # "onboarding_kit#p018" | "...#p018.2" (trang bị cắt) | "...#p019.v02" (ảnh)
+    chunk_id: str                 # "onboarding_kit#p018" | "...#p018.2" (trang bị cắt)
     doc_id: str
     page_no: int                  # R2 nhảy tới đây — mọi vector đều trỏ về một trang
     page_hash: str = ""           # copy từ ParsedPage — trang đổi hash thì chỉ nạp lại chunk của trang đó (§8)
@@ -29,7 +29,8 @@ class KBChunk(BaseModel):
     token_count: int = 0
 
     block_ids: list[str] = Field(default_factory=list)   # truy ngược ParsedDocument
-    provenance: dict[str, int] = Field(default_factory=dict)  # {"text_layer": 1, "vlm": 2}
+    provenance: dict[str, int] = Field(default_factory=dict)  # {"vlm": 3, "manual": 1}
+    n_images: int = 0             # bao nhiêu khối trong block_ids là MÔ TẢ ẢNH
 
     @property
     def is_searchable(self) -> bool:
@@ -42,10 +43,11 @@ class KBChunk(BaseModel):
         return self.content_type == "content"
 
     @property
-    def vlm_ratio(self) -> float:
-        """Bao nhiêu phần nội dung do model sinh ra. NT2: biết phần nào tin được."""
-        total = sum(self.provenance.values())
-        return self.provenance.get("vlm", 0) / total if total else 0.0
+    def image_ratio(self) -> float:
+        """Bao nhiêu phần nội dung là MÔ TẢ ẢNH do VLM viết — dễ sai số / bịa bối cảnh hơn chữ
+        VLM chép từ slide. Không tính theo `provenance`: từ khi bỏ text layer (2026-10-08) mọi
+        khối chữ cũng là `vlm`."""
+        return self.n_images / len(self.block_ids) if self.block_ids else 0.0
 
 
 class ChunkSet(BaseModel):
@@ -81,5 +83,5 @@ class SearchHit(BaseModel):
     score_sparse: float = 0.0         # BM25 thô, để debug
 
     text_enriched: str = ""       # đưa thẳng cho LLM ở R4
-    vlm_ratio: float = 0.0        # bao nhiêu phần do model sinh (NT2)
+    image_ratio: float = 0.0      # bao nhiêu phần là mô tả ảnh do VLM viết
     n_chunks: int = 1             # gộp mấy chunk của cùng trang lại

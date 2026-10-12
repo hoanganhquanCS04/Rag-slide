@@ -25,7 +25,7 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from kb.embed import MODEL_ID
+from index.config import MODEL_ID
 from kb.search import RRF_K, W_DENSE, W_SPARSE, Mode, Searcher
 
 log = logging.getLogger(__name__)

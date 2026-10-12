@@ -30,10 +30,13 @@ import numpy as np
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from kb.embed import MODEL_ID, Embedder, vectors_file
+from index.config import MODEL_ID
+from index.embedder.base import Embedder
+from index.embedder.factory import create_embedder
+from index.sparse.factory import create_sparse
+from index.store.factory import create_store
+from index.vectors import vectors_file
 from kb.models import ChunkSet, KBChunk, SearchHit
-from kb.sparse import create_sparse
-from kb.store import create_store
 
 log = logging.getLogger(__name__)
 
@@ -68,8 +71,8 @@ def rrf_fuse(r_dense: dict[Key, int], r_sparse: dict[Key, int], *, k: int = RRF_
 class Searcher:
     """Nạp một lần, hỏi nhiều lần.
 
-    Nhánh dense hỏi KHO VECTOR (`VECTOR_DB` trong .env: inmem | chroma, xem kb/store/).
-    Nhánh sparse hỏi INDEX TỪ KHOÁ (`SPARSE_INDEX`: rank_bm25, xem kb/sparse/).
+    Nhánh dense hỏi KHO VECTOR (`VECTOR_DB` trong .env: inmem | chroma, xem index/store/).
+    Nhánh sparse hỏi INDEX TỪ KHOÁ (`SPARSE_INDEX`: rank_bm25, xem index/sparse/).
     Khởi tạo gọi `sync` cả hai: lệch `chunks.json` thì nạp / dựng lại, khớp thì thôi.
     """
 
@@ -80,7 +83,7 @@ class Searcher:
         self.chunks: list[KBChunk] = self.cs.chunks
         self._pos = {c.chunk_id: i for i, c in enumerate(self.chunks)}
 
-        self.vectors_path = Path(vectors_path) if vectors_path else vectors_file(cp.parent, model_id)
+        self.vectors_path = Path(vectors_path) if vectors_path else vectors_file(self.cs.doc_id, model_id)
         self.store = create_store(model_id=model_id)
         n_sync = self.store.sync(self.cs, self.vectors_path)
         self.sparse = create_sparse()
@@ -97,7 +100,7 @@ class Searcher:
     def embedder(self) -> Embedder:
         """Nạp lười: chạy --sparse-only thì khỏi cần khoá API."""
         if self._emb is None:
-            self._emb = Embedder(self.model_id, retry=self.embed_retry)
+            self._emb = create_embedder(model_id=self.model_id, retry=self.embed_retry)
         return self._emb
 
     # ------------------------------------------------------------------ tìm
@@ -122,7 +125,7 @@ class Searcher:
         r_sparse: dict[int, int] = {}
 
         if mode in ("hybrid", "dense"):
-            qv = self.embedder.embed([query], use_cache=True)[0]
+            qv = self.embedder.embed([query])[0]
             for r, (cid, s) in enumerate(self.store.query(qv, POOL, where), 1):
                 if (i := self._pos.get(cid)) is not None:
                     s_dense[i] = s
@@ -155,7 +158,7 @@ class Searcher:
                 score_dense=float(s_dense[i]),
                 score_sparse=float(s_sparse[i]),
                 text_enriched=self.chunks[i].text_enriched,
-                vlm_ratio=self.chunks[i].vlm_ratio,
+                image_ratio=self.chunks[i].image_ratio,
             )
             for i, sc in sorted(rrf.items(), key=lambda kv: -kv[1])
         ]
@@ -223,9 +226,9 @@ def main(argv: list[str] | None = None) -> int:
                  h.text_enriched[:62].replace("\n", " "))
         if args.explain:
             log.info("      dense hang %-4s cos=%.3f  |  bm25 hang %-4s diem=%.2f"
-                     "  |  gop %d chunk  |  vlm %.0f%%",
+                     "  |  gop %d chunk  |  anh %.0f%%",
                      h.rank_dense or "-", h.score_dense,
-                     h.rank_sparse or "-", h.score_sparse, h.n_chunks, h.vlm_ratio * 100)
+                     h.rank_sparse or "-", h.score_sparse, h.n_chunks, h.image_ratio * 100)
     return 0
 
 
