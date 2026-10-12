@@ -1,8 +1,8 @@
 # Scenario — kịch bản robot nói cho từng trang (S4)
 
-**Vào:** `out/parsed/<doc_id>/document.json` + kho phát âm chung `data/pronunciation.json`
-· **Ra:** `out/deck/<doc_id>/scenario.json` · **Code:** `src/scenario/` · **LLM:** `gpt-5-mini`
-· **Prompt:** `prompts/s4_scenario.md`
+**Vào:** `src/output/parser/<doc_id>/document.json` + kho phát âm chung `data/pronunciation.json`
+· **Ra:** `src/output/scenario/<doc_id>/scenario.json` · **Code:** `src/scenario/` · **LLM:** `gpt-5-mini`
+· **Prompt:** `src/prompts/s4_scenario.md`
 
 ---
 
@@ -25,7 +25,7 @@ spec này xoay quanh một câu hỏi: *làm sao để LLM viết lời tự nhi
 ## 2. Lưu ở đâu — file riêng, không nhét vào metadata
 
 ```
-out/deck/<doc_id>/scenario.json      ← kịch bản, một file cho cả deck
+src/output/scenario/<doc_id>/scenario.json      ← kịch bản, một file cho cả deck
 ```
 
 **Không** để trong `ParsedDocument`, **không** để trong `KBChunk`. Lý do:
@@ -39,14 +39,14 @@ Trộn hai loại vào một file thì mỗi lần parse lại là đe doạ k�
 dính với trang 15, phải đẻ ra `data/patches/` để nội dung gõ tay sống sót.
 
 **Lưu tách, xem chung:** `src/scenario/cli.py <parsed> --show --page 11` in kịch bản của trang,
-mỗi câu content kèm `block_id` nó trỏ tới — mở `parsing/cli.py show <ten> --page 11` cạnh bên là đối chiếu được.
+mỗi câu content kèm `block_id` nó trỏ tới — mở `python src/parser/show.py <ten> --page 11` cạnh bên là đối chiếu được.
 
 ---
 
 ## 3. Input mỗi trang — CHỈ trang đó, không nhồi cả deck
 
 ```
-nội dung trang       các khối của ParsedPage, kèm id + provenance ← nguồn DUY NHẤT của sự thật
+nội dung trang       các khối của ParsedPage, kèm id              ← nguồn DUY NHẤT của sự thật
                      (lấy khối chứ không lấy KBChunk: câu content phải trỏ `ref` vào đúng block_id)
 loại trang           slide_type                                   ← quyết định độ dài
 trang trước / sau    CHỈ title                                    ← để viết câu chuyển
@@ -54,7 +54,7 @@ trang trước / sau    CHỈ title                                    ← để
                      3 trang gần nhất NGUYÊN VĂN, xa hơn chỉ câu mở đầu (PREV_FULL)
 thuật ngữ            KHÔNG đưa kho phát âm vào prompt             ← chỉ dùng từ Anh CÓ TRÊN TRANG
                      (code kiểm: term_not_on_page)
-provenance           ghi theo TỪNG khối (text_layer / vlm / manual) ← quyết định độ dè dặt (§7)
+loại khối            ghi theo TỪNG khối: ẢNH / DANH SÁCH LINK / chữ trên slide ← quyết định độ dè dặt (§7)
 ```
 
 Không giới hạn "đã nói gì" thì section dài phình prompt: `sec_01` của Onboarding 23 trang,
@@ -195,7 +195,7 @@ là `vlm`, nên phân biệt theo LOẠI khối — chữ VLM chép từ slide v
 đo 2026-10-02 dưới `vlm_ratio` cũ không còn đúng).
 
 §10: VLM **đo được là có sai** (chép `0x1675e5550` thành `0x1675e550`). Bản trước cấm
-nói mọi con số từ block `provenance: vlm`.
+nói mọi con số từ block VLM đọc.
 
 **Đã đổi — người dùng chốt 2026-09-30: số đọc từ ảnh ĐƯỢC NÓI, chấp nhận rủi ro sai.**
 Lý do: ở deck nhân sự, bảng số liệu hay là ẢNH — bảng hệ số làm thêm giờ (p7 Thời gian làm
@@ -206,7 +206,7 @@ p20). Cấm số thì các trang đó mất hết nội dung, trái luật ĐỦ
 - câu nêu số từ block ẢNH mang cờ **vàng** `vlm_number` (chưa có code) — chỉ đánh dấu để ai muốn đối
   chiếu với ảnh thì biết câu nào, KHÔNG bắt pass 2
 - vẫn cấm nêu tên riêng / dịp lễ mà chữ trên slide không nhắc — đó là VLM đoán bối cảnh ảnh
-- block `provenance: manual` (vá tay) tin như `text_layer`, không mang cờ
+- block vá tay (id `pNNN.mNN`) là người gõ, không mang cờ
 
 **Tầng 4 — người duyệt S7**, chỉ phần bị cờ (§10).
 
@@ -294,7 +294,7 @@ nhịp thì đưa SỐ ÂM TIẾT từng câu — LLM không tự đếm đượ
 
 **Chốt 2026-10-06:** bộ kiểm chỉ còn nguồn + đủ ý + phát âm. Các luật "nói tự nhiên" (nhịp ≥ 6,
 tỉ lệ delivery 10–25%, văn viết, ký hiệu `/ %`, ≤ 30 âm tiết, nói về slide, câu đệm, trang chuyển
-chương ≤ 2 câu…) **đã bỏ khỏi code** — vẫn là hướng dẫn trong `prompts/s4_scenario.md` nhưng không
+chương ≤ 2 câu…) **đã bỏ khỏi code** — vẫn là hướng dẫn trong `src/prompts/s4_scenario.md` nhưng không
 kiểm, không bắt pass 2. Lý do: 51/51 trang Onboarding phải chạy pass 2, phần lớn vì nhịp — LLM
 không tự đếm được âm tiết tiếng Việt.
 
@@ -376,9 +376,9 @@ trang sau có thể lặp ý. Lan tới hết section là an toàn.
 ## 14. Chạy
 
 ```bash
-python src/scenario/cli.py out/parsed/3_datavisualization/document.json
-python src/scenario/cli.py out/parsed/3_datavisualization/document.json --page 11     # một trang
-python src/scenario/cli.py out/parsed/3_datavisualization/document.json --dry-run     # in prompt, không gọi API
+python src/scenario/cli.py src/output/parser/3_datavisualization/document.json
+python src/scenario/cli.py src/output/parser/3_datavisualization/document.json --page 11     # một trang
+python src/scenario/cli.py src/output/parser/3_datavisualization/document.json --dry-run     # in prompt, không gọi API
 ```
 
 | cờ | nghĩa |

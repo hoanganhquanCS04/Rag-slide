@@ -19,16 +19,10 @@ import time
 from pathlib import Path
 from typing import Any
 
+from utils.config import ROOT
+
 log = logging.getLogger(__name__)
 
-ROOT = Path(__file__).resolve().parents[1]
-
-try:
-    from dotenv import load_dotenv
-
-    load_dotenv(ROOT / ".env")
-except ImportError:
-    pass
 DEFAULT_MODEL = os.environ.get("LLM_MODEL", "gpt-5-mini")     # sửa trong .env, không sửa ở đây
 
 
@@ -59,6 +53,9 @@ class LLM:
                  base_url: str | None = None, api_key: str | None = None):
         import httpx
 
+        if base_url is None:              # LLM chữ (S4, runtime) đi cổng riêng nếu .env khai
+            base_url = os.environ.get("LLM_BASE_URL") or None
+            api_key = api_key or os.environ.get("LLM_API_KEY")
         if base_url:
             # Cổng riêng (vd Gemma local qua vLLM): KHÔNG gửi OPENAI_API_KEY sang host khác.
             # vLLM không bật --api-key thì nhận khoá nào cũng được.
@@ -82,7 +79,7 @@ class LLM:
 
     async def chat(self, messages: list[dict], tag: str, *, raw: bool = False) -> Any:
         """-> JSON đã đọc. `raw=True`: trả NGUYÊN VĂN phản hồi (vẫn log) — người gọi tự đọc, vd VLM
-        trả MẢNG JSON mà JSON mode ép thành object (parsing/pictures.py)."""
+        trả MẢNG JSON mà JSON mode ép thành object (parser/pictures.py)."""
         payload = {"model": self.model, "messages": messages, **self.extra}
         if self.json_mode:
             payload["response_format"] = {"type": "json_object"}

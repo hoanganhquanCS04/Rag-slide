@@ -1,7 +1,7 @@
 # pronunciation.json — robot đọc thuật ngữ thế nào
 
-**Vào:** `out/deck/*/scenario.json` (kịch bản S4) · **Ra:** `data/pronunciation.json` — **MỘT kho
-cho mọi deck** · **Code:** `scripts/extract_terms.py` (gom) · `src/scenario/syllables.py` (tra + đếm)
+**Vào:** `src/output/scenario/*/scenario.json` (kịch bản S4) · **Ra:** `data/pronunciation.json` — **MỘT kho
+cho mọi deck** · **Code:** `scripts/extract_terms.py` (gom) · `src/utils/syllables.py` (tra + đếm)
 
 ---
 
@@ -93,7 +93,7 @@ không bị coi là lệch.
 1. S4 viết kịch bản        src/scenario/cli.py <document.json>
                            từ lạ đếm ước lượng + cờ unknown_pronunciation
 
-2. gom từ lạ vào kho       scripts/extract_terms.py out/deck/<doc_id>/scenario.json [...]
+2. gom từ lạ vào kho       scripts/extract_terms.py src/output/scenario/<doc_id>/scenario.json [...]
                            viết tắt -> đánh vần · từ Anh -> để nguyên · by:"auto"
 
 3. NGƯỜI mở kho            sửa "say" chỗ máy đoán sai, đổi by "auto" -> "nguoi"

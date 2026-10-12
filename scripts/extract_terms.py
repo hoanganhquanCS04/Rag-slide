@@ -15,7 +15,7 @@ Máy chỉ ĐOÁN `say`, người chốt:
 Mục người đã chốt (`by: "nguoi"`) KHÔNG BAO GIỜ bị ghi đè. Mục cũ không còn kịch bản nào
 nói thì vẫn giữ — kho dùng chung, deck khác có thể cần.
 
-    python scripts/extract_terms.py out/deck/<doc_id>/scenario.json [out/deck/<khac>/scenario.json ...]
+    python scripts/extract_terms.py src/output/scenario/<doc_id>/scenario.json [src/output/scenario/<khac>/scenario.json ...]
 """
 
 from __future__ import annotations
@@ -29,8 +29,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from scenario.models import Scenario
-from scenario.syllables import STORE, Pronunciation, count, is_abbrev, spell
+from models.scenario import Scenario
+from utils.syllables import STORE, Pronunciation, count, is_abbrev, spell
 
 log = logging.getLogger("terms")
 
@@ -52,7 +52,7 @@ def guess(word: str) -> dict:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="extract_terms")
-    ap.add_argument("scenarios", nargs="+", help="out/deck/<doc_id>/scenario.json")
+    ap.add_argument("scenarios", nargs="+", help="src/output/scenario/<doc_id>/scenario.json")
     ap.add_argument("--store", default=str(STORE), help="mặc định data/pronunciation.json")
     args = ap.parse_args(argv)
 

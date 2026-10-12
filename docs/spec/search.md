@@ -1,6 +1,6 @@
 # Search — từ câu hỏi ra số trang
 
-**Vào:** `out/kb/*/chunks.json` + `out/index/*/vectors__<model>.npy` · **Ra:** `SearchHit[]` · **Code:** `src/kb/search.py` + `src/index/sparse/` (BM25) + `src/kb/audit.py`
+**Vào:** `src/output/chunker/*/chunks.json` + `src/output/embedders/*/vectors__<model>.npy` · **Ra:** `SearchHit[]` · **Code:** `src/retrieval/search.py` + `src/retrieval/sparse/` (BM25) + `src/retrieval/audit.py`
 
 ---
 
@@ -104,7 +104,7 @@ bỏ chữ quá ngắn (1 ký tự)      trừ chữ số
    được mờ mờ, BM25 thì bằng không. Đã đo: gõ không dấu, cả 4 câu thử đều trượt.
    → Nếu kênh hỏi là form web (kế hoạch v1) thì phải tính tới chuyện người gõ không dấu.
    Cách xử: index **hai bản** — có dấu và bỏ dấu — chưa làm ở v0, ghi lại ở §9.
-3. **Chunk 0 điểm KHÔNG được xếp hạng** (đã sửa, `src/index/sparse/variants/rankbm25.py`). Bản đầu lấy
+3. **Chunk 0 điểm KHÔNG được xếp hạng** (đã sửa, `src/retrieval/sparse/variants/rankbm25.py`). Bản đầu lấy
    top-50 bất kể điểm: câu hỏi toàn từ hiếm thì gần hết pool là chunk 0 điểm, hoà nhau nên
    giữ thứ tự file — p1 hạng 2, p2 hạng 3… — và trang đầu deck ăn điểm RRF không vì lý do
    gì. Đo trên onboarding_kit: `VGRFOC`, `VGRDBIZ`, `kscv` trước ra **p1 (trang bìa) top-1**,
@@ -169,8 +169,8 @@ trên 100 câu còn lại) cũng hay chọn K = 15 1:1. Đổi cách chunk / đ�
 #### Tune — `scripts/tune.sh`
 
 ```bash
-bash scripts/tune.sh out/kb/<ten>/chunks.json                  # -> out/kb/<ten>/audit/chunks_tune.md + .json
-bash scripts/tune.sh out/kb/<ten>/chunks_thu.json --k 5,10,20 --wd 1,1.5,2     # -> audit/chunks_thu_tune.*
+bash scripts/tune.sh src/output/chunker/<ten>/chunks.json                  # -> src/output/retrieval/<ten>/chunks_tune.md + .json
+bash scripts/tune.sh src/output/chunker/<ten>/chunks_thu.json --k 5,10,20 --wd 1,1.5,2     # -> audit/chunks_thu_tune.*
 ```
 
 - Pool 50 của mỗi nhánh lấy MỘT lần mỗi câu (`Searcher.ranks`), gộp offline bằng ĐÚNG hàm
@@ -284,7 +284,7 @@ Dựng bảng BM25 mất ~10ms cho 52 chunk, làm **một lần lúc khởi đ�
 ## 8. Chạy
 
 ```bash
-python src/kb/search.py out/kb/3_datavisualization/chunks.json "làm sao lưu biểu đồ ra file ảnh"
+python src/retrieval/search.py src/output/chunker/3_datavisualization/chunks.json "làm sao lưu biểu đồ ra file ảnh"
 ```
 
 | cờ | nghĩa |
@@ -327,7 +327,7 @@ mà S1 đã bỏ (CLAUDE.md §5). Một vector cho mỗi chunk, không có vecto
 
 ## 10. Đã đo — và gate self-retrieval hiện KHÔNG đo được gì
 
-`src/kb/audit.py` chạy hai bài. Kết quả lần đầu:
+`src/retrieval/audit.py` chạy hai bài. Kết quả lần đầu:
 
 ### Self-retrieval — 100%, và đó là tin xấu
 
@@ -374,20 +374,20 @@ Khe rất hẹp, và đây mới là deck **duy nhất** đo được — deck t
 ### Chạy
 
 ```bash
-python src/kb/audit.py out/kb/3_datavisualization/chunks.json -o out/kb/3_datavisualization/audit/self_retrieval.json
-python src/kb/audit.py out/kb/3_datavisualization/chunks.json --query-from title --show-fail
+python src/retrieval/audit.py src/output/chunker/3_datavisualization/chunks.json -o src/output/retrieval/3_datavisualization/self_retrieval.json
+python src/retrieval/audit.py src/output/chunker/3_datavisualization/chunks.json --query-from title --show-fail
 ```
 
 Thoát mã 1 khi top-1 dưới gate, để CI bắt được.
 
-### Bộ câu hỏi có nhãn — `src/kb/eval.py`
+### Bộ câu hỏi có nhãn — `src/retrieval/eval.py`
 
 `audit.py` tự sinh câu hỏi từ văn bản. `eval.py` chạy câu hỏi **người viết**, ở
 `data/eval/queries.json`:
 
 ```bash
-python src/kb/eval.py out/kb/3_datavisualization/chunks.json -o out/kb/3_datavisualization/audit/eval.json
-python src/kb/eval.py out/kb/3_datavisualization/chunks.json --by nguoi
+python src/retrieval/eval.py src/output/chunker/3_datavisualization/chunks.json -o src/output/retrieval/3_datavisualization/eval.json
+python src/retrieval/eval.py src/output/chunker/3_datavisualization/chunks.json --by nguoi
 ```
 
 Hai bài **bổ sung** nhau, không thay được nhau:
@@ -436,8 +436,8 @@ chứng đo được rằng R3b **bắt buộc phải có**, không phải tính
 ### File sinh ra
 
 ```
-out/kb/3_datavisualization/audit/self_retrieval.json    duplicates[] + top-1/top-3 từng kiểu + caveat
-out/kb/3_datavisualization/audit/eval.json              kết quả từng câu hỏi, từng kiểu
+src/output/retrieval/3_datavisualization/self_retrieval.json    duplicates[] + top-1/top-3 từng kiểu + caveat
+src/output/retrieval/3_datavisualization/eval.json              kết quả từng câu hỏi, từng kiểu
 ```
 
 `search.py` **không ghi file** — nó là hàm chạy lúc runtime, trả `SearchHit[]` trong bộ

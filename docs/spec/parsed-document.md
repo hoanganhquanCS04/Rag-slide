@@ -1,7 +1,7 @@
 # ParsedDocument — cấu trúc dữ liệu sau khi parse
 
-**Code:** [`src/parsing/`](../../src/parsing/) · **Vào:** `data/raw/<file>.pdf` (hoặc `.pptx` + `.pdf` cùng tên)
-· **Ra:** `out/parsed/<doc_id>/document.json` — **một file**, vừa để người đọc vừa để pipeline chạy
+**Code:** [`src/parser/`](../../src/parser/) · **Vào:** `data/raw/<file>.pdf` (hoặc `.pptx` + `.pdf` cùng tên)
+· **Ra:** `src/output/parser/<doc_id>/document.json` — **một file**, vừa để người đọc vừa để pipeline chạy
 
 ---
 
@@ -13,10 +13,10 @@ chỉ trả lời ở mức **mô tả slide**. Lối thoát duy nhất là đư
 
 ```
 data/raw/<file>.pdf                      file gốc
-out/parsed/<doc_id>/docling_vlmpipeline.json  cache ① VLM đọc từng trang       parser/variants/docling.py
-out/parsed/<doc_id>/tables.json · pictures.json  cache ②b chép bảng · ② xét ảnh  parsing/tables.py · pictures.py
+src/output/parser/<doc_id>/docling_vlmpipeline.json  cache ① VLM đọc từng trang       parser/variants/docling.py
+src/output/parser/<doc_id>/tables.json · pictures.json  cache ②b chép bảng · ② xét ảnh  parser/tables.py · pictures.py
 logs/vlm_pipeline/<doc_id>/pNNN.txt           phản hồi thô của VLM từng trang
-out/parsed/<doc_id>/document.json             ParsedDocument — FILE NÀY        parser/base.py (save)
+src/output/parser/<doc_id>/document.json             ParsedDocument — FILE NÀY        parser/base.py (save)
 ```
 
 `<doc_id>` = tên file bỏ dấu, viết thường: `Thời gian làm việc & Chính sách nhân sự.pdf` →
@@ -37,7 +37,7 @@ ParsedDocument
      ├── page_no · title · section_id · page_hash
      ├── layout_error    chỉ có khi VLM sắp bố cục trượt kiểm tra -> trang dùng block docling
      └── blocks[]        NỘI DUNG, theo thứ tự đọc
-          └── id · kind · role · content · hrefs · polygon · provenance  (+ trường riêng từng loại)
+          └── id · kind · role · content · hrefs · polygon  (+ trường riêng từng loại)
 ```
 
 Header / footer / số trang lặp ở mọi trang **không có trong file** — docling gắn nhãn
@@ -48,7 +48,7 @@ mục lục.
 
 | field | nghĩa |
 |---|---|
-| `doc_id` | định danh — chui vào mọi `chunk_id`, tên thư mục `out/parsed/<doc_id>/` |
+| `doc_id` | định danh — chui vào mọi `chunk_id`, tên thư mục `src/output/parser/<doc_id>/` |
 | `source` | file gốc + hash |
 | `parser.vlm_model` | model đã đọc trang (VlmPipeline) — mọi khối `vlm` đến từ nó |
 | `sections` | chương — xem dưới |
@@ -64,21 +64,17 @@ mục lục.
 | `page_hash` | hash nội dung + vị trí mọi block — đổi thì kịch bản trang đó viết lại |
 | `layout_error` | lý do VLM sắp bố cục trượt kiểm tra (sót chữ / id bịa / bỏ quên vùng) |
 
-### Tầng block — ba câu mọi block đều trả lời
+### Tầng block — hai câu mọi block đều trả lời
 
 | | field | |
 |---|---|---|
 | nói gì | `content` | chữ · mô tả hình · markdown bảng — thứ đem đi chunk làm KB |
 | nằm đâu | `polygon` | 4 góc `[[l,t],[r,t],[r,b],[l,b]]`, `[0,1]`, gốc **trên-trái**, làm tròn 3 chữ số |
-| tin được không | `provenance` | xem bảng dưới |
 
-**`provenance`** (NT2):
-
-| giá trị | nghĩa |
-|---|---|
-| `vlm` | MỌI chữ của luồng hiện tại: VLM đọc từ ảnh trang (chữ slide, bảng) hoặc **mô tả hình** — CÓ THỂ SAI. Chữ slide hay mô tả ảnh: xem `kind` (`image` = mô tả), không xem `provenance` |
-| `manual` | người gõ tay (`data/patches/`) — tin được |
-| `text_layer` | chỉ còn trong document.json cũ (đọc text layer PDF — bỏ 2026-10-08) |
+**Tin được không:** MỌI chữ do VLM đọc từ ảnh trang (chữ slide, bảng) hoặc là **mô tả hình** —
+CÓ THỂ SAI. Chữ slide hay mô tả ảnh: xem `kind` (`image` = mô tả). Khối người vá tay: id
+`pNNN.mNN`. Trường `provenance` đã bỏ (2026-10-12) — mọi khối đều `vlm`, nó không phân biệt gì;
+document.json cũ còn khoá này thì nạp vẫn được, khoá bị bỏ qua.
 
 **`id`**: `p<trang>.<loại><số>`, ổn định — chunk và câu kịch bản trỏ vào đây.
 
@@ -96,7 +92,7 @@ Id không đánh lại khi bỏ block rỗng → có thể nhảy số (`b03` �
 |---|---|---|
 | `paragraph` | chữ | `role` (luôn có) · `urls` khi `role: links` |
 | `image` | mô tả hình (VLM) | `why_empty` khi `content: null` |
-| `table` | markdown **sinh từ** `cells` lúc nạp — **không ghi ra file** (trùng `cells`) | `cells` (hàng đầu là header; ô gộp dọc đã chép tên xuống hàng trống) · `structure_provenance` |
+| `table` | markdown **sinh từ** `cells` lúc nạp — **không ghi ra file** (trùng `cells`) | `cells` (hàng đầu là header; ô gộp dọc đã chép tên xuống hàng trống) |
 
 **`role`** — `kind` nói mẩu này **là gì**, `role` nói robot **đối xử với chữ đó thế nào**:
 
@@ -180,28 +176,25 @@ viết trên một dòng.
     {
       "id": "p007.v00", "kind": "paragraph", "role": "title",
       "content": "CÁCH TÍNH LÀM THÊM GIỜ",
-      "polygon": [[0.499, 0.094], [0.843, 0.094], [0.843, 0.141], [0.499, 0.141]],
-      "provenance": "text_layer"
+      "polygon": [[0.499, 0.094], [0.843, 0.094], [0.843, 0.141], [0.499, 0.141]]
     },
     {
       "id": "p007.v01", "kind": "table",
       "content": "|  | GIỜ LÀM THÊM BAN NGÀY | GIỜ LÀM THÊM BAN ĐÊM |\n|---|---|---|\n| Ngày thường | Hệ số 1.5 | Hệ số 2.1 |\n...",
       "cells": [["", "GIỜ LÀM THÊM BAN NGÀY", "GIỜ LÀM THÊM BAN ĐÊM"], ["Ngày thường", "Hệ số 1.5", "Hệ số 2.1"], "..."],
-      "polygon": [[0.407, 0.287], [0.96, 0.287], [0.96, 0.534], [0.407, 0.534]],
-      "provenance": "vlm", "structure_provenance": "vlm"
+      "polygon": [[0.407, 0.287], [0.96, 0.287], [0.96, 0.534], [0.407, 0.534]]
     },
     {
       "id": "p007.v02", "kind": "paragraph", "role": "list",
       "content": "Đảm bảo số giờ làm thêm không quá 40 giờ trong 01 tháng, không quá 200 giờ trong 01 năm\nGiờ làm việc ban đêm được tính từ 22 giờ đến 06 giờ sáng ngày hôm sau.",
-      "polygon": [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
-      "provenance": "vlm"
+      "polygon": [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]
     }
   ]
 }
 ```
 
 Khối `v02` không trỏ mẩu chữ docling nào, cũng không có vùng nguồn → không biết nằm đâu →
-`polygon` là cả trang. Số trong khối `vlm` phải được người đối chiếu với slide ở S7.
+`polygon` là cả trang. Số trong khối VLM đọc phải được người đối chiếu với slide ở S7.
 
 **Onboarding Kit, `sections`** — dựng từ mục lục p2, 5/5 mục khớp:
 
@@ -218,29 +211,32 @@ Khối `v02` không trỏ mẩu chữ docling nào, cũng không có vùng ngu�
 ## 3. Trong code
 
 ```python
-from parsing.models import ParsedDocument
+from models.parsed_document import ParsedDocument
 
-doc = ParsedDocument.load("out/parsed/onboarding_kit/document.json")   # file cũ -> báo 1 câu
+doc = ParsedDocument.load("src/output/parser/onboarding_kit/document.json")   # file cũ -> báo 1 câu
 page = doc.page(10)
 doc.section_of(10)                          # chương của trang
 
 for b in page.blocks:
-    b.content, b.polygon, b.provenance, b.hrefs   # field lưu
+    b.content, b.polygon, b.hrefs                 # field lưu
     b.box, b.center, b.area                       # tính từ polygon
+    b.page, b.page_no, b.section                  # back-reference: trang / số trang / chương chứa nó
 
 page.paragraphs · page.images · page.tables # lọc theo loại
 page.slide_type                             # loại trang — tính, không lưu
 page.compute_hash()                         # nội dung + vị trí
+page.document · page.section                # back-reference: deck / chương chứa trang
 
 doc.to_json()                               # đúng định dạng ghi ra file
 ```
 
 Luật dễ quên:
 
-- **Không có `page_no` / `reading_order` / `layer` trong block.** Block nằm trong trang nào là
-  biết trang; thứ tự đọc là thứ tự trong mảng.
-- **Bảng có hai `provenance`**: chữ trong ô (`provenance`) và lưới hàng/cột
-  (`structure_provenance`, do TableFormer hoặc VLM dựng — có thể xếp nhầm hàng).
+- **Không LƯU `page_no` / `reading_order` / `layer` trong block.** Block nằm trong trang nào là
+  biết trang; thứ tự đọc là thứ tự trong mảng. Cần thì hỏi back-reference `b.page` / `b.page_no` /
+  `b.section` — gán bởi `link()` lúc nạp, KHÔNG ghi JSON. Thêm / thay block sau khi dựng trang thì
+  gọi lại `doc.link()` (`enrich()` và `BaseParser.run()` đã gọi sẵn).
+- **Lưới hàng/cột của bảng có thể sai** (VLM xếp nhầm hàng), dù chữ trong ô đúng.
 - **`content` của bảng, `urls` và `role: links` được tính lại mỗi lần NẠP** — không lệch được
   với `cells` / chữ gốc / `hrefs`. `content` của bảng không ghi vào `document.json`.
 
@@ -261,13 +257,13 @@ Luật dễ quên:
 ## 5. Chạy
 
 ```powershell
-# ①②b② file gốc -> out\parsed\<doc_id>\document.json   (gọi VLM; có cache thì không gọi)
+# ①②b② file gốc -> src\output\parser\<doc_id>\document.json   (gọi VLM; có cache thì không gọi)
 .venv\Scripts\python.exe src\parser\cli.py "data\raw\<file>.pdf"
 .venv\Scripts\python.exe src\parser\cli.py "data\raw\<file>.pdf" --redo               # gọi lại VLM cả file
-.venv\Scripts\python.exe src\parser\cli.py "data\raw\<file>.pdf" --table-pages 21,22  # chỉ chép lại bảng 2 trang
+.venv\Scripts\python.exe src\parser\cli.py "data\raw\<file>.pdf" --table-pages 21 22  # chỉ chép lại bảng 2 trang
 
 # xem (đã enrich: link · chương · vá tay · cờ)
-.venv\Scripts\python.exe src\parsing\cli.py show <doc_id> --page 9-11
+.venv\Scripts\python.exe src\parser\show.py <doc_id> --page 9 10 11
 ```
 
 ```
@@ -276,7 +272,7 @@ parser.run(src, pdf)                       parser/base.py
   ② post_processing  ②b tables.py chép lại bảng · ② pictures.py xét ảnh -> áp vào doc
 parser.save(doc)  -> document.json
 
-enrich(ParsedDocument.load(...))           parsing/enrich.py — KB / S4 / runtime tự gọi khi nạp
+enrich(ParsedDocument.load(...))           parser/enrich.py — KB / S4 / runtime tự gọi khi nạp
   links.py → sections.py → patch.py → flags.py → bỏ block rỗng không cờ
 ```
 

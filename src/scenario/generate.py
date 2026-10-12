@@ -3,7 +3,7 @@
 Ba điểm dễ sai:
 
   1. **Chỉ đưa nội dung CHÍNH TRANG ĐÓ.** Không nhồi cả deck (§10). Nguồn sự thật là các
-     khối của `ParsedPage`, mỗi khối kèm `id` + `provenance` để LLM trỏ `ref` vào được.
+     khối của `ParsedPage`, mỗi khối kèm `id` để LLM trỏ `ref` vào được.
   2. **Song song theo SECTION, tuần tự TRONG section.** 7 trang liền cùng tên "Đồ thị dạng
      đường" — viết độc lập thì robot mở đầu y hệt bảy lần. Trang sau đọc kịch bản trang
      trước cùng section. Đây là thứ thay cho `message` đã bỏ.
@@ -21,16 +21,17 @@ import logging
 from collections.abc import Callable
 from pathlib import Path
 
-from llm import LLM, ROOT
-from parsing.models import (ParsedDocument, ParsedImage, ParsedPage, ParsedParagraph,
+from utils.config import PROMPTS_DIR
+from utils.llm import LLM
+from models.parsed_document import (ParsedDocument, ParsedImage, ParsedPage, ParsedParagraph,
                             ParsedTable)
 from scenario import validate
-from scenario.models import Grounding, Prosody, Sentence, SlideScript
-from scenario.syllables import Pronunciation, count
+from models.scenario import Grounding, Prosody, Sentence, SlideScript
+from utils.syllables import Pronunciation, count
 
 log = logging.getLogger(__name__)
 
-PROMPT_PATH = ROOT / "prompts" / "s4_scenario.md"
+PROMPT_PATH = PROMPTS_DIR / "s4_scenario.md"
 
 # Kịch bản các trang trước cùng section: N trang gần nhất đưa NGUYÊN VĂN, trang xa hơn chỉ
 # đưa câu mở đầu (đủ để không mở đầu giống nhau). Không giới hạn thì trang cuối sec_01 của
@@ -90,9 +91,9 @@ def rules_key(doc: ParsedDocument, page: ParsedPage) -> str:
     return "closing" if is_closing(doc, page) else page.slide_type
 
 
-def page_blocks(page: ParsedPage) -> list[tuple[str, str, str]]:
-    """-> [(id, provenance, text)] — chỉ khối CÓ nội dung, để LLM trỏ ref vào."""
-    return [(b.id, b.provenance.value, b.content.strip())
+def page_blocks(page: ParsedPage) -> list[tuple[str, str]]:
+    """-> [(id, text)] — chỉ khối CÓ nội dung, để LLM trỏ ref vào."""
+    return [(b.id, b.content.strip())
             for b in page.blocks if b.content and b.content.strip()]
 
 
@@ -109,7 +110,7 @@ def must_cover(b: object) -> bool:
 def block_info(page: ParsedPage) -> dict[str, validate.BlockInfo]:
     """id -> chữ / có phải nói — cho bộ kiểm tra."""
     cover = {b.id for b in page.blocks if must_cover(b)}
-    return {i: validate.BlockInfo(text=t, must_cover=i in cover) for i, _, t in page_blocks(page)}
+    return {i: validate.BlockInfo(text=t, must_cover=i in cover) for i, t in page_blocks(page)}
 
 
 def check(ss: SlideScript, doc: ParsedDocument, page: ParsedPage,
@@ -127,15 +128,14 @@ def render_prompt(template: str, doc: ParsedDocument, page: ParsedPage, stype: s
     key = rules_key(doc, page)
 
     blocks = page_blocks(page)
-    # Ghi rõ khối nào là ẢNH: ảnh người đã sửa mô tả mang provenance=manual, nhìn provenance
-    # không còn phân biệt được với chữ trên slide -> LLM lại đem mô tả ảnh ra đọc.
+    # Ghi rõ khối nào là ẢNH: không ghi thì LLM coi mô tả ảnh như chữ trên slide và đem ra đọc.
     # Khối link cũng ghi rõ: không biết thì LLM đọc "nhatot chấm com gạch chéo…" ra miệng.
     label = {b.id: "ẢNH" for b in page.blocks if isinstance(b, ParsedImage)}
     label |= {b.id: "DANH SÁCH LINK — không đọc địa chỉ" for b in page.paragraphs
               if b.role == "links"}
     btxt = "\n\n".join(
-        f"[{i}] ({label.get(i, 'chữ trên slide')}, provenance={p})\n{t}"
-        for i, p, t in blocks) or "(trang không có chữ)"
+        f"[{i}] ({label.get(i, 'chữ trên slide')})\n{t}"
+        for i, t in blocks) or "(trang không có chữ)"
 
     if previous:
         older, recent = previous[:-PREV_FULL], previous[-PREV_FULL:]
@@ -325,15 +325,7 @@ async def run_deck(doc: ParsedDocument, pron: Pronunciation, *, model: str,
                      and old.prompt_hash == prompt_hash and old.model == model
                      and old.slide_type == page.slide_type
                      and not (dirty and only is None))
-            if old is not None and old.edited_by == "nguoi":
-                # Người sửa tay -> giữ nguyên. Vẫn đếm lại + KIỂM, trượt thì chỉ gắn cờ để
-                # người thấy, không để LLM viết đè. Không bật `dirty`: trang sau không phải
-                # viết lại vì trang này.
-                ss = recount(old, pron)
-                ss.flags = validate.to_flags(check(ss, doc, page, pron))
-                if old.page_hash != page.page_hash:
-                    ss.flags.append("stale_manual")
-            elif old is not None and fresh and want:
+            if old is not None and fresh and want:
                 # Dùng lại được — nhưng KIỂM LẠI: bộ kiểm có thể vừa thêm luật mới. Chỉ viết
                 # lại khi trượt lỗi MỚI (chưa có trong cờ lần trước) hoặc lần trước API hỏng.
                 # Lỗi cũ mà pass 2 đã không sửa được thì giữ + gắn cờ — không thế thì MỖI lần

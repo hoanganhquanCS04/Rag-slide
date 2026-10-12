@@ -19,7 +19,7 @@ import logging
 import re
 from pathlib import Path
 
-from parsing.models import Block, Box, Href, ParsedDocument, ParsedParagraph
+from models.parsed_document import Block, Box, Href, ParsedDocument, ParsedParagraph
 
 log = logging.getLogger(__name__)
 

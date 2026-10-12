@@ -5,8 +5,8 @@
     python src/runtime/cli.py onboarding_kit --speed 1                  # đợi đúng thời lượng nói
     python src/runtime/cli.py onboarding_kit < cau_hoi.txt              # chạy thử bằng file
 
-Cần có sẵn (offline): out/parsed/<ten>/document.json · out/kb/<ten>/chunks.json + vector
-                      · out/deck/<ten>/scenario.json · out/deck/<ten>/deck_map.txt
+Cần có sẵn (offline): src/output/parser/<ten>/document.json · src/output/chunker/<ten>/chunks.json + vector
+                      · src/output/scenario/<ten>/scenario.json · src/output/retrieval/<ten>/deck_map.txt
 """
 
 from __future__ import annotations
@@ -20,7 +20,8 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from llm import DEFAULT_MODEL, ROOT
+from utils.config import ROOT
+from utils.llm import DEFAULT_MODEL
 from runtime.models import RuntimeConfig
 from runtime.session import Session
 

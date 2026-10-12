@@ -1,4 +1,4 @@
-"""File vector trên đĩa: `out/index/<doc_id>/vectors__<model>.{npy,json}`.
+"""File vector trên đĩa: `src/output/embedders/<doc_id>/vectors__<model>.{npy,json}`.
 
 MỘT chỗ đặt tên, ghi và đọc. Embedder và kho vector cùng dùng module này, KHÔNG import nhau.
 
@@ -17,10 +17,10 @@ from typing import Any
 
 import numpy as np
 
-from index.config import OUT
-from kb.models import ChunkSet
+from utils.config import EMBEDDERS_OUTPUT
+from models.kb_chunk import ChunkSet
 
-REBUILD = "chay `python src/index/cli.py out/kb/<ten>/chunks.json` (trung cache, khong ton API)"
+REBUILD = "chay `python src/retrieval/build_index.py src/output/chunker/<ten>/chunks.json` (trung cache, khong ton API)"
 
 
 def model_slug(model_id: str) -> str:
@@ -34,12 +34,12 @@ def text_key(text: str, model_id: str) -> str:
 
 
 def vectors_file(doc_id: str, model_id: str) -> Path:
-    """out/index/<doc_id>/vectors__<model>.npy.
+    """src/output/embedders/<doc_id>/vectors__<model>.npy.
 
     Tên bài là tên thư mục; tên model PHẢI nằm trong tên file (§10) — đổi model mà trỏ vector
     cũ là trả rác không báo lỗi.
     """
-    return OUT / doc_id / f"vectors__{model_slug(model_id)}.npy"
+    return EMBEDDERS_OUTPUT / doc_id / f"vectors__{model_slug(model_id)}.npy"
 
 
 def save_vectors(cs: ChunkSet, mat: np.ndarray, *, model_id: str,

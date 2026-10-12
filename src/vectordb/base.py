@@ -30,9 +30,9 @@ from typing import Any, ClassVar
 
 import numpy as np
 
-from index.filters import Hit, Where, filter_metadata
-from index.vectors import load_vectors, model_slug, text_key
-from kb.models import ChunkSet, KBChunk
+from utils.filters import Hit, Where, filter_metadata
+from utils.vectors import load_vectors, model_slug, text_key
+from models.kb_chunk import ChunkSet, KBChunk
 
 
 def collection_name(model_id: str) -> str:
@@ -65,8 +65,8 @@ class VectorStore(ABC):
     def delete(self, where: Where) -> None: ...
 
     @abstractmethod
-    def search(self, vector: np.ndarray, k: int, where: Where | None = None) -> list[Hit]:
-        """yk chunk gần nhất trong số khớp `where`, xếp giảm dần theo cosine."""
+    def query(self, vector: np.ndarray, k: int, where: Where | None = None) -> list[Hit]:
+        """k chunk gần nhất trong số khớp `where`, xếp giảm dần theo cosine."""
 
     @abstractmethod
     def metadata(self, doc_id: str) -> dict[str, dict[str, Any]]:

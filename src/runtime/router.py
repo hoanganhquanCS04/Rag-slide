@@ -21,15 +21,16 @@ import re
 import time
 from pathlib import Path
 
-from kb.deck_map import page_label
-from kb.models import SearchHit
-from llm import LLM, ROOT
-from parsing.models import ParsedDocument
+from retrieval.deck_map import page_label
+from models.kb_chunk import SearchHit
+from utils.config import PROMPTS_DIR
+from utils.llm import LLM
+from models.parsed_document import ParsedDocument
 from runtime.models import Context, Reply, RuntimeConfig
 from runtime.retrieve import Retriever
 
-PROMPT_PATH = ROOT / "prompts" / "r_router.md"
-QA_PROMPT_PATH = ROOT / "prompts" / "r_qa.md"       # chỉ hỏi đáp: không trang đang chiếu, không điều hướng
+PROMPT_PATH = PROMPTS_DIR / "r_router.md"
+QA_PROMPT_PATH = PROMPTS_DIR / "r_qa.md"       # chỉ hỏi đáp: không trang đang chiếu, không điều hướng
 
 # Robot nói gì khi không trả lời — KHÔNG lặp lại câu hỏi (đọc to câu troll là troll thành công)
 ESCALATE_TEXT = {
@@ -109,7 +110,7 @@ class Router:
         if raw.get("action") not in ("answer", "escalate"):
             raw = {"action": "escalate", "reason": "no_info"}
         # deck_map là nguồn hợp lệ cho câu hỏi cấu trúc bài (mấy trang, mấy chương): dựng bằng LUẬT
-        # từ mục lục (kb/deck_map.py), không do model sinh — vẫn đúng NT3 "mọi câu phải có nguồn"
+        # từ mục lục (retrieval/deck_map.py), không do model sinh — vẫn đúng NT3 "mọi câu phải có nguồn"
         dm = Context(chunk_id="deck_map", page_no=0, text=self.deck_map)
         return self._check(raw, [*found, dm], []), ms, dbg
 

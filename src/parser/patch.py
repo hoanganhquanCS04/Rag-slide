@@ -5,12 +5,9 @@ Vì sao cần: có nội dung không đường nào đọc đúng được. Ví 
 màn hình mà layout model không nhận ra là ảnh. Bật OCR thì hỏng dấu tiếng Việt ("Liệt kê"
 -> "Lit kê") và chậm 8.4×. Vài trang lẻ thì người gõ tay là rẻ nhất và đúng nhất.
 
-KHÔNG sửa thẳng vào `out/parsed/<doc_id>/document.json` — dựng lại là mất. Patch nằm ở file riêng,
-áp lại MỖI lần dựng (`build.py`), nên bền qua mọi lần chạy lại. `document.json` luôn dựng mới
-từ `docling.json` nên patch không bao giờ bị áp chồng hai lần.
-
-Block vá vào mang `provenance: "manual"` — tin được như `text_layer`, và truy được là người
-gõ chứ không phải model sinh (NT2).
+KHÔNG sửa thẳng vào `src/output/parser/<doc_id>/document.json` — dựng lại là mất. Patch nằm ở file
+riêng, áp lại MỖI lần nạp (`parser/enrich.py`), nên bền qua mọi lần chạy lại. Block vá vào có id
+`pNNN.mNN` (m = manual) — nhìn id là biết người gõ, file patch là bản ghi đã vá gì.
 
     data/patches/<doc_id_bat_ky_phan_nao_cua_ten>.json
     {
@@ -41,12 +38,11 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from parsing.models import (
+from models.parsed_document import (
     ParsedDocument,
     ParsedImage,
     ParsedParagraph,
     ParsedTable,
-    Provenance,
     polygon_from_box,
 )
 
@@ -78,10 +74,9 @@ def apply_patch(doc: ParsedDocument, patch: dict[str, Any]) -> None:
 
         for i, b in enumerate(spec.get("add_blocks") or []):
             kw = {"id": f"p{page.page_no:03d}.m{i:02d}",          # m = manual
-                  "polygon": polygon_from_box(*(b.get("bbox") or [0.05, 0.20, 0.95, 0.90])),
-                  "provenance": Provenance.MANUAL}
+                  "polygon": polygon_from_box(*(b.get("bbox") or [0.05, 0.20, 0.95, 0.90]))}
             page.blocks.append(
-                ParsedTable(cells=b["cells"], structure_provenance=Provenance.MANUAL, **kw)
+                ParsedTable(cells=b["cells"], **kw)
                 if "cells" in b else
                 ParsedParagraph(role=b.get("role", "body"), content=b.get("text", "").strip(), **kw)
             )
@@ -94,7 +89,6 @@ def apply_patch(doc: ParsedDocument, patch: dict[str, Any]) -> None:
                 continue
             im.content = desc.strip() or None
             im.why_empty = None if desc.strip() else "decorative"
-            im.provenance = Provenance.MANUAL
             n_fix += 1
 
         page.page_hash = page.compute_hash()   # vá xong hash đổi -> S4 biết trang này khác

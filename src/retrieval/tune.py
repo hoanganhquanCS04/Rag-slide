@@ -2,11 +2,11 @@
 
 Đổi cách chunk thì chỉ đổi file đầu vào, chạy lại, so hai báo cáo — không chạy lẻ từng script.
 
-    bash scripts/tune.sh out/kb/<ten>/chunks.json        # -> out/kb/<ten>/audit/chunks_tune.md + .json
-    python src/kb/tune.py out/kb/<ten>/chunks.json --queries data/eval/<ten>.queries.json
-    python src/kb/tune.py out/kb/<ten>/chunks.json --k 5,10,20 --wd 1,2 --ws 1
+    bash scripts/tune.sh src/output/chunker/<ten>/chunks.json        # -> src/output/retrieval/<ten>/chunks_tune.md + .json
+    python src/retrieval/tune.py src/output/chunker/<ten>/chunks.json --queries data/eval/<ten>.queries.json
+    python src/retrieval/tune.py src/output/chunker/<ten>/chunks.json --k 5,10,20 --wd 1,2 --ws 1
 
-Ra HAI file đặt theo tên file vào: `<thư mục chunks>/audit/<tên chunks>_tune.md` (người đọc) +
+Ra HAI file đặt theo tên file vào: `src/output/retrieval/<doc_id>/<tên chunks>_tune.md` (người đọc) +
 `.json` cùng tên (máy đọc, để so giữa các bộ chunk). Một file vào = một bộ báo cáo: chạy lại thì
 ghi đè báo cáo của chính file đó; bộ chunk khác tên thì báo cáo khác tên.
 
@@ -38,16 +38,16 @@ from typing import Any
 
 import numpy as np
 
-if __package__ in (None, ""):
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+if __package__ in (None, ""):  # chạy thẳng file: THAY src/retrieval/ bằng src/
+    sys.path[0] = str(Path(__file__).resolve().parents[1])
 
-from index.cli import embed_chunkset
-from index.config import MODEL_ID
-from index.embedder.factory import create_embedder
-from index.vectors import load_vectors, vectors_file
-from kb.eval import default_queries
-from kb.models import ChunkSet
-from kb.search import POOL, RRF_K, TOP_K, W_DENSE, W_SPARSE, Searcher, rrf_fuse
+from retrieval.build_index import embed_chunkset
+from utils.config import MODEL_ID, RETRIEVAL_OUTPUT
+from embedders.factory import create_embedder
+from utils.vectors import load_vectors, vectors_file
+from retrieval.eval import default_queries
+from models.kb_chunk import ChunkSet
+from retrieval.search import POOL, RRF_K, TOP_K, W_DENSE, W_SPARSE, Searcher, rrf_fuse
 
 log = logging.getLogger(__name__)
 
@@ -68,7 +68,7 @@ def _num(x: float) -> str:
 
 def ensure_vectors(cs: ChunkSet, model_id: str) -> None:
     """Bộ chunk mới chưa nhúng (hoặc nhúng lệch) -> nhúng luôn. Cache theo nội dung: chữ không
-    đổi thì không gọi API — đổi file chunk là chạy được ngay, không phải nhớ chạy src/index/cli.py."""
+    đổi thì không gọi API — đổi file chunk là chạy được ngay, không phải nhớ chạy src/retrieval/build_index.py."""
     try:
         load_vectors(cs, vectors_file(cs.doc_id, model_id), model_id)
     except SystemExit as e:
@@ -240,20 +240,20 @@ def write_misses(path: Path, meta: dict[str, Any], best: dict[str, Any], misses:
         "queries": rows}, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def out_paths(chunks: Path) -> tuple[Path, Path]:
-    """-> (file .md, file .json) đặt theo tên file vào: <thư mục chunks>/audit/<tên chunks>_tune.*
+def out_paths(chunks: Path, doc_id: str) -> tuple[Path, Path]:
+    """-> (file .md, file .json) đặt theo tên file vào: src/output/retrieval/<doc_id>/<tên chunks>_tune.*
 
     MỘT file vào = MỘT bộ báo cáo: chạy lại thì ghi đè báo cáo của chính file đó; bộ chunk
     khác tên ra báo cáo khác tên, không đè nhau. Đuôi `_tune` để khỏi lẫn với file chunk thật.
     """
-    base = chunks.parent / "audit" / f"{chunks.stem}_tune"
+    base = RETRIEVAL_OUTPUT / doc_id / f"{chunks.stem}_tune"
     base.parent.mkdir(parents=True, exist_ok=True)
     return base.with_name(base.name + ".md"), base.with_name(base.name + ".json")
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="tune", description="quet K + trong so dense/sparse cua RRF")
-    ap.add_argument("chunks", help="out/kb/<ten>/chunks.json (hoac bo chunk thu bat ky)")
+    ap.add_argument("chunks", help="src/output/chunker/<ten>/chunks.json (hoac bo chunk thu bat ky)")
     ap.add_argument("--queries", default=None, help="mac dinh data/eval/<doc_id>.queries.json")
     ap.add_argument("--k", default=DEFAULT_K, help=f"danh sach K, mac dinh {DEFAULT_K}")
     ap.add_argument("--wd", default=DEFAULT_WD, help=f"trong so dense, mac dinh {DEFAULT_WD}")
@@ -275,7 +275,7 @@ def main(argv: list[str] | None = None) -> int:
 
     ensure_vectors(cs, args.model)
     se = Searcher(cp, model_id=args.model)
-    for name in ("index.embedder", "httpx"):                 # 200 dòng "cache: dung lai 1/1" -> tắt
+    for name in ("embedders", "httpx"):                 # 200 dòng "cache: dung lai 1/1" -> tắt
         logging.getLogger(name).setLevel(logging.WARNING)
 
     page_of = [c.page_no for c in se.chunks]
@@ -315,7 +315,7 @@ def main(argv: list[str] | None = None) -> int:
             "time": time.strftime("%Y-%m-%d %H:%M"), "sec": round(time.perf_counter() - t0, 1)}
     types = {"base": by_type(base, queries), "best": by_type(best, queries)}
 
-    md, js = out_paths(cp)
+    md, js = out_paths(cp, cs.doc_id)
     write_md(md, meta, configs, best, base, misses, types)
     js.write_text(json.dumps(
         {"meta": meta, "best": best["label"], "base": base["label"], "configs": configs,

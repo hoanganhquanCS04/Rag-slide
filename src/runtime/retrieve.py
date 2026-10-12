@@ -19,11 +19,11 @@ from __future__ import annotations
 import logging
 import re
 
-from index.embedder.base import EmbedError
-from kb.models import SearchHit
-from kb.search import Searcher
-from llm import ROOT
-from parsing.models import ParsedPage
+from embedders.base import EmbedError
+from models.kb_chunk import SearchHit
+from retrieval.search import Searcher
+from utils.config import CHUNKER_OUTPUT
+from models.parsed_document import ParsedPage
 from runtime.models import Context
 
 log = logging.getLogger(__name__)
@@ -48,7 +48,7 @@ def expand(question: str, page: ParsedPage | None) -> str:
 class Retriever:
     def __init__(self, doc_id: str, top_k: int):
         # embed_retry=1: lỗi là lùi về BM25 ngay, không đợi 1+2+4+8s như offline
-        self.searcher = Searcher(ROOT / "out" / "kb" / doc_id / "chunks.json", embed_retry=1)
+        self.searcher = Searcher(CHUNKER_OUTPUT / doc_id / "chunks.json", embed_retry=1)
         self.top_k = top_k
         self.mode = "hybrid"
 

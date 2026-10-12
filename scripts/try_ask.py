@@ -10,7 +10,7 @@ Chạy SAU phần offline (`bash scripts/run_deck.sh <file raw>`).
     python scripts/try_ask.py onboarding_kit < cau_hoi.txt                # mỗi dòng một câu
 
 Luồng (`Router.answer`, src/runtime/router.py): tìm (hybrid, RRF của search.py) -> top 5 trang vào
-prompt prompts/r_qa.md -> 1 lần gọi LLM (LLM_MODEL trong .env) -> code kiểm grounding. LLM chỉ được
+prompt src/prompts/r_qa.md -> 1 lần gọi LLM (LLM_MODEL trong .env) -> code kiểm grounding. LLM chỉ được
 trả lời hoặc từ chối. `deck_map` dựng tại chỗ bằng luật (không tốn API).
 
 Log từng bước để soi: [1] tìm được chunk nào, hạng dense / BM25, đoạn nào vào prompt · [2] prompt
@@ -29,14 +29,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
-os.chdir(ROOT)                                       # out/, logs/, config/ trong file này tính từ gốc repo
+os.chdir(ROOT)                                       # src/output/, logs/, config/ tính từ gốc repo
 
-from chunker.tokens import count_tokens
-from kb import deck_map
-from kb.search import RRF_K, W_DENSE, W_SPARSE
-from llm import DEFAULT_MODEL
-from parsing.enrich import enrich
-from parsing.models import ParsedDocument, slugify_doc_id
+from utils.tokens import count_tokens
+from retrieval import deck_map
+from retrieval.search import RRF_K, W_DENSE, W_SPARSE
+from utils.llm import DEFAULT_MODEL
+from parser.enrich import enrich
+from models.parsed_document import ParsedDocument, slugify_doc_id
 from runtime.models import RuntimeConfig
 from runtime.retrieve import Retriever
 from runtime.router import Router
@@ -77,7 +77,7 @@ def show_debug(dbg: dict, ms: dict, cfg: RuntimeConfig, mode: str, full_prompt: 
 
 async def run(doc_id: str, questions: list[str], model: str, cfg: RuntimeConfig,
               quiet: bool, full_prompt: bool) -> None:
-    doc = enrich(ParsedDocument.load(f"out/parsed/{doc_id}/document.json"))
+    doc = enrich(ParsedDocument.load(f"src/output/parser/{doc_id}/document.json"))
     retriever = Retriever(doc_id, cfg.top_k)
     router = Router(doc, retriever, cfg, deck_map.build(doc), model, Path("logs/runtime") / doc_id / "llm")
     print(f"{doc_id}: {doc.n_pages} trang | LLM {model}" + ("" if questions else " | Ctrl+C de thoat"))
@@ -125,7 +125,7 @@ def main() -> int:
     qs = [" ".join(args.question)] if args.question else []
     # Tên file gốc -> doc_id bằng ĐÚNG hàm run_deck.sh dùng; doc_id đưa vào thì giữ nguyên
     doc_id = slugify_doc_id(Path(args.doc).stem)
-    missing = [f for f in (f"out/parsed/{doc_id}/document.json", f"out/kb/{doc_id}/chunks.json")
+    missing = [f for f in (f"src/output/parser/{doc_id}/document.json", f"src/output/chunker/{doc_id}/chunks.json")
                if not Path(f).exists()]
     if missing:
         raise SystemExit(f"chua dung '{doc_id}' (thieu {', '.join(missing)}) — chay truoc:\n"

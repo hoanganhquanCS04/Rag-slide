@@ -16,9 +16,9 @@ from typing import Any
 
 import numpy as np
 
-from index.filters import Hit, Where, filter_metadata, matches
-from index.sparse.base import SparseIndex, tokenize
-from kb.models import ChunkSet
+from utils.filters import Hit, Where, filter_metadata, matches
+from retrieval.sparse.base import SparseIndex, tokenize
+from models.kb_chunk import ChunkSet
 
 
 class RankBM25Index(SparseIndex):

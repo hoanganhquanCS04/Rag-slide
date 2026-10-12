@@ -1,16 +1,15 @@
-"""ParsedDocument -> `out/kb/<doc_id>/chunks.json`.
+"""ParsedDocument -> `src/output/chunker/<doc_id>/chunks.json`.
 
-    python src/chunker/cli.py out/parsed/<ten>/document.json [--chunker page]
-    python src/chunker/cli.py out/parsed/<ten>/document.json --page 19     # in chunk của 1 trang
-    python src/chunker/cli.py out/parsed/<ten>/document.json --stats       # chỉ in thống kê
+    python src/chunker/cli.py src/output/parser/<ten>/document.json [--chunker page]
+    python src/chunker/cli.py src/output/parser/<ten>/document.json --page 19     # in chunk của 1 trang
+    python src/chunker/cli.py src/output/parser/<ten>/document.json --stats       # chỉ in thống kê
 
-Mỗi bài một thư mục `out/kb/<doc_id>/`. Bước sau — nhúng + nạp kho: `src/index/cli.py`.
+Mỗi bài một thư mục `src/output/chunker/<doc_id>/`. Bước sau — nhúng + nạp kho: `src/retrieval/build_index.py`.
 """
 
 from __future__ import annotations
 
 import argparse
-import importlib
 import logging
 import statistics
 import sys
@@ -22,10 +21,12 @@ if __package__ in (None, ""):  # chạy thẳng file, không qua -m
 
 from dotenv import load_dotenv
 
-from chunker.base import MAX_TOKENS, BaseChunker
-from kb.models import ChunkSet
-from parsing.enrich import enrich
-from parsing.models import ParsedDocument
+from chunker.base import MAX_TOKENS
+from chunker.factory import CHUNKERS, create_chunker
+from models.kb_chunk import ChunkSet
+from parser.enrich import enrich
+from utils.config import CHUNKER_OUTPUT, ROOT
+from models.parsed_document import ParsedDocument
 
 for _s in (sys.stdout, sys.stderr):
     if hasattr(_s, "reconfigure"):
@@ -33,18 +34,7 @@ for _s in (sys.stdout, sys.stderr):
 
 log = logging.getLogger("chunker")
 
-ROOT = Path(__file__).resolve().parents[2]
-OUT = ROOT / "out" / "kb"
-
-# import lúc chọn — biến thể này hỏng không kéo biến thể kia theo
-CHUNKERS = {
-    "page": "chunker.variants.page:PageChunker",
-}
-
-
-def make_chunker(kind: str, out_dir: Path, max_tokens: int) -> BaseChunker:
-    module, cls = CHUNKERS[kind].split(":")
-    return getattr(importlib.import_module(module), cls)(out_dir, max_tokens)
+OUT = CHUNKER_OUTPUT
 
 
 def _short(s: str, full: bool, n: int = 78) -> str:
@@ -79,10 +69,10 @@ def stats(cs: ChunkSet) -> None:
 def main(argv: list[str] | None = None) -> int:
     load_dotenv(ROOT / ".env")
     ap = argparse.ArgumentParser(prog="chunker", description=__doc__.splitlines()[0])
-    ap.add_argument("parsed", type=Path, help="out/parsed/<ten>/document.json")
+    ap.add_argument("parsed", type=Path, help="src/output/parser/<ten>/document.json")
     ap.add_argument("--chunker", default="page", choices=CHUNKERS)
     ap.add_argument("--max-tokens", type=int, default=MAX_TOKENS)
-    ap.add_argument("--page", default=None, help="chi in chunk cua trang: '19' | '19,20'")
+    ap.add_argument("--page", nargs="+", type=int, default=None, help="chi in chunk cua trang: 19 | 19 20")
     ap.add_argument("--stats", action="store_true", help="chi in thong ke")
     ap.add_argument("--full", action="store_true", help="in nguyen van chunk")
     args = ap.parse_args(argv)
@@ -92,11 +82,11 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(f"khong thay file: {args.parsed}")
     doc = enrich(ParsedDocument.load(args.parsed))   # chương / vá tay / cờ không nằm trong document.json
 
-    chunker = make_chunker(args.chunker, OUT / doc.doc_id, args.max_tokens)
+    chunker = create_chunker(args.chunker, OUT / doc.doc_id, args.max_tokens)
     cs = chunker.run(doc)
 
     if args.page:
-        show(cs, [int(x) for x in args.page.replace(" ", "").split(",") if x], args.full)
+        show(cs, args.page, args.full)
     elif not args.stats:
         show(cs, None, args.full)
     stats(cs)

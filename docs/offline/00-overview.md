@@ -38,7 +38,10 @@ Hệ quả: gặp lựa chọn "làm kỹ, chậm" vs "làm nhanh, ẩu" ở off
 `title`, `chart_data`, `tables`, `build_steps` đã có bản **đúng 100%** từ parsing pptx.
 Đưa cho LLM là tự tạo cơ hội bịa lại cái đang đúng.
 
-Hệ quả cứng: mọi artifact phải khai `provenance`, mỗi field thuộc đúng một trong hai nhóm:
+Hệ quả cứng (thiết kế gốc): mọi artifact phải khai `provenance`, mỗi field thuộc đúng một trong hai nhóm.
+**v0 đã bỏ trường `provenance` khỏi code (2026-10-12)**: không còn text layer, mọi chữ đều do VLM
+đọc nên trường đó không phân biệt gì. Nguồn gốc giờ đọc theo LOẠI khối (`image` = mô tả ảnh) và
+id (`pNNN.mNN` = vá tay). Sơ đồ dưới giữ lại cho v1 (`.pptx` có lại bản đúng 100%):
 
 ```json
 "provenance": {
@@ -163,7 +166,7 @@ R2  hỏi điều hướng   →  KHÔNG lọc            (trang mở chương l
 Chưa dựng Qdrant và **chưa cần**: 52 vector quét vét cạn hết **0.01ms**, 100.000 vector
 cũng chỉ 25ms — trong khi gọi API nhúng câu hỏi đã mất ~700ms. Kho vector mua về metadata
 filter và nhiều deck, **không phải tốc độ**. v0 dùng Chroma (ghi đĩa, một collection cho mọi
-tài liệu, lọc bằng `doc_id`) hoặc RAM — chọn bằng `VECTOR_DB`, xem `src/index/store/`.
+tài liệu, lọc bằng `doc_id`) hoặc RAM — chọn bằng `VECTOR_DB`, xem `src/vectordb/`.
 
 ### 3.2 Thời gian thật (đo 2026-10-02)
 
@@ -182,7 +185,7 @@ Build lần đầu bị chi phối bởi ①. Chạy lại khi không đổi gì
 
 #### S0 · Ingest — `deck.pdf` → `ParsedDocument`  ✅ ĐÃ CÓ
 
-`src/parsing/` · xem [spec đầy đủ](../spec/parsed-document.md)
+`src/parser/` · xem [spec đầy đủ](../spec/parsed-document.md)
 
 ```
 VÀO  data/raw/<ten>.pdf
@@ -209,7 +212,7 @@ VÀO  data/raw/<ten>.pdf
   │          slide_type từ bbox tiêu đề + tiêu đề "Bài tập…"
   │          KHÔNG gọi model cho hai thứ này
   │
-  ├─> [patch tay]  data/patches/<ten>.json ─> provenance = manual
+  ├─> [patch tay]  data/patches/<ten>.json ─> khối id pNNN.mNN
   │                cho trang mọi đường đều đọc sai
   │
   └─> [hash]  page_hash = SHA(nội dung + bbox từng mẩu)   <- incremental
@@ -217,7 +220,7 @@ VÀO  data/raw/<ten>.pdf
                     v
               ParsedDocument ─> [cờ]  empty_page · image_not_described · table_empty
                                       no_sections
-RA   out/parsed/<doc_id>/{docling_vlmpipeline,tables,pictures,document}.json  ──> S5
+RA   src/output/parser/<doc_id>/{docling_vlmpipeline,tables,pictures,document}.json  ──> S5
      docling_vlmpipeline.json = cache phản hồi VLM — chạy lại không gọi lại (trừ --redo)
 ```
 
@@ -227,11 +230,11 @@ RA   out/parsed/<doc_id>/{docling_vlmpipeline,tables,pictures,document}.json  �
 
 #### S5 · KB Construction — `ParsedDocument` → `KBChunk[]` + vector  ✅ ĐÃ CÓ
 
-`src/kb/` · xem [kb-chunk.md](../spec/kb-chunk.md), [embedding.md](../spec/embedding.md),
+`src/retrieval/` · xem [kb-chunk.md](../spec/kb-chunk.md), [embedding.md](../spec/embedding.md),
 [search.md](../spec/search.md)
 
 ```
-VÀO  out/parsed/<doc_id>/document.json
+VÀO  src/output/parser/<doc_id>/document.json
   │
   ├─> [chunk]  1 trang = 1 chunk                  <- vì R2 nhảy tới TRANG
   │            tiền tố "[<chương> · <tiêu đề trang> · trang N/M]"   <- KHÔNG gọi LLM
@@ -248,10 +251,10 @@ VÀO  out/parsed/<doc_id>/document.json
   │            nhúng CẢ BỘ, kể cả phân mục — lọc là việc của lúc TRUY VẤN
   │
   └─> [index]  dense: kho vector chroma | inmem (BẢN SAO của .npy, tự đồng bộ)
-               sparse: BM25 dựng trong RAM lúc khởi động (src/index/sparse/)
+               sparse: BM25 dựng trong RAM lúc khởi động (src/retrieval/sparse/)
                gộp bằng RRF K=15, dense 1 : sparse 1   <- đo bằng scripts/tune.sh
                KHÔNG cộng điểm: hai thang đo không so được
-RA   out/kb/<doc_id>/chunks.json · out/index/<doc_id>/vectors__<model_id>.npy + out/index/chroma/
+RA   src/output/chunker/<doc_id>/chunks.json · src/output/embedders/<doc_id>/vectors__<model_id>.npy + src/output/vectordb/chroma/
 ```
 
 Đo được (2026-10-02, câu hỏi do AI viết — thiên vị): Onboarding 200 câu **hybrid 157 top-1 /
@@ -277,7 +280,7 @@ RA   DeckStructure  ──> S4
 `src/scenario/` · xem [scenario.md](../spec/scenario.md)
 
 ```
-VÀO  block của CHÍNH TRANG ĐÓ (id + provenance) + title trang trước/sau + slide_type
+VÀO  block của CHÍNH TRANG ĐÓ (id + loại khối) + title trang trước/sau + slide_type
      + kịch bản các trang trước cùng chương      <- KHÔNG nhồi cả deck vào prompt
   │
   ├─> [pass 1]  viết lời, mỗi câu khai kind + ref
@@ -295,7 +298,7 @@ VÀO  block của CHÍNH TRANG ĐÓ (id + provenance) + title trang trước/sau
   │
   └─> [đếm âm tiết]  CODE đếm theo pronunciation.json, 200 âm tiết/phút
                      KHÔNG đếm từ
-RA   out/deck/<doc_id>/scenario.json + scenario.md  ──> S6b
+RA   src/output/scenario/<doc_id>/scenario.json + scenario.md  ──> S6b
 ```
 
 Chưa có `time_budget` (S2) nên chưa cân giờ — độ dài đi theo nội dung trang.
@@ -306,15 +309,15 @@ Chưa có `time_budget` (S2) nên chưa cân giờ — độ dài đi theo nội
 VÀO  ParsedDocument (sections + slide_type)
   │
   ├─> deck_map.txt (~180 token: số chương + khoảng trang từng chương)  ─> prompt runtime
-  │       src/kb/deck_map.py — luật, không gọi model
+  │       src/retrieval/deck_map.py — luật, không gọi model
   │
-  └─> [audit]  src/kb/audit.py — ĐÃ CÓ
+  └─> [audit]  src/retrieval/audit.py — ĐÃ CÓ
                quét trùng lặp: cosine cặp >= 0.94   ─> bắt được 2 cặp thật
                self-retrieval: gate §11 >= 90%
                ⚠️ self-retrieval hiện gần như luôn 100% vì câu hỏi lấy TỪ CHÍNH
                   văn bản chunk — đề bài là đáp án. Số đo thật lấy từ
-                  data/eval/queries.json (src/kb/eval.py)
-RA   deck_map.txt + out/kb/<doc_id>/audit/*.json
+                  data/eval/queries.json (src/retrieval/eval.py)
+RA   deck_map.txt + src/output/retrieval/<doc_id>/*.json
 ```
 
 #### S6b · Precompute — `Scenario[]` → `precomputed/`
@@ -366,7 +369,7 @@ VÀO  mọi artifact + flags.json + BẢN NGHE THỬ    <- CHỈ duyệt phần 
   │       sửa pronunciation.json ─> đếm lại âm tiết + synth lại câu liên quan
   │
   ├─ image_not_described ─> người chọn 1 trong 2:
-  │       ảnh có nội dung thật ─> gõ tay vào data/patches/ ─> provenance=manual
+  │       ảnh có nội dung thật ─> gõ tay vào data/patches/ (fix_images)
   │       ảnh trang trí        ─> đánh dấu is_decorative, hết flag
   │
   └─ chunk trùng ─> người chọn 1 trong 2:
@@ -402,7 +405,7 @@ Mọi artifact là **Pydantic v2 model**, ghi ra JSON, đọc lại được. Kh
 các stage. Pipeline phải resume được từ bất kỳ stage nào — nghĩa là mỗi stage đọc file
 của stage trước chứ không nhận object trong bộ nhớ.
 
-Cây dưới là ĐÍCH. v0 đang ghi vào `out/parsed/` · `out/kb/` · `out/deck/` — xem
+Cây dưới là ĐÍCH. v0 đang ghi vào `src/output/parser/` · `src/output/chunker/` · `src/output/scenario/` — xem
 [01-hien-trang.md §1](./01-hien-trang.md).
 
 ```
@@ -479,7 +482,6 @@ một trang trước đổi, các trang sau phải viết lại theo. Code hiệ
 ```
 dirty  = {trang có page_hash / prompt / model đổi}
 dirty += {MỌI trang sau nó trong cùng chương}    (vì đọc kịch bản trang trước)
-trang người sửa tay (edited_by: "nguoi") -> không bao giờ viết lại, chỉ đếm lại + kiểm
 ```
 
 ---
@@ -488,10 +490,10 @@ trang người sửa tay (edited_by: "nguoi") -> không bao giờ viết lại, 
 
 - Python 3.11+, type hints bắt buộc, Pydantic v2 cho schema.
 - Mỗi stage là một module độc lập, **chạy riêng được qua CLI**:
-  `python src/index/cli.py out/kb/<ten>/chunks.json`
+  `python src/retrieval/build_index.py src/output/chunker/<ten>/chunks.json`
 - Gọi LLM/VLM: retry exponential backoff, log **full prompt + response** vào `logs/`.
   Không log thì không bao giờ debug được vì sao model bịa.
-- Mọi prompt nằm trong `prompts/*.md`. **Không hardcode prompt trong file `.py`.**
+- Mọi prompt nằm trong `src/prompts/*.md`. **Không hardcode prompt trong file `.py`.**
 - Async cho mọi I/O. Gọi VLM (4 luồng) và S4 (5 luồng) đều song song.
 - Không `print()`. Dùng `logging` hoặc `rich`.
 - Stage sinh flag thì ghi flag, không tự sửa dữ liệu, không tự quyết. Quyết định là việc
@@ -546,6 +548,6 @@ Mọi flag từ mọi stage đổ về một file, S7 đọc file đó. Chi ti�
 | S0    | `empty_page`, `image_not_described`, `table_empty`, `layout_failed`, `no_sections` |
 | S5    | chunk trùng nhau (cosine >= 0.94, `audit.py`), chunk vượt 500 token (log `--stats`)                  |
 | S2    | `sections` không phủ kín / chồng nhau / đứt quãng — *chưa code*                                      |
-| S4    | **cờ đỏ:** `bad_grounding`, `empty_script`, `llm_failed`, `stale_manual` · **sửa ở pass 2:** `block_not_covered`, `number_missing` · **vàng:** `unknown_pronunciation` — luật nói tự nhiên bỏ khỏi bộ kiểm 2026-10-06 |
+| S4    | **cờ đỏ:** `bad_grounding`, `empty_script`, `llm_failed` · **sửa ở pass 2:** `block_not_covered`, `number_missing` · **vàng:** `unknown_pronunciation` — luật nói tự nhiên bỏ khỏi bộ kiểm 2026-10-06 |
 | S6a   | `self_retrieval_fail` — ⚠️ hiện gần như không bao giờ bắn, xem §3.3                                |
 | S6b   | `duration_mismatch`, **`pronunciation_hash_mismatch`**, **`voice_id_mismatch`**                 |

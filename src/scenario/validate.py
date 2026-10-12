@@ -21,8 +21,8 @@ import re
 from dataclasses import dataclass
 from typing import Literal
 
-from scenario.models import SlideScript
-from scenario.syllables import Pronunciation
+from models.scenario import SlideScript
+from utils.syllables import Pronunciation
 
 # ĐỦ Ý — con số là thông tin cốt lõi của deck nhân sự (số giờ, hệ số, phần trăm, số tiền).
 # Thứ KHÔNG đọc thành tiếng thì không bắt: link, email, số điện thoại, mã tài liệu (VSF_IT03

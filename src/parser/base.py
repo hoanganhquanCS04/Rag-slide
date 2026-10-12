@@ -11,9 +11,9 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import ClassVar
 
-from parsing.models import ParsedDocument
-from parsing.pictures import apply_pictures, run_pictures
-from parsing.tables import apply_tables, run_tables
+from models.parsed_document import ParsedDocument
+from parser.pictures import apply_pictures, run_pictures
+from parser.tables import apply_tables, run_tables
 
 log = logging.getLogger(__name__)
 
@@ -49,7 +49,8 @@ class BaseParser(ABC):
             table_pages: set[int] | None = None) -> ParsedDocument:
         """① rồi ②. `src` cho doc_id / nguồn, `pdf` để vẽ trang."""
         doc = self.parse_layout(src, pdf, redo=redo)
-        return self.post_processing(doc, pdf, redo=redo, table_pages=table_pages)
+        doc = self.post_processing(doc, pdf, redo=redo, table_pages=table_pages)
+        return doc.link()                 # ②b dựng lại ParsedTable mới -> gán lại block.page
 
     def save(self, doc: ParsedDocument) -> Path:
         """-> out_dir/document.json."""

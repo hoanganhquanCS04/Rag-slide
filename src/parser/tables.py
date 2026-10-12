@@ -1,6 +1,6 @@
 """②b Chép bảng: layout ① (ParsedDocument) + PDF -> tables.json; `apply_tables` thay ô bảng vào doc.
 
-MỖI BẢNG một request (Prompt C, `prompts/s0_vlm_table_prompt.md`): ảnh CẮT đúng vùng bảng (bbox Table
+MỖI BẢNG một request (Prompt C, `src/prompts/s0_vlm_table_prompt.md`): ảnh CẮT đúng vùng bảng (bbox Table
 của layout ① + lề), vẽ lại từ PDF ở độ phân giải cao (~2000px bề ngang bảng) -> Gemma chỉ chép bảng
 đó thành JSON {"columns", "rows"}: số cột = hàng tiêu đề, nhãn nhiều cấp ghép "lớn - con", ô gộp lặp chữ.
 
@@ -25,14 +25,14 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from llm import LLM
+from utils.config import PROMPTS_DIR, ROOT
+from utils.llm import LLM
 from parser.vlm import FENCE, vlm_endpoint
-from parsing.models import ParsedDocument, ParsedTable, Provenance, norm_text
+from models.parsed_document import ParsedDocument, ParsedTable, norm_text
 
 log = logging.getLogger(__name__)
 
-ROOT = Path(__file__).resolve().parents[2]
-TABLE_PROMPT = ROOT / "prompts" / "s0_vlm_table_prompt.md"
+TABLE_PROMPT = PROMPTS_DIR / "s0_vlm_table_prompt.md"
 LOG_DIR = ROOT / "logs" / "vlm_tables"
 
 TARGET_WIDTH_PX = 2000   # bề ngang ảnh cắt của bảng
@@ -186,8 +186,7 @@ def apply_tables(doc: ParsedDocument, tables_json: Path) -> Counter[str]:
                 out["giu_bang_buoc_1"] += 1
                 continue
             page.blocks[i] = ParsedTable(                      # dựng lại: fill_down + content tính lại
-                id=b.id, polygon=b.polygon, caption=b.caption, cells=res["cells"],
-                provenance=Provenance.VLM, structure_provenance=Provenance.VLM)
+                id=b.id, polygon=b.polygon, caption=b.caption, cells=res["cells"])
             out["chep_lai_buoc_2b"] += 1
             touched = True
         if touched:

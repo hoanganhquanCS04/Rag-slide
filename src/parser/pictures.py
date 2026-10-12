@@ -1,6 +1,6 @@
 """② Xét ảnh: layout ① (ParsedDocument) + PDF -> pictures.json; `apply_pictures` gắn vào doc.
 
-MỖI TRANG CÓ ẢNH một request (Prompt B, `prompts/s0_vlm_picture_prompt.md`): ảnh CẢ trang có KHUNG ĐỎ
+MỖI TRANG CÓ ẢNH một request (Prompt B, `src/prompts/s0_vlm_picture_prompt.md`): ảnh CẢ trang có KHUNG ĐỎ
 đánh số [1], [2]… quanh từng ảnh + danh sách `[k] [x1, y1, x2, y2]` (thang 0–1000, cùng thang Prompt A).
 VLM trả mỗi ảnh một mục {id, picture_type, reason, text}:
 
@@ -30,14 +30,14 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from llm import LLM
+from utils.config import PROMPTS_DIR, ROOT
+from utils.llm import LLM
 from parser.vlm import FENCE, load_json_array, vlm_endpoint
-from parsing.models import ParsedDocument, ParsedImage
+from models.parsed_document import ParsedDocument, ParsedImage
 
 log = logging.getLogger(__name__)
 
-ROOT = Path(__file__).resolve().parents[2]
-PICTURE_PROMPT = ROOT / "prompts" / "s0_vlm_picture_prompt.md"
+PICTURE_PROMPT = PROMPTS_DIR / "s0_vlm_picture_prompt.md"
 LOG_DIR = ROOT / "logs" / "vlm_pictures"
 
 RENDER_SCALE = 2.0       # ảnh trang gửi VLM = 2 × 72dpi (Gemma 4 tự co theo VLM_SOFT_TOKENS)

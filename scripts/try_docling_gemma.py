@@ -4,13 +4,13 @@ Lớp mỏng: không có logic VLM / parse riêng — gọi đúng `src/parser/c
 khung chính là document.json mà KB / kịch bản đọc.
 
     python scripts/try_docling_gemma.py "data/raw/3_DataVisualization (1).pdf"
-    python scripts/try_docling_gemma.py data/raw/thoi_gian_lam_viec.pdf --pages 3-5 --draw-only
+    python scripts/try_docling_gemma.py data/raw/thoi_gian_lam_viec.pdf --pages 3 4 5 --draw-only
 
 Ghi:
-  out/parsed/<doc_id>/docling_vlmpipeline.json · document.json     (ĐÈ bản chính, như parser/cli.py --redo)
+  src/output/parser/<doc_id>/docling_vlmpipeline.json · document.json     (ĐÈ bản chính, như parser/cli.py --redo)
   logs/vlm_pipeline/<doc_id>/pNNN.txt                               phản hồi thô của Gemma
-  out/try_docling_gemma/<doc_id>/pages/pNNN.png                     khung = polygon block, số = thứ tự
-  out/try_docling_gemma/<doc_id>/sheet_NN.png                       8 trang một tấm để lướt nhanh
+  src/output/parser/<doc_id>/boxes/pages/pNNN.png                     khung = polygon block, số = thứ tự
+  src/output/parser/<doc_id>/boxes/sheet_NN.png                       8 trang một tấm để lướt nhanh
 """
 
 from __future__ import annotations
@@ -28,9 +28,10 @@ import pypdfium2 as pdfium  # noqa: E402
 from dotenv import load_dotenv  # noqa: E402
 from PIL import Image, ImageDraw, ImageFont  # noqa: E402
 
-from parser.cli import parse_file, parse_pages  # noqa: E402
-from parsing.enrich import enrich, page_pdf  # noqa: E402
-from parsing.models import ParsedDocument, ParsedPage, ParsedParagraph, slugify_doc_id  # noqa: E402
+from parser.cli import parse_file  # noqa: E402
+from utils.config import PARSER_OUTPUT  # noqa: E402
+from parser.enrich import enrich, page_pdf  # noqa: E402
+from models.parsed_document import ParsedDocument, ParsedPage, ParsedParagraph, slugify_doc_id  # noqa: E402
 
 load_dotenv(ROOT / ".env")     # VLM_MODEL làm mặc định cho --model bên dưới
 
@@ -76,9 +77,9 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="S0 VlmPipeline + Gemma -> document.json, roi ve khung")
     ap.add_argument("pdf", help="data/raw/<ten>.pdf | .pptx (can .pdf cung ten)")
     ap.add_argument("--model", default=os.environ.get("VLM_MODEL", "gemma4"))
-    ap.add_argument("--pages", default=None, help="chi VE cac trang nay: '18-19' | '5' | '3,7'")
+    ap.add_argument("--pages", nargs="+", type=int, default=None, help="chi VE cac trang nay: 5 | 3 7 | {18..19}")
     ap.add_argument("--draw-only", action="store_true", help="khong goi Gemma, ve tu document.json co san")
-    ap.add_argument("--out", default=str(ROOT / "out" / "try_docling_gemma"))
+    ap.add_argument("--out", default=str(PARSER_OUTPUT), help="anh ve vao <out>/<doc_id>/boxes/")
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -92,16 +93,16 @@ def main() -> int:
     if pdf_path is None:
         raise SystemExit(f"khong thay {src.with_suffix('.pdf').name} de ve trang")
     doc_id = slugify_doc_id(src.stem)
-    d = ROOT / "out" / "parsed" / doc_id
+    d = PARSER_OUTPUT / doc_id
 
     code = 0
     if not args.draw_only:                                   # = parser/cli.py <file> --redo
         code = parse_file(src, redo=True, model=args.model)
     doc = enrich(ParsedDocument.load(d / "document.json"))
 
-    out = Path(args.out) / doc_id
+    out = Path(args.out) / doc_id / "boxes"
     (out / "pages").mkdir(parents=True, exist_ok=True)
-    wanted = set(parse_pages(args.pages)) if args.pages else None
+    wanted = set(args.pages) if args.pages else None
     pdf = pdfium.PdfDocument(str(pdf_path))
     drawn = []
     try:

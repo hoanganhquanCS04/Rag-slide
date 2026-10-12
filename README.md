@@ -15,11 +15,11 @@ trên slide.
 
 |    | Bước            | Code                            | Làm gì                                                                                                                                                                                                   |
 | -- | ----------------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ✅ | S0 Parse          | `src/parsing/`                | docling đọc chữ + toạ độ (tắt OCR) · VLM nhìn cả trang sắp chữ thành khối · VLM chép bảng từ ảnh bảng · chương từ trang mục lục · link ẩn · vá tay · cờ cho người duyệt |
-| ✅ | S5 KB             | `src/kb/`                     | 1 trang = 1 chunk (cắt khi > 500 token) · nhúng`text-embedding-3-small` qua API, cache theo nội dung · kho vector Chroma hoặc RAM · index BM25                                                    |
-| ✅ | Tìm kiếm        | `src/kb/search.py`            | hybrid vector + BM25, gộp bằng RRF (K=15, 1:1), trả**top-5 trang**                                                                                                                                |
-| ✅ | Đo chất lượng | `src/kb/{eval,audit,tune}.py` | bộ câu hỏi có nhãn · self-retrieval + quét chunk trùng · quét tham số RRF                                                                                                                       |
-| ✅ | S6a`deck_map`   | `src/kb/deck_map.py`          | bản đồ chương ~180 token cho prompt runtime, bằng luật                                                                                                                                              |
+| ✅ | S0 Parse          | `src/parser/`                | docling đọc chữ + toạ độ (tắt OCR) · VLM nhìn cả trang sắp chữ thành khối · VLM chép bảng từ ảnh bảng · chương từ trang mục lục · link ẩn · vá tay · cờ cho người duyệt |
+| ✅ | S5 KB             | `src/retrieval/`                     | 1 trang = 1 chunk (cắt khi > 500 token) · nhúng`text-embedding-3-small` qua API, cache theo nội dung · kho vector Chroma hoặc RAM · index BM25                                                    |
+| ✅ | Tìm kiếm        | `src/retrieval/search.py`            | hybrid vector + BM25, gộp bằng RRF (K=15, 1:1), trả**top-5 trang**                                                                                                                                |
+| ✅ | Đo chất lượng | `src/retrieval/{eval,audit,tune}.py` | bộ câu hỏi có nhãn · self-retrieval + quét chunk trùng · quét tham số RRF                                                                                                                       |
+| ✅ | S6a`deck_map`   | `src/retrieval/deck_map.py`          | bản đồ chương ~180 token cho prompt runtime, bằng luật                                                                                                                                              |
 | 🟡 | Hỏi đáp thử   | `scripts/try_ask.py`          | tìm → 1 lần gọi LLM → code kiểm nguồn, trong terminal                                                                                                                                               |
 | 🟡 | S4 kịch bản     | `src/scenario/`               | bước 4 của`run_deck.sh` (`--no-scenario` để bỏ), chỉ viết lại trang đổi                                                                                                                    |
 |    |                   |                                 |                                                                                                                                                                                                            |
@@ -43,19 +43,19 @@ data/raw/<file>.pdf
    │   + bảng (HTML) + mô tả ảnh          (raw -> logs/vlm_pipeline/)
    │ ③ đối chiếu text layer + link + chương + vá tay + cờ              CPU
    ▼
-out/parsed/<ten>/document.json      ParsedDocument — nguồn của mọi bước sau
+src/output/parser/<ten>/document.json      ParsedDocument — nguồn của mọi bước sau
    │ ④a chunk                                                        miễn phí
    ▼
-out/kb/<ten>/chunks.json
+src/output/chunker/<ten>/chunks.json
    │ ④b index: nhúng vector + nạp kho                               💰 API+  có cache
    ▼
-out/index/<ten>/vectors__<model>.npy  (+ out/index/chroma/)
+src/output/embedders/<ten>/vectors__<model>.npy  (+ src/output/vectordb/chroma/)
    │ ⑤ deck_map                                                     miễn phí
    ▼
-out/deck/<ten>/deck_map.txt
+src/output/retrieval/<ten>/deck_map.txt
    │ ⑥ S4 kịch bản: chỉ trang đổi mới gọi LLM                       💰 API (~1–2 lần/trang)
    ▼
-out/deck/<ten>/scenario.json · scenario.md
+src/output/scenario/<ten>/scenario.json · scenario.md
 ```
 
 `<ten>` = tên file bỏ dấu, viết thường: `Thời gian làm việc & Chính sách nhân sự.pdf` →
@@ -86,7 +86,7 @@ cp .env.example .env
 | `LLM_MODEL`                           | `gemini-3.5-flash-lite`     | hỏi đáp thử, kịch bản                |
 | `EMBED_MODEL`                         | `text-embedding-3-small`    | ④ nhúng vector, tìm kiếm               |
 | `VECTOR_DB`                           | `chroma` hoặc `inmem`    | kho vector (bỏ trống =`inmem`)         |
-| `CHROMA_PATH`                         | `out/index/chroma`          | chỗ Chroma ghi đĩa, tính từ gốc repo |
+| `CHROMA_PATH`                         | `src/output/vectordb/chroma`          | chỗ Chroma ghi đĩa, tính từ gốc repo |
 
 Windows: terminal PowerShell mới cần `$env:PYTHONIOENCODING = "utf-8"` (script `.sh` tự đặt).
 
@@ -111,11 +111,11 @@ python scripts/try_ask.py "data/raw/<file>.pdf"            # tên file gốc cũ
 python scripts/try_ask.py <ten> "nghỉ phép năm được mấy ngày"
 
 # 3. Chỉ tìm, xem trang nào ra và do nhánh nào kéo lên
-python src/kb/search.py out/kb/<ten>/chunks.json "làm thêm ngày lễ hệ số bao nhiêu" --explain
+python src/retrieval/search.py src/output/chunker/<ten>/chunks.json "làm thêm ngày lễ hệ số bao nhiêu" --explain
 
 # Xem nội dung đã parse / chunk của một trang
-python src/parsing/cli.py show <ten> --page 7
-python src/chunker/cli.py out/parsed/<ten>/document.json --page 7 --full
+python src/parser/show.py <ten> --page 7
+python src/chunker/cli.py src/output/parser/<ten>/document.json --page 7 --full
 ```
 
 ### Ví dụ — 2 deck đang làm, copy chạy luôn
@@ -123,7 +123,7 @@ python src/chunker/cli.py out/parsed/<ten>/document.json --page 7 --full
 Chạy ở **thư mục gốc repo**; đường dẫn file luôn kèm `data/raw/`. File gốc đã đổi tên đúng bằng
 `<ten>` (2026-10-06) nên tên file và `doc_id` trùng nhau.
 
-> ⚠️ Có `out/parsed/<ten>/docling_vlmpipeline.json` rồi thì parse KHÔNG gọi VLM (chỉ dựng lại ③);
+> ⚠️ Có `src/output/parser/<ten>/docling_vlmpipeline.json` rồi thì parse KHÔNG gọi VLM (chỉ dựng lại ③);
 > `--redo` mới gọi lại VLM cho CẢ deck (51 + 17 trang).
 >
 > Bước kịch bản (S4) chạy mặc định: Thời gian làm việc đã có kịch bản → 0 lần gọi LLM;
@@ -162,10 +162,10 @@ src/
 ├── scenario/     S4 kịch bản — ngoài giai đoạn hiện tại
 └── llm.py        gọi LLM/VLM qua API, retry, log vào logs/
 scripts/          run_deck.sh · try_ask.py · tune.sh · pptx2pdf.ps1 · extract_terms.py
-prompts/          mọi prompt (không hardcode trong .py)
+src/prompts/          mọi prompt (không hardcode trong .py)
 config/           runtime.json — tham số hỏi đáp
 data/             raw/ file gốc · eval/ câu hỏi có nhãn · patches/ vá tay · pronunciation.json
-out/              mọi thứ sinh ra: parsed/ · kb/ · index/ · deck/            (gitignore)
+src/output/              mọi thứ sinh ra: parsed/ · kb/ · index/ · deck/            (gitignore)
 docs/             tài liệu — xem dưới
 ```
 

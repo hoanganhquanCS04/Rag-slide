@@ -26,8 +26,8 @@ import re
 from abc import ABC, abstractmethod
 from typing import ClassVar
 
-from index.filters import Hit, Where
-from kb.models import ChunkSet
+from utils.filters import Hit, Where
+from models.kb_chunk import ChunkSet
 
 # Tách dính liền của code: plt.savefig(x) -> plt savefig x ; np.arange -> np arange
 _SPLIT = re.compile(r"[^0-9A-Za-zÀ-ỹ]+")

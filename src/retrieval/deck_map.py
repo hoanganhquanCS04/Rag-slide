@@ -4,7 +4,7 @@ Runtime KHÔNG nhồi cả deck vào prompt (§10). Nhưng LLM cần biết bộ
 nào để hiểu "quay lại phần đồ thị ba chiều" hay "phần bài tập". deck_map là TRẠNG THÁI
 gọn (danh sách chương + khoảng trang), không phải tri thức — tri thức vẫn phải tìm.
 
-    python src/kb/deck_map.py out/parsed/<ten>/document.json      -> out/deck/<ten>/deck_map.txt
+    python src/retrieval/deck_map.py src/output/parser/<ten>/document.json      -> src/output/retrieval/<ten>/deck_map.txt
 
 Dựng bằng LUẬT từ `sections` + `slide_type`, không gọi model:
     có chương   -> mỗi chương một dòng, kèm khoảng trang; trang ngoài chương gom "Mở đầu"
@@ -19,16 +19,16 @@ import sys
 from itertools import groupby
 from pathlib import Path
 
-if __package__ in (None, ""):
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+if __package__ in (None, ""):  # chạy thẳng file: THAY src/retrieval/ bằng src/
+    sys.path[0] = str(Path(__file__).resolve().parents[1])
 
-from chunker.tokens import count_tokens
-from parsing.enrich import enrich
-from parsing.models import ParsedDocument, ParsedPage
+from utils.config import RETRIEVAL_OUTPUT
+from utils.tokens import count_tokens
+from parser.enrich import enrich
+from models.parsed_document import ParsedDocument, ParsedPage
 
 log = logging.getLogger("deck_map")
 
-ROOT = Path(__file__).resolve().parents[2]
 LINE_CHARS = 48          # cắt dòng chữ đầu khi trang không có tiêu đề
 
 
@@ -70,7 +70,7 @@ def build(doc: ParsedDocument) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="deck_map")
-    ap.add_argument("parsed", help="out/parsed/<ten>/document.json")
+    ap.add_argument("parsed", help="src/output/parser/<ten>/document.json")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     for s in (sys.stdout, sys.stderr):
@@ -79,7 +79,7 @@ def main(argv: list[str] | None = None) -> int:
 
     doc = enrich(ParsedDocument.load(args.parsed))
     text = build(doc)
-    out = ROOT / "out" / "deck" / doc.doc_id / "deck_map.txt"
+    out = RETRIEVAL_OUTPUT / doc.doc_id / "deck_map.txt"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(text, encoding="utf-8")
     log.info("%s", text.rstrip())

@@ -1,6 +1,6 @@
 """Bước ① qua docling VlmPipeline: mỗi trang một request VLM, preset `dots_ocr`.
 
-Prompt: `prompts/s0_vlm_layout_prompt.md` (khoá `paragraph`, loại khối viết thường) — `normalize_elements`
+Prompt: `src/prompts/s0_vlm_layout_prompt.md` (khoá `paragraph`, loại khối viết thường) — `normalize_elements`
 đổi về đúng dạng dots_ocr trước khi `parse_dots_json` dựng DoclingDocument. Phản hồi thô từng trang ở
 `logs/vlm_pipeline/<doc_id>/pNNN.txt`: trang hỏng JSON thành trang rỗng, chỉ raw cho biết vì sao.
 """
@@ -39,7 +39,8 @@ from docling_core.types.doc.base import Size  # noqa: E402
 
 from parser.base import BaseParser  # noqa: E402
 from parser.vlm import load_json_array, vlm_endpoint  # noqa: E402
-from parsing.models import (  # noqa: E402
+from utils.config import PROMPTS_DIR, ROOT  # noqa: E402
+from models.parsed_document import (  # noqa: E402
     AnyBlock,
     ParsedDocument,
     ParsedImage,
@@ -55,8 +56,7 @@ from parsing.models import (  # noqa: E402
 
 log = logging.getLogger(__name__)
 
-ROOT = Path(__file__).resolve().parents[3]
-LAYOUT_PROMPT = ROOT / "prompts" / "s0_vlm_layout_prompt.md"
+LAYOUT_PROMPT = PROMPTS_DIR / "s0_vlm_layout_prompt.md"
 RAW_DIR = ROOT / "logs" / "vlm_pipeline"
 
 _NOISY = (

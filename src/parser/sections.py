@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 import re
 
-from parsing.models import ParsedDocument, SectionSpan
+from models.parsed_document import ParsedDocument, SectionSpan
 
 log = logging.getLogger(__name__)
 

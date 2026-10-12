@@ -6,21 +6,19 @@ chung ở đây. Luật chung (chi tiết ở docs/spec/kb-chunk.md):
     tiền tố   [<chương> · <tiêu đề trang> · trang N/M]   <- KHÔNG gọi LLM, thiếu phần nào bỏ phần đó
     đánh dấu  trang phân mục -> section_divider, lọc lúc tìm (KHÔNG xoá)
 
-Đầu vào chỉ là `document.json` đã `enrich()`: `blocks[].content` là chữ, `id` + `provenance` để
-truy ngược. Header/footer lặp S0 đã bỏ, ảnh không có mô tả thì `content` rỗng -> tự rơi.
+Đầu vào chỉ là `document.json` đã `enrich()`: `blocks[].content` là chữ, `id` để truy ngược. Header/footer lặp S0 đã bỏ, ảnh không có mô tả thì `content` rỗng -> tự rơi.
 """
 
 from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from collections import Counter
 from pathlib import Path
 from typing import ClassVar
 
-from chunker.tokens import TOKENIZER_ID, count_tokens
-from kb.models import ChunkSet, KBChunk
-from parsing.models import Block, ParsedDocument, ParsedPage
+from utils.tokens import TOKENIZER_ID, count_tokens
+from models.kb_chunk import ChunkSet, KBChunk
+from models.parsed_document import Block, ParsedDocument, ParsedPage
 
 log = logging.getLogger(__name__)
 
@@ -90,6 +88,5 @@ class BaseChunker(ABC):
             text_enriched=enriched,
             token_count=count_tokens(enriched),
             block_ids=[b.id for b in blocks],
-            provenance=dict(Counter(b.provenance.value for b in blocks)),
             n_images=sum(1 for b in blocks if b.kind == "image"),
         )

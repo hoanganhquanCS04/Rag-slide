@@ -1,13 +1,13 @@
 # KBChunk — cắt tài liệu thành mẩu để tìm
 
-**Vào:** `out/parsed/<doc_id>/document.json` (`ParsedDocument`) — file DUY NHẤT, không đọc
+**Vào:** `src/output/parser/<doc_id>/document.json` (`ParsedDocument`) — file DUY NHẤT, không đọc
 `docling_vlmpipeline.json` / `data/patches/` (đã gộp vào đó ở S0) · **Ra:**
-`out/kb/<doc_id>/chunks.json` · **Code:** [src/chunker/](../../src/chunker/) — `BaseChunker`
+`src/output/chunker/<doc_id>/chunks.json` · **Code:** [src/chunker/](../../src/chunker/) — `BaseChunker`
 ([base.py](../../src/chunker/base.py)) + biến thể `page` ([variants/page.py](../../src/chunker/variants/page.py))
 
 ```
-python src/chunker/cli.py out/parsed/<doc_id>/document.json   # -> out/kb/<doc_id>/chunks.json
-python src/index/cli.py out/kb/<doc_id>/chunks.json            # -> out/index/<doc_id>/vectors__<model>.*
+python src/chunker/cli.py src/output/parser/<doc_id>/document.json   # -> src/output/chunker/<doc_id>/chunks.json
+python src/retrieval/build_index.py src/output/chunker/<doc_id>/chunks.json            # -> src/output/embedders/<doc_id>/vectors__<model>.*
 ```
 
 ---
@@ -71,11 +71,11 @@ Thuế và đăng ký giảm trừ gia cảnh             ← block đầu trang
 
 Thân chunk lấy từ `page.blocks[].content` — loại nào cũng vậy:
 
-| block | `content` là gì | `provenance` |
+| block | `content` là gì | tin được không |
 |---|---|---|
-| `paragraph` | chữ từ text layer | `text_layer` — đúng 100% |
-| `table` | markdown SINH từ `cells` mỗi lần nạp | chữ ô đúng, lưới hàng/cột có thể sai |
-| `image` | mô tả của VLM | `vlm` — có thể sai. `content: null` (`why_empty`) thì tự rơi |
+| `paragraph` | chữ VLM đọc từ ảnh trang | có thể sai |
+| `table` | markdown SINH từ `cells` mỗi lần nạp | lưới hàng/cột có thể sai |
+| `image` | mô tả của VLM | dễ bịa bối cảnh hơn chữ. `content: null` (`why_empty`) thì tự rơi |
 
 **Tiền tố là phần contextual enrichment** mà §5 S5 gọi là "bước quan trọng nhất":
 `[<chương> · <tiêu đề trang> · trang N/M]`, thiếu phần nào bỏ phần đó, tiêu đề trùng tên
@@ -136,15 +136,17 @@ page_hash      "ed0af3583bd451dc"            ← copy từ ParsedPage: trang đ�
 section_id     "sec_00"
 section_title  "Đồ thị dạng đường"
 block_ids      ["p011.b00", "p011.b01"]      ← truy ngược về đúng mẩu
-provenance     {"text_layer": 1, "vlm": 1}   ← phần nào chắc đúng, phần nào model sinh
+n_images       1                             ← bao nhiêu mẩu là MÔ TẢ ẢNH -> image_ratio
 content_type   "content" | "section_divider"
 token_count    178
 vector_role    "page"                        ← "image" không còn sinh, xem §4
 ```
 
-**`provenance` đếm theo mẩu** là chỗ cố ý khác luật gốc. NT2 đòi mọi field khai nguồn,
-nhưng chunk **trộn** hai loại: tiêu đề từ text layer (đúng 100%), mô tả ảnh do VLM sinh
-(có thể bịa). Không ghi tỉ lệ thì lúc R4 trả lời không biết phần nào tin được.
+**`n_images` / `image_ratio`**: chunk **trộn** chữ trên slide với mô tả ảnh do VLM sinh (dễ bịa bối
+cảnh hơn). Không ghi tỉ lệ thì lúc R4 trả lời không biết phần nào đáng dè dặt. Trường
+`provenance` cũ (đếm `{"vlm": 3}`) đã bỏ 2026-10-12 — mọi khối đều `vlm`, nó không phân biệt gì.
+
+**Back-reference** (không ghi JSON): `chunk.chunk_set` -> cả bộ chunk chứa nó.
 
 `block_ids` cho phép truy ngược về `ParsedDocument`, nên `grounding` của NT3 chỉ được
 đúng vào ảnh `p019.b02` chứ không phải chung chung cả trang.
@@ -242,7 +244,7 @@ Vì sao: nhồi đầy cắt ngang chủ đề — Onboarding p29 bảng gói b�
 ## 9. Luật chốt
 
 ```
-vào           out/parsed/<doc_id>/document.json — file duy nhất
+vào           src/output/parser/<doc_id>/document.json — file duy nhất
 đơn vị        1 trang = 1 chunk (mô tả ảnh nằm trong đó, KHÔNG có vector ảnh phụ)
 tiền tố       [<chương> · <tiêu đề trang> · trang N/M], thiếu phần nào bỏ phần đó
 nội dung      mọi block có content, đúng thứ tự page.blocks
@@ -257,7 +259,7 @@ nhúng         text_enriched · EMBED_MODEL trong .env (text-embedding-3-small) 
 
 ## 10. Phải đo, chưa biết
 
-Hai câu chỉ có số mới trả lời được — làm xong `src/kb/` thì chạy ngay:
+Hai câu chỉ có số mới trả lời được — làm xong `src/retrieval/` thì chạy ngay:
 
 **Self-retrieval** (§5 S6a · gate §11 ≥ 90%): lấy nội dung trang `i` làm truy vấn, top-1
 phải ra đúng trang `i`. Đây là **vòng phản hồi đầu tiên** của cả dự án — nó đo xem parse

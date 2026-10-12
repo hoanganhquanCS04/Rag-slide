@@ -5,13 +5,13 @@ from __future__ import annotations
 import importlib
 import os
 
-from index.config import MODEL_ID
-from index.store.base import VectorStore
+from utils.config import MODEL_ID
+from vectordb.base import VectorStore
 
 # import lúc chọn — chạy inmem thì máy không cần có chromadb
 STORES = {
-    "inmem": "index.store.variants.inmem:InMemoryStore",
-    "chroma": "index.store.variants.chroma:ChromaStore",
+    "inmem": "vectordb.variants.inmem:InMemoryStore",
+    "chroma": "vectordb.variants.chroma:ChromaStore",
 }
 
 

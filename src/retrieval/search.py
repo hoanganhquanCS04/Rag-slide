@@ -13,7 +13,7 @@ Xem docs/spec/search.md. Bốn điểm dễ sai:
   4. **Nhánh điều hướng (R2) phải TẮT lọc trang phân mục.** Hỏi "quay lại phần đồ thị ba
      chiều" thì trang mở chương mới là đáp án đúng. Lọc là luật của R4, không phải của R2.
 
-    python src/kb/search.py out/kb/<ten>/chunks.json "cau hoi" -k 5 --explain
+    python src/retrieval/search.py src/output/chunker/<ten>/chunks.json "cau hoi" -k 5 --explain
 """
 
 from __future__ import annotations
@@ -27,16 +27,16 @@ from typing import Hashable, Literal, TypeVar
 
 import numpy as np
 
-if __package__ in (None, ""):
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+if __package__ in (None, ""):  # chạy thẳng file: THAY src/retrieval/ bằng src/
+    sys.path[0] = str(Path(__file__).resolve().parents[1])
 
-from index.config import MODEL_ID
-from index.embedder.base import Embedder
-from index.embedder.factory import create_embedder
-from index.sparse.factory import create_sparse
-from index.store.factory import create_store
-from index.vectors import vectors_file
-from kb.models import ChunkSet, KBChunk, SearchHit
+from utils.config import MODEL_ID
+from embedders.base import Embedder
+from embedders.factory import create_embedder
+from retrieval.sparse.factory import create_sparse
+from vectordb.factory import create_store
+from utils.vectors import vectors_file
+from models.kb_chunk import ChunkSet, KBChunk, SearchHit
 
 log = logging.getLogger(__name__)
 
@@ -189,7 +189,7 @@ def _group_by_page(hits: list[SearchHit]) -> list[SearchHit]:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="search")
-    ap.add_argument("chunks", help="out/kb/<ten>/chunks.json")
+    ap.add_argument("chunks", help="src/output/chunker/<ten>/chunks.json")
     ap.add_argument("query", nargs="+", help="cau hoi")
     ap.add_argument("-k", type=int, default=TOP_K)
     ap.add_argument("--vectors", default=None)

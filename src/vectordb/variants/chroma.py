@@ -19,12 +19,11 @@ from typing import Any
 
 import numpy as np
 
-from index.config import ROOT
-from index.filters import Hit, Where
-from index.store.base import VectorStore, chunk_metadata
-from kb.models import KBChunk
+from utils.config import ROOT, VECTORDB_OUTPUT
+from utils.filters import Hit, Where
+from vectordb.base import VectorStore, chunk_metadata
+from models.kb_chunk import KBChunk
 
-DEFAULT_PATH = "out/index/chroma"     # tính từ gốc repo, như CHROMA_PATH trong .env
 
 
 def _where(where: Where | None) -> dict[str, Any] | None:
@@ -44,7 +43,8 @@ class ChromaStore(VectorStore):
         import chromadb
         from chromadb.config import Settings
 
-        self.path = Path(path) if path else ROOT / (os.environ.get("CHROMA_PATH") or DEFAULT_PATH)
+        env = os.environ.get("CHROMA_PATH")            # tính từ gốc repo
+        self.path = Path(path) if path else (ROOT / env if env else VECTORDB_OUTPUT / "chroma")
         self._client = chromadb.PersistentClient(
             path=str(self.path), settings=Settings(anonymized_telemetry=False))
         self._col = self._client.get_or_create_collection(

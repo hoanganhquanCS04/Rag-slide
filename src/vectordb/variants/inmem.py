@@ -10,9 +10,9 @@ from typing import Any
 
 import numpy as np
 
-from index.filters import Hit, Where, matches
-from index.store.base import VectorStore, chunk_metadata
-from kb.models import KBChunk
+from utils.filters import Hit, Where, matches
+from vectordb.base import VectorStore, chunk_metadata
+from models.kb_chunk import KBChunk
 
 
 class InMemoryStore(VectorStore):

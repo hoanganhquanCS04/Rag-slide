@@ -4,13 +4,17 @@ Xem [docs/spec/kb-chunk.md](../../docs/spec/kb-chunk.md) cho lý do từng quy�
 
 Tóm tắt: 1 trang = 1 chunk (dài thì cắt `.1`, `.2`…), mọi chunk trỏ về `page_no` vì R2
 điều hướng theo TRANG. Cắt ở `src/chunker/`.
+
+Back-reference (KHÔNG ghi JSON, gán lại mỗi lần nạp): `chunk.chunk_set`.
 """
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr, model_validator
+
+from models.backref import BackRef
 
 
 class KBChunk(BaseModel):
@@ -29,8 +33,14 @@ class KBChunk(BaseModel):
     token_count: int = 0
 
     block_ids: list[str] = Field(default_factory=list)   # truy ngược ParsedDocument
-    provenance: dict[str, int] = Field(default_factory=dict)  # {"vlm": 3, "manual": 1}
     n_images: int = 0             # bao nhiêu khối trong block_ids là MÔ TẢ ẢNH
+
+    _chunk_set_ref: BackRef = PrivateAttr(default_factory=BackRef)
+
+    @property
+    def chunk_set(self) -> ChunkSet | None:
+        """Cả bộ chunk chứa chunk này — vd `chunk.chunk_set.searchable`."""
+        return self._chunk_set_ref.target
 
     @property
     def is_searchable(self) -> bool:
@@ -45,8 +55,7 @@ class KBChunk(BaseModel):
     @property
     def image_ratio(self) -> float:
         """Bao nhiêu phần nội dung là MÔ TẢ ẢNH do VLM viết — dễ sai số / bịa bối cảnh hơn chữ
-        VLM chép từ slide. Không tính theo `provenance`: từ khi bỏ text layer (2026-10-08) mọi
-        khối chữ cũng là `vlm`."""
+        VLM chép từ slide."""
         return self.n_images / len(self.block_ids) if self.block_ids else 0.0
 
 
@@ -57,6 +66,19 @@ class ChunkSet(BaseModel):
     max_tokens: int = 500
     tokenizer: str = ""           # tokenizer dùng để đếm, ghi lại cho khỏi lẫn
     chunks: list[KBChunk] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _link(self) -> ChunkSet:
+        return self.link()
+
+    def link(self) -> ChunkSet:
+        """Gán `chunk.chunk_set` cho mọi chunk."""
+        for c in self.chunks:
+            c._chunk_set_ref = BackRef(self)
+        return self
+
+    def __deepcopy__(self, memo: dict[int, Any] | None = None) -> ChunkSet:
+        return super().__deepcopy__(memo).link()
 
     @property
     def searchable(self) -> list[KBChunk]:

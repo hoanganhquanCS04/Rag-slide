@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from kb.models import KBChunk
+from models.kb_chunk import KBChunk
 
 # Lọc metadata: {"doc_id": "x", "page_no": [3, 4]}  =  doc_id == "x"  VÀ  page_no ∈ {3, 4}
 Where = dict[str, Any]

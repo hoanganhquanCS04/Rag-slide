@@ -9,11 +9,11 @@ import logging
 from collections import Counter
 from pathlib import Path
 
-from parsing.flags import apply_flags
-from parsing.links import attach_links
-from parsing.models import ParsedDocument
-from parsing.patch import apply_patch, find_patch, load_patch
-from parsing.sections import apply_sections
+from parser.flags import apply_flags
+from parser.links import attach_links
+from models.parsed_document import ParsedDocument
+from parser.patch import apply_patch, find_patch, load_patch
+from parser.sections import apply_sections
 
 log = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ def enrich(doc: ParsedDocument) -> ParsedDocument:
     if dropped := drop_empty_blocks(doc):
         log.info("  bo %d block rong khong co co: %s", sum(dropped.values()), dict(dropped))
         apply_flags(doc)
-    return doc
+    return doc.link()                     # vá tay vừa thêm block -> gán lại block.page
 
 
 def drop_empty_blocks(doc: ParsedDocument) -> Counter[str]:

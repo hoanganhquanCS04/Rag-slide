@@ -1,10 +1,10 @@
 """S4 — sinh kịch bản robot nói cho từng trang (§9: chạy riêng được qua CLI).
 
-    python src/scenario/cli.py out/parsed/<doc_id>/document.json                  # cả deck
-    python src/scenario/cli.py out/parsed/<doc_id>/document.json --page 9,11,20   # vài trang
-    python src/scenario/cli.py out/parsed/<doc_id>/document.json --dry-run --page 11
-    python src/scenario/cli.py out/parsed/<doc_id>/document.json --show           # xem, không gọi API
-    python src/scenario/cli.py out/parsed/<doc_id>/document.json --md             # chỉ ghi lại .md
+    python src/scenario/cli.py src/output/parser/<doc_id>/document.json                  # cả deck
+    python src/scenario/cli.py src/output/parser/<doc_id>/document.json --page 9 11 20   # vài trang
+    python src/scenario/cli.py src/output/parser/<doc_id>/document.json --dry-run --page 11
+    python src/scenario/cli.py src/output/parser/<doc_id>/document.json --show           # xem, không gọi API
+    python src/scenario/cli.py src/output/parser/<doc_id>/document.json --md             # chỉ ghi lại .md
 
 Mỗi lần lưu scenario.json là ghi luôn scenario.md (bản đọc cả deck) bên cạnh.
 
@@ -29,13 +29,13 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from llm import DEFAULT_MODEL, ROOT
-from parser.cli import parse_pages
-from parsing.enrich import enrich
-from parsing.models import ParsedDocument
+from utils.config import ROOT, SCENARIO_OUTPUT
+from utils.llm import DEFAULT_MODEL
+from parser.enrich import enrich
+from models.parsed_document import ParsedDocument
 from scenario.generate import load_prompt, render_prompt, run_deck
-from scenario.models import Scenario, SlideScript
-from scenario.syllables import STORE, Pronunciation
+from models.scenario import Scenario, SlideScript
+from utils.syllables import STORE, Pronunciation
 
 log = logging.getLogger("scenario")
 
@@ -66,7 +66,6 @@ def to_markdown(sc: Scenario, doc: ParsedDocument, pages: set[int] | None) -> st
         out += [f"## Trang {ss.page_no} · {title}", "",
                 f"`{ss.slide_type}` · {len(ss.sentences)} câu · {ss.syllables} âm tiết · "
                 f"~{ss.seconds:.0f}s · pass {ss.passes}"
-                + (" · ✍️ người sửa" if ss.edited_by == "nguoi" else "")
                 + (f" · 🚩 **{', '.join(ss.flags)}**" if ss.flags else ""), ""]
         for s in ss.sentences:
             if s.kind == "delivery":
@@ -105,10 +104,10 @@ def report(sc: Scenario) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="scenario")
-    ap.add_argument("parsed", help="out/parsed/<doc_id>/document.json")
+    ap.add_argument("parsed", help="src/output/parser/<doc_id>/document.json")
     ap.add_argument("--pron", default=str(STORE), help="kho phát âm chung, mặc định data/pronunciation.json")
-    ap.add_argument("-o", "--out", default=None, help="mặc định out/deck/<doc_id>/scenario.json")
-    ap.add_argument("--page", default=None, help="'11' | '9,11,20' | '9-15'")
+    ap.add_argument("-o", "--out", default=None, help="mặc định src/output/scenario/<doc_id>/scenario.json")
+    ap.add_argument("--page", nargs="+", type=int, default=None, help="11 | 9 11 20 | {9..15}")
     ap.add_argument("--model", default=DEFAULT_MODEL)
     ap.add_argument("--workers", type=int, default=5)
     ap.add_argument("--force", action="store_true", help="bỏ qua incremental, viết lại")
@@ -126,10 +125,9 @@ def main(argv: list[str] | None = None) -> int:
             s.reconfigure(encoding="utf-8", errors="replace")
 
     doc = enrich(ParsedDocument.load(args.parsed))
-    deck_dir = ROOT / "out" / "deck" / doc.doc_id
-    out = Path(args.out) if args.out else deck_dir / "scenario.json"
+    out = Path(args.out) if args.out else SCENARIO_OUTPUT / doc.doc_id / "scenario.json"
     pron = Pronunciation.load(args.pron)
-    pages = set(parse_pages(args.page)) if args.page else None
+    pages = set(args.page) if args.page else None
 
     old: Scenario | None = None
     if out.exists():

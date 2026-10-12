@@ -26,7 +26,8 @@ và có nguồn truy nguyên được.
    phải đẩy vào offline. Runtime budget: < 2.5s tới byte audio đầu tiên.
 2. **Dữ liệu chính xác KHÔNG BAO GIỜ để model sinh lại.** Title, chart series, ô bảng
    đã có bản đúng 100% từ parsing pptx. Đưa cho LLM là tự tạo cơ hội bịa lại cái đang đúng.
-   Mọi field phải khai `provenance`: `deterministic` hay `vlm`.
+   Nguồn gốc ghi theo LOẠI khối và id (ảnh = `ParsedImage`, vá tay = id `pNNN.mNN`), không còn
+   trường `provenance` riêng (bỏ 2026-10-12 — v0 mọi chữ đều do VLM đọc, trường đó không phân biệt gì).
 3. **Ảo giác offline nguy hiểm gấp nhiều lần online.** Bịa runtime sai một lần;
    bịa trong `Scenario` thì robot nói sai ở MỌI buổi thuyết trình.
    → Mọi câu **nội dung** phải có `grounding`; `null` = flag đỏ bắt người duyệt.
@@ -64,8 +65,8 @@ Ba hệ quả bắt buộc phải chấp nhận, không được lờ đi:
 1. **Mất bản đúng 100% của `chart_data`, `tables`, `build_steps`.** Chúng đến từ XML
    của pptx; PDF không có. NT2 vẫn giữ nguyên nhưng phạm vi co lại về **0**: S0 không đọc
    text layer PDF (bỏ 2026-10-08 — text layer Onboarding thiếu dấu cách, đem thay chữ VLM làm
-   dính 126 từ), nên MỌI chữ là `vlm`; chỉ vá tay `manual` là chắc đúng. Phân biệt "chữ trên
-   slide" với "mô tả ảnh" bằng LOẠI khối (`ParsedImage`), KHÔNG bằng `provenance`.
+   dính 126 từ), nên MỌI chữ do VLM đọc; chỉ khối vá tay (id `pNNN.mNN`) là chắc đúng. Phân biệt
+   "chữ trên slide" với "mô tả ảnh" bằng LOẠI khối (`ParsedImage`).
 2. **S3 Alignment suy biến.** Align slide với nguồn mà nguồn chính là slide → mỗi
    slide map vào chính nó, không sinh thêm tri thức nào. Chưa có tài liệu nguồn
    riêng thì **S3 chạy cũng vô nghĩa**.
@@ -81,10 +82,10 @@ mức "mô tả slide".
 **Đã làm được đến đâu:**
 
 ```
-✅ S0   PDF → ParsedDocument      src/parsing/     2 deck: Onboarding 51 trang, Thời gian làm việc 17 — chương từ mục lục
+✅ S0   PDF → ParsedDocument      src/parser/      2 deck: Onboarding 51 trang, Thời gian làm việc 17 — chương từ mục lục
 ✅ S5   chunk                     src/chunker/     89 + 18 chunk, 1 trang = 1 chunk (không vector ảnh phụ) — khuôn như src/parser/
-✅ S5   vector                    src/index/       embedder · store · sparse — khuôn như src/parser/
-✅ S5   tìm                       src/kb/          hybrid dense+BM25 gộp RRF, cố định top-5
+✅ S5   vector                    src/embedders/ · src/vectordb/ — khuôn như src/parser/
+✅ S5   tìm                       src/retrieval/   hybrid dense+BM25 gộp RRF, cố định top-5
 🚫 S1   BỎ — gộp vào S0                            xem §5
 🚫 S3   BỎ ở v0 — align vào chính mình thì vô nghĩa
 ✅ S2a  slide_type               luật, ParsedPage.slide_type — divider · exercise · content
@@ -152,7 +153,7 @@ S0 → S5 (chunk+embed) ─┬─► S6a deck_map + audit ───────�
 
 ## 5. Luật riêng từng stage (agent hay làm sai chỗ này)
 
-### S0 — v0: PDF qua docling (`src/parsing/`)
+### S0 — v0: PDF qua docling (`src/parser/`)
 
 Xem [docs/spec/parsed-document.md](docs/spec/parsed-document.md) cho schema đầy đủ.
 
@@ -161,7 +162,7 @@ Xem [docs/spec/parsed-document.md](docs/spec/parsed-document.md) cho schema đ�
   4 góc. **Ngoại lệ `.pptx`**: docling gắn nhãn `BOTTOMLEFT` nhưng số đo từ ĐỈNH — không lật
 - **Bỏ header/footer/số trang lặp** (nhãn `page_header`/`page_footer` của docling) — không phải
   nội dung, không lưu. Chương lấy từ **trang mục lục** (`sections.py`), không từ thanh header
-- **Một đường duy nhất: docling VlmPipeline** (`src/parser/variants/docling.py`, `prompts/s0_vlm_layout_prompt.md`),
+- **Một đường duy nhất: docling VlmPipeline** (`src/parser/variants/docling.py`, `src/prompts/s0_vlm_layout_prompt.md`),
   VLM **qua API**, mỗi **TRANG** một request: nhìn ảnh CẢ trang, trả bố cục + chữ + bảng (HTML →
   `cells`). Mọi chữ là `vlm`. Xét ảnh (`TRANG_TRI` / sơ đồ / ảnh có chữ) là bước ② riêng
   (`pictures.py`), chép lại bảng là ②b (`tables.py`) — `BaseParser.post_processing`
@@ -182,7 +183,7 @@ Xem [docs/spec/parsed-document.md](docs/spec/parsed-document.md) cho schema đ�
 - KHÔNG đọc text layer PDF, KHÔNG OCR (OCR chậm 8.4×, phá dấu tiếng Việt). PDF chỉ dùng để vẽ ảnh
   trang và đọc link ẩn (annotation — URL không có trong ảnh; nhãn link lấy từ chữ VLM)
 - `page_hash` = SHA(nội dung + polygon từng block), cho incremental build
-- Mỗi block có `content` · `polygon` · `provenance` (`vlm` là mặc định, KHÔNG ghi ra JSON — chỉ `manual` mới ghi). MỘT file, vừa để người đọc vừa để
+- Mỗi block có `content` · `polygon`. MỘT file, vừa để người đọc vừa để
   pipeline chạy — trường rỗng không ghi, không lưu thứ suy ra được
 
 **Mấy luật dưới đây chỉ áp dụng khi quay lại `.pptx`** (đích, chưa làm):
@@ -218,7 +219,7 @@ section_divider  đúng 1 tiêu đề, tâm giữa trang                       �
                  (cy >= 0.30, cx trong [0.35, 0.65])
 exercise         tiêu đề mở đầu bằng "Bài tập"                       ✅ ĐÃ CÓ
 content          còn lại                                              ✅ ĐÃ CÓ
-                 -> ParsedPage.slide_type (src/parsing/models.py)
+                 -> ParsedPage.slide_type (src/models/parsed_document.py)
 ```
 
 **Luật nằm ở MỘT chỗ: `ParsedPage.slide_type`** (property — tính lại mỗi lần nạp, KHÔNG ghi
@@ -315,14 +316,14 @@ Spec đầy đủ: [docs/spec/scenario.md](docs/spec/scenario.md).
 
 ### S6a — dùng lại index của S5, không dựng index riêng
 
-- **Một vector cho mỗi chunk**, đã có ở `src/index/` (`python src/index/cli.py`). Multi-field **BỎ**: nó cần
+- **Một vector cho mỗi chunk**, đã có ở `src/retrieval/build_index.py`. Multi-field **BỎ**: nó cần
   `message` / `desc` / `relations` tách riêng, mà §5 S1 đã bỏ hết.
 - Tìm là **hybrid dense + BM25, gộp bằng RRF** — xem
   [docs/spec/search.md](docs/spec/search.md). Đo được: hybrid hơn từng nhánh riêng.
-- **Self-retrieval check** (`src/kb/audit.py`): lấy nội dung trang `i` làm truy vấn →
+- **Self-retrieval check** (`src/retrieval/audit.py`): lấy nội dung trang `i` làm truy vấn →
   top-1 phải ra trang `i`. **Cảnh báo: bài này hiện gần như luôn 100%** vì câu hỏi lấy
   từ chính văn bản — đề bài là đáp án. Nó chỉ chứng minh **không có hai chunk trùng nhau**.
-  Thứ đo thật là bộ câu hỏi người viết ở `data/eval/queries.json` (`src/kb/eval.py`).
+  Thứ đo thật là bộ câu hỏi người viết ở `data/eval/<doc_id>.queries.json` (`src/retrieval/eval.py`).
 - Sinh `deck_map.txt` (~150 token: danh sách section) cho prompt runtime
 - Tên file vector phải nhúng `model_id` — đổi embedding model mà không sinh lại thì
   runtime truy vấn index cũ bằng vector mới và trả rác **mà không báo lỗi**
@@ -383,7 +384,7 @@ input → regex fast-path ──(khớp)──→ goto_slide()          [~5ms]
   Prompt mục tiêu **~1.3k token**, không phải 3.6k.
 - **R2 = retrieve → LLM chọn.** KHÔNG có reranker.
 
-  - hybrid dense + BM25 gộp bằng RRF (`src/kb/search.py`) → **top-k = 5, CỐ ĐỊNH** →
+  - hybrid dense + BM25 gộp bằng RRF (`src/retrieval/search.py`) → **top-k = 5, CỐ ĐỊNH** →
     **cả top-5** vào prompt → LLM chỉ VERIFY và CHỌN trong 5, kèm lý do (không reranker
     lọc xuống 3 nữa: top-3 trượt 7/200 câu Onboarding mà top-5 có)
   - **Nhánh điều hướng phải TẮT lọc trang phân mục**: hỏi "quay lại phần đồ thị ba chiều"
@@ -443,61 +444,99 @@ input → regex fast-path ──(khớp)──→ goto_slide()          [~5ms]
 ### 7.0 HIỆN TRẠNG v0 — file JSON trên đĩa + kho vector (inmem | chroma) ★
 
 Chưa có tầng shared/per-deck. Nguồn là file JSON + `.npy` để mở ra xem; kho vector chỉ là
-BẢN SAO để tìm, xoá đi thì tự dựng lại từ `.npy`, không tốn API:
+BẢN SAO để tìm, xoá đi thì tự dựng lại từ `.npy`, không tốn API.
+
+**Code** — `src/`, mỗi stage một thư mục, schema dùng chung tách riêng:
+
+```
+src/models/      schema Pydantic dùng chung — parsed_document.py (S0) · kb_chunk.py (S5) ·
+                 scenario.py (S4) · backref.py (con trỏ ngược, xem dưới)
+src/utils/       dùng chung, không thuộc stage nào — config.py (gốc repo, .env, MODEL_ID,
+                 PROMPTS_DIR, OUTPUT_DIR) · llm.py · vectors.py · filters.py · tokens.py · syllables.py
+src/parser/      S0 — cli.py · factory.py · base.py · variants/docling.py · vlm.py ·
+                 enrich.py (link ẩn → chương → vá tay → cờ) · links · sections · flags · patch ·
+                 pictures (②) · tables (②b) · show.py (xem document.json)
+src/chunker/     S5 chunk — cli.py · factory.py · base.py · variants/page.py
+src/embedders/   S5 nhúng — base.py · cache.py · factory.py · variants/openai.py
+src/vectordb/    S5 kho vector (CHỈ dense) — base.py · factory.py · variants/{inmem,chroma}.py
+src/retrieval/   tìm — sparse/ (BM25) · search.py (hybrid RRF) · build_index.py (nhúng + nạp kho) ·
+                 deck_map.py (S6a) · audit.py · eval.py · tune.py
+src/scenario/    S4 — cli.py · generate.py · validate.py
+src/runtime/     R1–R7 (bản chữ chạy thử)
+src/prompts/     MỌI prompt (*.md)
+src/output/      MỌI artifact pipeline sinh ra (gitignore)
+```
+
+Khuôn mỗi stage có biến thể: `base.py` (ABC + phần dùng chung) + `variants/` + `factory.py` (dict
+`"module:Class"`, import lười). **Các thư mục stage KHÔNG import nhau qua lại tuỳ tiện** — phần
+chung ở `src/utils/`, schema ở `src/models/`. Cache embedding là lớp bọc `embedders/cache.py`.
+Đường dẫn gốc / prompt / output CHỈ lấy từ `utils.config` — không tự tính `Path(__file__).parents[...]`.
+
+**Back-reference** (`models/backref.py`): đứng ở object con chấm ra được object cha —
+`block.page` · `block.page_no` · `block.section` · `page.document` · `page.section` ·
+`chunk.chunk_set` · `sentence.slide` · `sentence.page_no`. Giữ trong `PrivateAttr` (KHÔNG ghi
+JSON), gán bằng `link()` của object cha mỗi lần nạp. Sửa cây (thêm / thay block) thì gọi lại
+`doc.link()` — `enrich()` và `BaseParser.run()` đã gọi sẵn. `BackRef` luôn `==` nhau: pydantic so
+cả attribute ẩn, không thế thì so hai cây khác nhau là đệ quy vô hạn.
+
+**Dữ liệu:**
 
 ```
 data/raw/<file>.pdf                       file gốc — VỪA là deck VỪA là KB (.pptx cần .pdf cùng tên)
 data/patches/<doc_id>.json                nội dung gõ tay cho trang parser vẫn sai
-data/eval/queries.json                    câu hỏi có nhãn để đo retrieval
+data/eval/<doc_id>.queries.json           câu hỏi có nhãn để đo retrieval
 data/pronunciation.json                   KHO PHÁT ÂM CHUNG mọi deck — máy đề xuất từ kịch bản, người chốt
 .env  VLM_MODEL · LLM_MODEL · EMBED_MODEL  tên model dùng — sửa ở đây, KHÔNG sửa trong code
-.env  EMBEDDER · VECTOR_DB=inmem|chroma · CHROMA_PATH · SPARSE_INDEX   chọn biến thể trong src/index/ — không sửa code
+.env  VLM_BASE_URL · LLM_BASE_URL       cổng riêng (vLLM local) cho VLM / LLM chữ — bỏ trống = OPENAI_BASE_URL
+.env  EMBEDDER · VECTOR_DB=inmem|chroma · CHROMA_PATH · SPARSE_INDEX   chọn biến thể — không sửa code
 
-out/parsed/<doc_id>/                      S0 — MỘT lệnh: python src/parser/cli.py <file>  (① + ②b + ②) · xem: parsing/cli.py show
-├── docling_vlmpipeline.json              ① DoclingDocument VlmPipeline (cache — có rồi thì không gọi VLM)
-├── tables.json · pictures.json           ②b chép bảng · ② xét ảnh (cache theo bảng / trang)
-└── document.json                         ParsedDocument — link / chương / vá tay / cờ KHÔNG có trong file:
-                                          KB, S4, runtime gọi `parsing.enrich.enrich()` lúc nạp
 logs/vlm_pipeline/<doc_id>/pNNN.txt       phản hồi thô của VLM từng trang (xem vì sao trang hỏng)
-
-out/kb/<doc_id>/                          S5 chunk — MỖI BÀI MỘT THƯ MỤC (như out/parsed/)
-├── chunks.json                           KBChunk[]     (src/chunker/cli.py)
-└── audit/{self_retrieval,eval}.json      kết quả đo
-
-out/index/<doc_id>/                       S5 index — python src/index/cli.py out/kb/<doc_id>/chunks.json
-├── vectors__<model_id>.npy               ma trận vector — tên model PHẢI nằm trong tên file
-└── vectors__<model_id>.json              rows[i] = chunk_id, keys[i] = hash chữ của hàng i
-                                          (keys lệch chunks.json -> báo nhúng lại, không nạp vector cũ)
-out/index/.embed_cache/<model>/<sha1>.npy DÙNG CHUNG — cache theo hash nội dung
-out/index/chroma/                         DÙNG CHUNG — kho Chroma: MỘT collection kb__<model_id>
-                                          cho mọi bài, tách bằng metadata doc_id (VECTOR_DB=chroma)
 ```
 
-**Kịch bản** (S4, `src/scenario/`) — `precomputed/` chưa có vì S6b TTS chưa code:
+**Output** — `src/output/` (gitignore). Mỗi thư mục con TRÙNG TÊN thư mục code trong `src/` sinh ra
+nó, đường dẫn lấy từ `utils.config` (`PARSER_OUTPUT`, `CHUNKER_OUTPUT`, …):
 
 ```
-out/deck/<doc_id>/
-├── scenario.json          kịch bản CẢ deck, mỗi entry kèm page_hash cho incremental
-└── precomputed/<hash câu>.wav    TTS cache, key = hash TỪNG CÂU
-                           (bảng phát âm KHÔNG ở đây — một kho chung data/pronunciation.json)
+src/output/
+├── parser/<doc_id>/              S0 — python src/parser/cli.py <file>  (① + ②b + ②)
+│   ├── docling_vlmpipeline.json  ① DoclingDocument VlmPipeline (cache — có rồi thì không gọi VLM)
+│   ├── tables.json · pictures.json   ②b chép bảng · ② xét ảnh (cache theo bảng / trang)
+│   ├── document.json             ParsedDocument — link / chương / vá tay / cờ KHÔNG có trong file:
+│   │                             KB, S4, runtime gọi `parser.enrich.enrich()` lúc nạp
+│   │                             xem: python src/parser/show.py <doc_id> [--page 7]
+│   └── boxes/                    ảnh khung từng trang (scripts/try_docling_gemma.py), chỉ để soi
+├── chunker/<doc_id>/chunks.json  S5 — KBChunk[]  (src/chunker/cli.py)
+├── embedders/
+│   ├── <doc_id>/vectors__<model_id>.npy    ma trận vector — tên model PHẢI nằm trong tên file
+│   ├── <doc_id>/vectors__<model_id>.json   rows[i] = chunk_id, keys[i] = hash chữ của hàng i
+│   │                             (keys lệch chunks.json -> báo nhúng lại, không nạp vector cũ)
+│   └── cache/<model>/<sha1>.npy  DÙNG CHUNG mọi deck — cache theo hash nội dung
+│                                 (cả thư mục do python src/retrieval/build_index.py <chunks.json> ghi)
+├── vectordb/chroma/              DÙNG CHUNG — kho Chroma: MỘT collection kb__<model_id> cho mọi bài,
+│                                 tách bằng metadata doc_id (chỉ khi VECTOR_DB=chroma)
+├── retrieval/<doc_id>/           S6a + đo tìm kiếm
+│   ├── deck_map.txt              python src/retrieval/deck_map.py <document.json>
+│   └── eval.json · eval_miss.* · chunks_tune.* · chunks_misses.json · self_retrieval.json
+└── scenario/<doc_id>/            S4 — python src/scenario/cli.py <document.json>
+    ├── scenario.json             kịch bản CẢ deck, mỗi entry kèm page_hash cho incremental
+    └── scenario.md               bản đọc cho người, ghi cùng lúc với .json
 ```
+
+TTS cache (S6b, chưa code) sẽ có thư mục riêng theo tên thư mục code của nó, key = hash TỪNG CÂU.
+Bảng phát âm KHÔNG ở output — một kho chung `data/pronunciation.json`.
 
 **Kịch bản KHÔNG để chung với `ParsedDocument`** (parse lại là mất, đúng bẫy đã dính với
 trang 15) **và KHÔNG để chung với `KBChunk`** (sửa một câu thoại không được làm bẩn index).
+Không còn cờ "người đã sửa tay" (`edited_by` bỏ 2026-10-12): sửa tay `scenario.json` chỉ sống tới
+lần trang / prompt / model đổi hoặc chạy `--force`. S7 phải có cơ chế riêng.
 
 Kho vector KHÔNG mua tốc độ: 52 vector, quét vét cạn hết **0.01ms**; ngay cả 100.000 vector
 cũng chỉ 25ms, trong khi gọi API nhúng câu hỏi đã mất ~700ms. Chroma mua về **lưu đĩa +
 metadata filter + nhiều tài liệu chung một chỗ**. Kho chỉ làm nhánh dense — BM25 ở
-`src/index/sparse/` (cùng hình với `store/`, chọn bằng `SPARSE_INDEX`), RRF ở `kb/search.py`.
-`Searcher` khởi tạo gọi `sync` cả hai: lệch `chunks.json` thì nạp lại từ `.npy` / dựng lại BM25.
-Khung inmem/chroma/factory lấy từ `minhbtrc/chatbot-template` (MIT) — chỗ khác bản gốc ghi ở
-`src/index/store/base.py`. Sơ đồ §7.1 là đích, chưa áp dụng.
-
-`src/index/` theo khuôn `src/parser/`: ba thư mục con `embedder/` · `store/` · `sparse/`, mỗi cái
-`base.py` (ABC + phần dùng chung) + `variants/` + `factory.py` (dict `"module:Class"`, import
-lười). **Ba thư mục con KHÔNG import nhau** — phần chung ở `config.py` (.env, `MODEL_ID`),
-`vectors.py` (file .npy/.json, `text_key`), `filters.py` (`Where`, `Hit`). Cache là lớp bọc
-`embedder/cache.py`, không nằm trong embedder.
+`src/retrieval/sparse/` (cùng hình với `vectordb/`, chọn bằng `SPARSE_INDEX`), RRF ở
+`retrieval/search.py`. `Searcher` khởi tạo gọi `sync` cả hai: lệch `chunks.json` thì nạp lại từ
+`.npy` / dựng lại BM25. Khung inmem/chroma/factory lấy từ `minhbtrc/chatbot-template` (MIT) — chỗ
+khác bản gốc ghi ở `src/vectordb/base.py`. Sơ đồ §7.1 là đích, chưa áp dụng.
 
 ### 7.1 Đích (nhiều deck)
 
@@ -553,7 +592,7 @@ synth lại câu chứa từ đó; lệch timing > 15% thì chạy lại pass 2 
 - Mỗi stage là một module độc lập, nhận/trả Pydantic model, **có thể chạy riêng qua CLI**
 - Artifact ghi ra JSON, đọc lại được — pipeline phải resume được từ bất kỳ stage nào
 - Gọi LLM/VLM: retry với exponential backoff, log full prompt + response vào `logs/`
-- Mọi prompt nằm trong `prompts/*.md`, KHÔNG hardcode trong file .py
+- Mọi prompt nằm trong `src/prompts/*.md`, KHÔNG hardcode trong file .py
 - Async cho mọi I/O; S1 và S4 phải song song hoá được (mặc định 5 luồng)
 - Không `print()`, dùng `logging` hoặc `rich`
 
@@ -568,7 +607,7 @@ synth lại câu chứa từ đó; lệch timing > 15% thì chạy lại pass 2 
 | Parse PDF nguồn | `PyMuPDF`, `unstructured` hoặc `docling` cho cây heading                                                                                       |
 | Embedding        | **v0: `text-embedding-3-small` qua API** (dense-only, 1536 chiều) · đích: `bge-m3` (dense + sparse 1 forward)                            |
 | Rerank           | **KHÔNG dùng** (chốt 2026-10-01) — `bge-reranker-v2-m3` local đã loại (2.2 GB), không chờ quyền `/rerank` trên API key — xem §6 |
-| Vector DB        | **v0: `chromadb` hoặc RAM** — chọn bằng `VECTOR_DB` (`src/index/store/`). Tắt embedding có sẵn, cosine, tắt telemetry                 |
+| Vector DB        | **v0: `chromadb` hoặc RAM** — chọn bằng `VECTOR_DB` (`src/vectordb/`). Tắt embedding có sẵn, cosine, tắt telemetry                 |
 | Schema           | Pydantic v2                                                                                                                                            |
 
 **Cảnh báo:** LibreOffice render pptx không khớp 100% với PowerPoint (font thay thế,
@@ -579,7 +618,7 @@ SmartArt đôi khi vỡ). Phải cài font Việt vào container.
 ## 10. CẤM
 
 - ❌ Để LLM sinh lại `title`, `chart_data`, `tables` — đã có bản đúng từ S0
-  (v0: không còn nguồn deterministic nào — chữ, bảng, số đều do VLM đọc, khai `provenance: vlm`)
+  (v0: không còn nguồn deterministic nào — chữ, bảng, số đều do VLM đọc)
 - ❌ Coi mô tả ảnh do VLM sinh là dữ liệu chắc đúng — nó là `vlm`, đo được là có sai
   (chép `0x1675e5550` thành `0x1675e550`). **Nhưng S4 VẪN ĐƯỢC NÓI số từ block `vlm`**
   (người dùng chốt 2026-09-30, chấp nhận rủi ro sai: bảng hệ số làm thêm giờ là ảnh, cấm
@@ -630,7 +669,7 @@ SmartArt đôi khi vỡ). Phải cài font Việt vào container.
 ⚠️ **Self-retrieval hiện gần như luôn 100% và KHÔNG nói lên gì.** Câu hỏi lấy từ chính
 văn bản của chunk — đề bài là đáp án. Nó chỉ chứng minh **không có hai chunk trùng nhau**.
 Số đo thật phải lấy từ bộ câu hỏi có nhãn ở `data/eval/<doc_id>.queries.json`
-(`src/kb/eval.py`) — đo 2026-10-02, top-1: Onboarding 200 câu hybrid 157 · dense 131 ·
+(`src/retrieval/eval.py`) — đo 2026-10-02, top-1: Onboarding 200 câu hybrid 157 · dense 131 ·
 sparse 145; Thời gian làm việc 30 câu 28 · 29 · 29. Câu hiện đều do AI viết → số thiên vị,
 vẫn cần bộ câu **người viết**.
 Xem [docs/spec/search.md §10](docs/spec/search.md).

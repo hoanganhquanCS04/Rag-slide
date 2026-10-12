@@ -8,7 +8,7 @@ Xem docs/spec/embedding.md. Bốn điểm dễ sai:
   1. Embed `text_enriched`, KHÔNG phải `text_raw` (§10 cấm).
   2. Nhúng CẢ bộ chunk, kể cả trang phân mục. Lọc là việc của lúc TRUY VẤN.
      Lọc sớm thì audit không đo được hiện tượng trang phân mục cướp kết quả.
-  3. `model_id` nằm trong TÊN FILE (`index/vectors.py`). Đổi model mà không sinh lại thì truy
+  3. `model_id` nằm trong TÊN FILE (`utils/vectors.py`). Đổi model mà không sinh lại thì truy
      vấn index cũ bằng vector mới -> trả rác mà không báo lỗi (§5 S6a).
   4. API KHÔNG trả sparse vector. Nhánh sparse là BM25 dựng riêng ở `index/sparse/`, gộp với
      dense ở `search.py` — KHÔNG có sẵn như bge-m3 trước đây.

@@ -5,13 +5,13 @@ from __future__ import annotations
 import importlib
 import os
 
-from index.config import MODEL_ID
-from index.embedder.base import RETRY, Embedder
-from index.embedder.cache import CachedEmbedder
+from utils.config import MODEL_ID
+from embedders.base import RETRY, Embedder
+from embedders.cache import CachedEmbedder
 
 # import lúc chọn — biến thể này hỏng không kéo biến thể kia theo
 EMBEDDERS = {
-    "openai": "index.embedder.variants.openai:OpenAIEmbedder",
+    "openai": "embedders.variants.openai:OpenAIEmbedder",
 }
 
 

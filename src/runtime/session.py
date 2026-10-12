@@ -19,15 +19,15 @@ import logging
 import re
 import time
 
-from kb.deck_map import page_label
-from llm import ROOT
-from parsing.enrich import enrich
-from parsing.models import ParsedDocument
+from retrieval.deck_map import page_label
+from utils.config import PARSER_OUTPUT, RETRIEVAL_OUTPUT, ROOT, SCENARIO_OUTPUT
+from parser.enrich import enrich
+from models.parsed_document import ParsedDocument
 from runtime import fastpath
 from runtime.models import RuntimeConfig, Turn
 from runtime.retrieve import Retriever
 from runtime.router import Router
-from scenario.models import SYL_PER_MIN, Scenario
+from models.scenario import SYL_PER_MIN, Scenario
 
 log = logging.getLogger("runtime")
 
@@ -37,19 +37,19 @@ PAGE_OF_CHUNK = re.compile(r"#p(\d+)")
 
 class Session:
     def __init__(self, doc_id: str, cfg: RuntimeConfig, model: str, speed: float):
-        deck = ROOT / "out" / "deck" / doc_id
-        for f, how in [(deck / "scenario.json", "src/scenario/cli.py"),
-                       (deck / "deck_map.txt", "src/kb/deck_map.py")]:
+        scenario = SCENARIO_OUTPUT / doc_id / "scenario.json"
+        for f, how in [(scenario, "src/scenario/cli.py"),
+                       (RETRIEVAL_OUTPUT / doc_id / "deck_map.txt", "src/retrieval/deck_map.py")]:
             if not f.exists():
-                raise SystemExit(f"thieu {f} — chay: python {how} out/parsed/{doc_id}/document.json")
+                raise SystemExit(f"thieu {f} — chay: python {how} src/output/parser/{doc_id}/document.json")
 
-        self.doc = enrich(ParsedDocument.load(ROOT / "out" / "parsed" / doc_id / "document.json"))
-        sc = Scenario.model_validate_json((deck / "scenario.json").read_text(encoding="utf-8"))
+        self.doc = enrich(ParsedDocument.load(PARSER_OUTPUT / doc_id / "document.json"))
+        sc = Scenario.model_validate_json(scenario.read_text(encoding="utf-8"))
         self.scripts = {s.page_no: s for s in sc.slides}
         self.retriever = Retriever(doc_id, cfg.top_k)
         logs = ROOT / "logs" / "runtime" / doc_id
         self.router = Router(self.doc, self.retriever, cfg,
-                             (deck / "deck_map.txt").read_text(encoding="utf-8"),
+                             (RETRIEVAL_OUTPUT / doc_id / "deck_map.txt").read_text(encoding="utf-8"),
                              model, logs / "llm")
         self.speed = speed
         self.history: list[Turn] = []

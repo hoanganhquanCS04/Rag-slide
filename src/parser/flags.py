@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 
-from parsing.models import Flag, ParsedDocument
+from models.parsed_document import Flag, ParsedDocument
 
 log = logging.getLogger(__name__)
 

@@ -22,9 +22,9 @@ from dataclasses import dataclass
 from enum import Enum
 
 from chunker.base import BaseChunker
-from chunker.tokens import count_tokens
-from kb.models import KBChunk
-from parsing.models import Block, ParsedDocument, ParsedPage, ParsedParagraph, ParsedTable
+from utils.tokens import count_tokens
+from models.kb_chunk import KBChunk
+from models.parsed_document import Block, ParsedDocument, ParsedPage, ParsedParagraph, ParsedTable
 
 MIN_TOKENS = 100               # khúc nhỏ hơn (kể cả tiền tố) là vụn -> gộp sang khúc bên cạnh
 SENTENCE_END = re.compile(r"(?<=[.!?;])\s+")

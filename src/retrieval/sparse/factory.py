@@ -5,12 +5,12 @@ from __future__ import annotations
 import importlib
 import os
 
-import index.config  # noqa: F401 — import là nạp .env luôn
-from index.sparse.base import SparseIndex
+import utils.config  # noqa: F401 — import là nạp .env luôn
+from retrieval.sparse.base import SparseIndex
 
 # import lúc chọn — biến thể này hỏng không kéo biến thể kia theo
 SPARSE = {
-    "rank_bm25": "index.sparse.variants.rankbm25:RankBM25Index",
+    "rank_bm25": "retrieval.sparse.variants.rankbm25:RankBM25Index",
 }
 
 

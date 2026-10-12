@@ -6,9 +6,9 @@ nhưng nhãn do người gán nên có thể sai, và người gán dễ thiên 
 
 Hai bài bổ sung cho nhau, không thay được nhau.
 
-    python src/kb/eval.py out/kb/<ten>/chunks.json                # bộ câu hỏi của chính deck
-    python src/kb/eval.py out/kb/<ten>/chunks.json --by nguoi     # chi cau nguoi that viet
-    python src/kb/eval.py out/kb/<ten>/chunks.json --rrf-k 7 --wd 1.25   # thu cau hinh ★ cua tune
+    python src/retrieval/eval.py src/output/chunker/<ten>/chunks.json                # bộ câu hỏi của chính deck
+    python src/retrieval/eval.py src/output/chunker/<ten>/chunks.json --by nguoi     # chi cau nguoi that viet
+    python src/retrieval/eval.py src/output/chunker/<ten>/chunks.json --rrf-k 7 --wd 1.25   # thu cau hinh ★ cua tune
 
 Cấu hình gộp RRF mặc định = hằng số của search.py (cái runtime đang chạy), ghi vào JSON ở
 `rrf` — tune.py chỉ ĐO, không đổi mặc định, nên muốn thử cấu hình ★ của tune thì truyền tay.
@@ -22,11 +22,11 @@ import logging
 import sys
 from pathlib import Path
 
-if __package__ in (None, ""):
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+if __package__ in (None, ""):  # chạy thẳng file: THAY src/retrieval/ bằng src/
+    sys.path[0] = str(Path(__file__).resolve().parents[1])
 
-from index.config import MODEL_ID
-from kb.search import RRF_K, W_DENSE, W_SPARSE, Mode, Searcher
+from utils.config import MODEL_ID
+from retrieval.search import RRF_K, W_DENSE, W_SPARSE, Mode, Searcher
 
 log = logging.getLogger(__name__)
 

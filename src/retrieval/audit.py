@@ -16,8 +16,8 @@ Xem docs/spec/search.md §10. Hai bài kiểm tra:
 Chạy CẢ BA kiểu (dense / sparse / hybrid) rồi in ra một bảng. Hybrid không hơn dense thì
 phải nói thẳng ra, chứ không giữ BM25 cho đủ lệ.
 
-    python src/kb/audit.py out/kb/<ten>/chunks.json
-    python src/kb/audit.py out/kb/<ten>/chunks.json --query-from raw --show-fail
+    python src/retrieval/audit.py src/output/chunker/<ten>/chunks.json
+    python src/retrieval/audit.py src/output/chunker/<ten>/chunks.json --query-from raw --show-fail
 """
 
 from __future__ import annotations
@@ -31,12 +31,12 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-if __package__ in (None, ""):
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+if __package__ in (None, ""):  # chạy thẳng file: THAY src/retrieval/ bằng src/
+    sys.path[0] = str(Path(__file__).resolve().parents[1])
 
-from index.config import MODEL_ID
-from index.vectors import load_vectors
-from kb.search import Mode, Searcher
+from utils.config import MODEL_ID
+from utils.vectors import load_vectors
+from retrieval.search import Mode, Searcher
 
 log = logging.getLogger(__name__)
 
@@ -76,7 +76,7 @@ class AuditReport(BaseModel):
     caveat: str = (
         "Self-retrieval lay cau hoi TU CHINH van ban cua chunk nen gan nhu luon 100%. "
         "No chi chung minh khong co hai chunk trung nhau, KHONG chung minh index tim tot. "
-        "So do that la bo cau hoi co nhan: src/kb/eval.py (xem docs/spec/search.md §10)."
+        "So do that la bo cau hoi co nhan: src/retrieval/eval.py (xem docs/spec/search.md §10)."
     )
 
 
@@ -165,7 +165,7 @@ def find_duplicates(se: Searcher, threshold: float = DUP_THRESHOLD
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="audit")
-    ap.add_argument("chunks", help="out/kb/<ten>/chunks.json")
+    ap.add_argument("chunks", help="src/output/chunker/<ten>/chunks.json")
     ap.add_argument("--vectors", default=None)
     ap.add_argument("--model", default=MODEL_ID)
     ap.add_argument("--query-from", default="enriched", choices=["enriched", "raw", "title"])
@@ -174,7 +174,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--show-fail", action="store_true", help="liet ke tung ca truot")
     ap.add_argument("--dup-threshold", type=float, default=DUP_THRESHOLD)
     ap.add_argument("-o", "--out", default=None,
-                    help="ghi ket qua ra JSON, vd out/kb/<ten>/audit/self_retrieval.json")
+                    help="ghi ket qua ra JSON, vd src/output/retrieval/<ten>/self_retrieval.json")
     args = ap.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")

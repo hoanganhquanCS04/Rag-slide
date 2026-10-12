@@ -1,6 +1,6 @@
 """Bọc một embedder khác bằng cache trên đĩa theo NỘI DUNG — chữ đã nhúng thì không gọi lại.
 
-    out/index/.embed_cache/<model>/<text_key>.npy     một vector mỗi file, DÙNG CHUNG mọi deck
+    src/output/embedders/cache/<model>/<text_key>.npy     một vector mỗi file, DÙNG CHUNG mọi deck
 
 `.npy` của bài xếp theo VỊ TRÍ chunk nên không trả lời được "chữ này nhúng chưa". Cache trả lời
 được — dùng lại khi: sửa vài trang rồi chạy lại (§8), eval / tune hỏi lại cùng bộ câu hỏi, thử
@@ -16,13 +16,13 @@ from pathlib import Path
 
 import numpy as np
 
-from index.config import OUT
-from index.embedder.base import BATCH, Embedder
-from index.vectors import model_slug, text_key
+from utils.config import EMBEDDERS_OUTPUT
+from embedders.base import BATCH, Embedder
+from utils.vectors import model_slug, text_key
 
 log = logging.getLogger(__name__)
 
-CACHE_DIR = OUT / ".embed_cache"
+CACHE_DIR = EMBEDDERS_OUTPUT / "cache"
 
 
 class CachedEmbedder(Embedder):

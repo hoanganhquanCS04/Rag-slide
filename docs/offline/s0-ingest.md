@@ -9,7 +9,7 @@
 > nhìn ảnh CẢ trang để sắp mẩu chữ thành khối (chỉ trỏ id, chữ vẫn là text layer) và chép
 > bảng từ ảnh bảng. Output là `ParsedDocument`, không phải `RawSlide[]`.
 > Luồng v0: [00-overview §3.3](./00-overview.md) · [01-hien-trang](./01-hien-trang.md) ·
-> code: [`src/parsing/`](../../src/parsing/) · spec: [parsed-document.md](../spec/parsed-document.md)
+> code: [`src/parser/`](../../src/parser/) · spec: [parsed-document.md](../spec/parsed-document.md)
 >
 > Mất so với bản pptx dưới đây: `chart_data`, `tables`, `build_steps` — chúng đến từ
 > XML mà PDF không có. Hệ quả cho NT2 xem [CLAUDE.md §3.0](../../CLAUDE.md).
