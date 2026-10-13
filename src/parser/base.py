@@ -49,8 +49,7 @@ class BaseParser(ABC):
             table_pages: set[int] | None = None) -> ParsedDocument:
         """① rồi ②. `src` cho doc_id / nguồn, `pdf` để vẽ trang."""
         doc = self.parse_layout(src, pdf, redo=redo)
-        doc = self.post_processing(doc, pdf, redo=redo, table_pages=table_pages)
-        return doc.link()                 # ②b dựng lại ParsedTable mới -> gán lại block.page
+        return self.post_processing(doc, pdf, redo=redo, table_pages=table_pages)
 
     def save(self, doc: ParsedDocument) -> Path:
         """-> out_dir/document.json."""

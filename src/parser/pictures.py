@@ -14,7 +14,7 @@ từng tả ảnh Tết thành Trung Thu (CLAUDE.md §5 S0).
 
 Cache THEO TRANG trong pictures.json: khoá = sha(page.cache_hash() của layout + sha prompt + model). Không đổi
 -> không gọi lại (trừ `redo`). Trang gọi lỗi ghi `error`, lần chạy sau tự gọi lại. Prompt + phản hồi
-ở `logs/vlm_pictures/<doc_id>/` (src/llm.py, ảnh không ghi vào log).
+ở `logs/vlm_pictures/<doc_id>/` (src/utils/llm.py, ảnh không ghi vào log).
 """
 
 from __future__ import annotations
@@ -199,7 +199,7 @@ def apply_pictures(doc: ParsedDocument, pictures_json: Path) -> Counter[str]:
     """Gắn kết quả bước ② vào ảnh của `doc` theo `block_id` (id layout ① = id document.json).
 
     TRANG_TRI -> BỎ khỏi `page.blocks` (không ghi vào document.json; phân loại + lý do vẫn ở pictures.json
-    cho người duyệt). Id khối còn lại KHÔNG đánh lại — patch vẫn trỏ đúng. SO_DO / ANH_CO_CHU / MINH_HOA có
+    cho người duyệt). Id khối còn lại KHÔNG đánh lại — chunk / kịch bản vẫn trỏ đúng. SO_DO / ANH_CO_CHU / MINH_HOA có
     chữ -> content; loại mang thông tin mà text rỗng -> not_described (cờ cho người duyệt). Ảnh không có
     kết quả giữ nguyên.
     """

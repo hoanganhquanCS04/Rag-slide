@@ -3,17 +3,13 @@
 Lưu ở file RIÊNG `src/output/scenario/<doc_id>/scenario.json`, không nhét vào `ParsedDocument`:
 ParsedDocument suy ra được từ PDF (parse lại là có), kịch bản thì LLM sinh + người duyệt
 (mất là phải trả tiền + duyệt lại).
-
-Back-reference (KHÔNG ghi JSON, gán lại mỗi lần nạp): `sentence.slide`, `sentence.page_no`.
 """
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Literal
 
-from pydantic import BaseModel, Field, PrivateAttr, model_validator
-
-from models.backref import BackRef
+from pydantic import BaseModel, Field
 
 SYL_PER_MIN = 200          # tiếng Việt nói 190–210 âm tiết/phút (§5 S4)
 
@@ -43,17 +39,6 @@ class Sentence(BaseModel):
     syllables: int = 0                   # CODE tính theo kho phát âm, không để LLM khai
     prosody: Prosody = Field(default_factory=Prosody)
 
-    _slide_ref: BackRef = PrivateAttr(default_factory=BackRef)
-
-    @property
-    def slide(self) -> SlideScript | None:
-        """Kịch bản trang chứa câu này."""
-        return self._slide_ref.target
-
-    @property
-    def page_no(self) -> int | None:
-        return self.slide.page_no if self.slide else None
-
 
 class SlideScript(BaseModel):
     page_no: int
@@ -66,19 +51,6 @@ class SlideScript(BaseModel):
     passes: int = 1                      # 2 = phải sửa một lần -> đáng soi
     model: str = ""
     prompt_hash: str = ""
-
-    @model_validator(mode="after")
-    def _link(self) -> SlideScript:
-        return self.link()
-
-    def link(self) -> SlideScript:
-        """Gán `sentence.slide` cho mọi câu."""
-        for s in self.sentences:
-            s._slide_ref = BackRef(self)
-        return self
-
-    def __deepcopy__(self, memo: dict[int, Any] | None = None) -> SlideScript:
-        return super().__deepcopy__(memo).link()
 
     @property
     def syllables(self) -> int:
@@ -105,16 +77,6 @@ class Scenario(BaseModel):
     # khi synth, lệch là DỪNG
     pronunciation_hash: str
     slides: list[SlideScript] = Field(default_factory=list)
-
-    @model_validator(mode="after")
-    def _link(self) -> Scenario:
-        return self.link()
-
-    def link(self) -> Scenario:
-        """Gán lại cả cây — slide dựng bằng `model_copy` không chạy validator nên back-ref cũ."""
-        for s in self.slides:
-            s.link()
-        return self
 
     @property
     def seconds(self) -> float:

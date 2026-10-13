@@ -1,18 +1,13 @@
-"""Biến thể `page`: 1 trang = 1 chunk, quá `max_tokens` thì cắt ở ranh giới tự nhiên.
+"""Chunker `page`: mỗi trang thành 1 chunk; trang dài quá `max_tokens` thì cắt thành vài chunk.
 
-    đơn vị    1 trang = 1 chunk                          <- vì R2 nhảy tới TRANG
-    cắt thêm  chunk > 500 token -> cắt thành ÍT khúc nhất (không cắt thêm khúc nào), nhưng
-              chọn CHỖ cắt: trước đề mục > giữa hai block > giữa dòng / hàng bảng > giữa câu,
-              cấm bỏ đề mục trơ trọi cuối khúc. MỘT block đã > 500 -> bảng theo hàng (mảnh nào
-              cũng lặp hàng tiêu đề), chữ theo dòng, dòng vẫn dài thì theo câu
-    vụn       khúc < 100 token (kể cả tiền tố) -> gộp vào khúc bên cạnh, được vượt tới 600
+Để làm gì: R2 điều hướng theo TRANG nên đơn vị tìm kiếm là trang. Trang quá dài thì một vector
+bình quân cả trang bị loãng, phải cắt nhỏ.
 
-Mô tả ảnh là một block có chữ như mọi block khác -> nằm trong chunk trang. Không còn vector phụ
-mỗi ảnh (bỏ 2026-10-10): nó chỉ nhân bản chữ đã có trong chunk trang.
-
-KHÔNG overlap. Overlap sinh ra cho văn xuôi cắt ở điểm tuỳ tiện — ở đây ranh giới luôn là
-trang / block / dòng / câu, không câu nào bị cắt đôi. Ngữ cảnh vắt qua ranh giới thì tiền tố
-lo: mảnh `.2` của trang dài vẫn biết mình thuộc chương nào, trang nào, nói về gì.
+Cách làm (3 bước):
+    split_block   khối -> các mảnh (Piece), đánh dấu chỗ nào cắt được, mảnh nào là đề mục
+    CutPlanner    chọn chỗ cắt: ít khúc nhất, cắt ở chỗ tự nhiên nhất, khúc vụn gộp vào bên cạnh
+    PageChunker   gắn tiền tố + đặt id -> KBChunk
+Không overlap giữa các chunk: tiền tố đã cho mỗi chunk biết nó thuộc chương / trang nào.
 """
 
 from __future__ import annotations
@@ -22,19 +17,22 @@ from dataclasses import dataclass
 from enum import Enum
 
 from chunker.base import BaseChunker
-from utils.tokens import count_tokens
 from models.kb_chunk import KBChunk
 from models.parsed_document import Block, ParsedDocument, ParsedPage, ParsedParagraph, ParsedTable
+from utils.tokens import count_tokens
 
 MIN_TOKENS = 100               # khúc nhỏ hơn (kể cả tiền tố) là vụn -> gộp sang khúc bên cạnh
 SENTENCE_END = re.compile(r"(?<=[.!?;])\s+")
-HEADING_MAX_WORDS = 12         # "Bảo hiểm sức khỏe Vingroup:" là đề mục, câu dài kết bằng ':' thì không
+HEADING_MAX_WORDS = 12         # dòng kết bằng ':' mà dài hơn thế là câu, không phải đề mục
 
 # ------------------------------------------------------------------ mảnh nhỏ nhất: Block -> Piece
 
 
 class Boundary(Enum):
-    """Ranh giới NGAY TRƯỚC một piece — cắt ở đó phạt bao nhiêu."""
+    """Loại đường nối NGAY TRƯỚC một mảnh: giữa hai khối, hai dòng, hay hai câu.
+
+    Để làm gì: CutPlanner dùng nó để biết cắt ở đây đẹp hay xấu (đường nối càng nhỏ càng xấu).
+    """
 
     BLOCK = "block"
     LINE = "line"
@@ -43,11 +41,17 @@ class Boundary(Enum):
 
 @dataclass(eq=False)
 class Piece:
-    """Mảnh không cắt nữa: cả block (vừa budget), hoặc một dòng / hàng bảng / câu của block to.
+    """Mảnh nhỏ nhất, không cắt thêm nữa: cả một khối, hoặc một dòng / hàng bảng / câu của khối to.
 
-    `starts_heading` = mảnh mở đầu bằng đề mục -> cắt ngay trước nó là chỗ đẹp nhất.
-    `is_heading` = mảnh CHỈ là đề mục -> cắt ngay sau nó là chỗ tệ nhất.
-    `header` = mảnh là hàng bảng: hàng tiêu đề + |---| phải lặp ở đầu khúc chứa nó.
+    Để làm gì: là đơn vị mà CutPlanner xếp thành các khúc.
+
+        block           khối gốc chứa mảnh này
+        text, tokens    nội dung và độ dài
+        boundary        đường nối ngay trước mảnh
+        starts_heading  mảnh MỞ ĐẦU bằng đề mục -> cắt ngay trước nó là đẹp nhất
+        is_heading      mảnh CHỈ là đề mục -> cắt ngay sau nó là xấu nhất
+        header          mảnh là hàng bảng: hàng tiêu đề bảng + dòng |---|, in lại ở đầu khúc
+        header_tokens   độ dài của header
     """
 
     block: Block
@@ -61,25 +65,21 @@ class Piece:
 
 
 def _is_heading_line(line: str) -> bool:
+    """Dòng này có phải đề mục không. Cách làm: kết thúc bằng ':' và không quá 12 từ ("LƯU Ý:")."""
     s = line.strip()
     return s.endswith(":") and len(s.split()) <= HEADING_MAX_WORDS
 
 
 def split_block(block: Block, budget: int) -> list[Piece]:
-    """Block vừa `budget` -> một piece. To hơn -> piece ở ranh giới tự nhiên.
+    """Chia một khối thành các mảnh (Piece).
 
-    Đo trên Onboarding: 7 block một mình đã > 500 token (bảng chấm công p21: 1570, list thuế
-    p19: 848). Cắt ở ranh giới block thì không đụng được chúng -> một vector bình quân cả
-    bảng 13 hàng, hỏi một dòng quy định là loãng.
+    Để làm gì: khối quá to (vd bảng 1575 token) thì phải có chỗ để cắt bên trong nó.
 
-        bảng   theo hàng, khúc nào cũng lặp hàng tiêu đề + |---| — không có nó khúc sau chỉ
-               còn số, không biết cột nào là gì
-        chữ    theo dòng (list là mỗi gạch đầu dòng một dòng); dòng vẫn dài thì theo câu
-
-    Một câu đơn lẻ dài hơn budget thì để nguyên — cắt giữa câu còn tệ hơn chunk to.
-
-    Đề mục: block `title` không phải đầu trang (p9 "Quy tắc phản hồi email:", "LƯU Ý:"), hoặc
-    dòng ngắn kết bằng ':' (p29 "Bảo hiểm sức khỏe Vingroup:" mở đầu block list của nó).
+    Cách làm:
+        khối vừa `budget`  -> 1 mảnh nguyên khối; là đề mục nếu role title hoặc dòng kết bằng ':'
+        bảng quá to        -> mỗi hàng 1 mảnh, mảnh nào cũng mang hàng tiêu đề bảng
+        chữ quá to         -> mỗi dòng 1 mảnh; dòng vẫn quá to thì tách theo câu
+    Một câu dài hơn `budget` vẫn để nguyên: cắt giữa câu còn tệ hơn chunk to.
     """
     text = block.content or ""
     is_par = isinstance(block, ParsedParagraph)
@@ -112,7 +112,7 @@ def split_block(block: Block, budget: int) -> list[Piece]:
 
 # ------------------------------------------------------------------ chọn chỗ cắt: Piece[] -> Segment[]
 
-# Phạt khi cắt NGAY TRƯỚC một piece. Thấp = chỗ cắt tự nhiên. Số chỉ có nghĩa THỨ TỰ.
+# Điểm phạt khi cắt NGAY TRƯỚC một mảnh. Thấp = chỗ cắt tự nhiên. Số chỉ có nghĩa THỨ TỰ.
 CUT_BEFORE_HEADING = 0
 CUT_PENALTY = {Boundary.BLOCK: 1, Boundary.LINE: 2, Boundary.SENTENCE: 4}
 CUT_AFTER_HEADING = 8          # đề mục nằm cuối khúc này, nội dung của nó sang khúc sau
@@ -121,23 +121,28 @@ SMALL_PENALTY = 5              # khúc vụn — chỉ chịu khi mọi cách c�
 
 @dataclass
 class Segment:
-    """Một khúc = dải piece liền nhau -> một chunk."""
+    """Một khúc = dãy mảnh liền nhau = một chunk.
+
+    Để làm gì: gom mảnh lại, tính độ dài / chữ / các khối gốc của khúc.
+    """
 
     pieces: list[Piece]
 
     def _with_header(self, k: int) -> bool:
-        """Hàng bảng `k` có phải in hàng tiêu đề trước nó không: mở khúc, hoặc sang bảng khác."""
+        """Hàng bảng thứ k có cần in hàng tiêu đề trước nó không: có, nếu nó mở khúc hoặc sang bảng khác."""
         p = self.pieces[k]
         return p.header is not None and (k == 0 or self.pieces[k - 1].block is not p.block)
 
     @property
     def size(self) -> int:
-        """Token của khúc. Mỗi piece +1 cho dấu `\\n` nối — không tính thì đo ra chunk 511."""
+        """Số token của khúc. Cách làm: cộng token từng mảnh + 1 cho dấu xuống dòng nối
+        + hàng tiêu đề bảng nếu phải in lại."""
         return sum(p.tokens + 1 + (p.header_tokens + 1 if self._with_header(k) else 0)
                    for k, p in enumerate(self.pieces))
 
     @property
     def text(self) -> str:
+        """Chữ của khúc. Cách làm: nối các mảnh bằng dấu xuống dòng, chèn hàng tiêu đề bảng khi cần."""
         out: list[str] = []
         for k, p in enumerate(self.pieces):
             if self._with_header(k):
@@ -147,42 +152,44 @@ class Segment:
 
     @property
     def blocks(self) -> list[Block]:
-        """Block gốc trong khúc — block cắt nhiều piece chỉ tính 1 lần."""
+        """Các khối gốc trong khúc, mỗi khối một lần -> ghi vào `KBChunk.block_ids`."""
         return list({id(p.block): p.block for p in self.pieces}.values())
 
 
 class CutPlanner:
-    """Chia piece của một trang thành các khúc LIỀN NHAU — mỗi khúc vừa ngân sách.
+    """Chia các mảnh của một trang thành các khúc liền nhau, mỗi khúc vừa ngân sách token.
 
-    Thứ tự ưu tiên (so từ trái sang):
+    Để làm gì: chọn chỗ cắt sao cho mỗi chunk trọn ý (không tách đề mục khỏi nội dung của nó).
 
-        1. ÍT khúc nhất         — chỉ đổi CHỖ cắt, không cắt thêm. Số khúc = đúng như nhồi đầy.
-        2. tổng phạt chỗ cắt    — trước đề mục 0 · giữa block 1 · giữa dòng/hàng 2 · giữa câu 4 ·
-                                  ngay sau đề mục 8 · mỗi khúc vụn (< MIN_TOKENS) +5
-        3. đều nhất             — tổng bình phương cỡ khúc
-    Một piece đơn lẻ to hơn budget (câu dài, hàng bảng dài) vẫn đứng riêng một khúc.
-    `prefix_tokens` tính vào ngưỡng vụn để so trên đúng con số `token_count` sẽ ghi.
+    Cách làm: thử mọi cách chia (quy hoạch động), chọn cách tốt nhất theo thứ tự:
+        1. ít khúc nhất
+        2. tổng phạt chỗ cắt thấp nhất: trước đề mục 0 · giữa khối 1 · giữa dòng 2 · giữa câu 4 ·
+           ngay sau đề mục 8 · mỗi khúc vụn +5
+        3. các khúc dài đều nhau
+    Rồi gộp khúc vụn (< 100 token kể cả tiền tố) vào khúc bên cạnh.
     """
 
     def __init__(self, pieces: list[Piece], max_tokens: int, prefix_tokens: int):
         self.pieces = pieces
         self.prefix_tokens = prefix_tokens
         self.budget = max_tokens - prefix_tokens
-        # p32 tiêu đề (41 token) + bảng 445 không vừa 500 cùng nhau, để riêng thì khúc đầu chỉ
-        # có tiêu đề — vector rỗng nghĩa. Nên khi gộp vụn được vượt tới max_tokens + MIN_TOKENS.
+        # gộp vụn được vượt tới max_tokens + MIN_TOKENS: để tiêu đề đứng riêng một khúc thì vector rỗng nghĩa
         self.merge_limit = max_tokens + MIN_TOKENS - prefix_tokens
 
     def plan(self) -> list[Segment]:
+        """Chọn chỗ cắt rồi gộp khúc vụn -> danh sách Segment."""
         return [Segment(self.pieces[i:j]) for i, j in self._merge_small(self._best_cuts())]
 
     def _size(self, i: int, j: int) -> int:
+        """Số token nếu gom mảnh i..j-1 thành một khúc."""
         return Segment(self.pieces[i:j]).size
 
     def _is_small(self, size: int) -> bool:
+        """Khúc có vụn không: tính cả tiền tố mà vẫn < MIN_TOKENS."""
         return self.prefix_tokens + size < MIN_TOKENS
 
     def _penalty(self, k: int) -> int:
-        """Phạt khi cắt ngay trước pieces[k]."""
+        """Điểm phạt nếu cắt ngay trước mảnh k: sau đề mục 8 · trước đề mục 0 · còn lại theo loại đường nối."""
         if self.pieces[k - 1].is_heading:
             return CUT_AFTER_HEADING
         if self.pieces[k].starts_heading:
@@ -190,7 +197,12 @@ class CutPlanner:
         return CUT_PENALTY[self.pieces[k].boundary]
 
     def _best_cuts(self) -> list[tuple[int, int]]:
-        """Quy hoạch động: best[j] = cách chia tốt nhất pieces[:j], so theo (số khúc, phạt, bình phương)."""
+        """Tìm cách chia tốt nhất -> danh sách (đầu, cuối) của từng khúc.
+
+        Cách làm (quy hoạch động): best[j] = cách chia tốt nhất cho j mảnh đầu, tính từ mọi best[i]
+        cộng thêm khúc i..j-1; so theo (số khúc, tổng phạt, tổng bình phương độ dài). Lần ngược
+        theo `back` để lấy ra các khúc.
+        """
         m = len(self.pieces)
         best: list[tuple[int, int, int] | None] = [None] * (m + 1)
         back = [0] * (m + 1)
@@ -216,7 +228,11 @@ class CutPlanner:
         return spans[::-1]
 
     def _merge_small(self, spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
-        """Khúc vụn gộp vào khúc bên cạnh — bỏ chỗ cắt TỆ HƠN trong hai chỗ cắt của nó."""
+        """Gộp khúc vụn vào khúc bên cạnh.
+
+        Cách làm: với mỗi khúc vụn, bỏ chỗ cắt XẤU HƠN trong hai chỗ cắt hai bên nó (miễn gộp xong
+        không vượt `merge_limit`); lặp tới khi không gộp được nữa.
+        """
         changed = True
         while changed and len(spans) > 1:
             changed = False
@@ -240,11 +256,16 @@ class CutPlanner:
 
 
 class PageChunker(BaseChunker):
-    """1 trang = 1 chunk; > `max_tokens` thì cắt ở ranh giới tự nhiên."""
+    """Chunker 1 trang = 1 chunk; trang quá dài thì cắt ở chỗ tự nhiên."""
 
     kind = "page"
 
     def chunk_page(self, doc: ParsedDocument, page: ParsedPage) -> list[KBChunk]:
+        """Một trang -> các KBChunk của nó.
+
+        Cách làm: tạo tiền tố -> split_block từng khối (ngân sách = max_tokens - token tiền tố) ->
+        CutPlanner chia khúc -> make_chunk. Id: `p009` nếu 1 khúc, `p009.1`, `p009.2`… nếu nhiều khúc.
+        """
         prefix = self.prefix(doc, page)
         prefix_tokens = count_tokens(prefix)
         pieces = [p for b in page.blocks if b.content

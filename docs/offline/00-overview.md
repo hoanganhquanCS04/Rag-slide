@@ -41,7 +41,7 @@ Hệ quả: gặp lựa chọn "làm kỹ, chậm" vs "làm nhanh, ẩu" ở off
 Hệ quả cứng (thiết kế gốc): mọi artifact phải khai `provenance`, mỗi field thuộc đúng một trong hai nhóm.
 **v0 đã bỏ trường `provenance` khỏi code (2026-10-12)**: không còn text layer, mọi chữ đều do VLM
 đọc nên trường đó không phân biệt gì. Nguồn gốc giờ đọc theo LOẠI khối (`image` = mô tả ảnh) và
-id (`pNNN.mNN` = vá tay). Sơ đồ dưới giữ lại cho v1 (`.pptx` có lại bản đúng 100%):
+id. Sơ đồ dưới giữ lại cho v1 (`.pptx` có lại bản đúng 100%):
 
 ```json
 "provenance": {
@@ -204,16 +204,13 @@ VÀO  data/raw/<ten>.pdf
   │
   ├─> parser.save -> document.json.  Phần dưới: enrich() lúc KB / S4 / runtime nạp
   │
-  ├─> [link ẩn]      annotation PDF (URL) -> hrefs của block chồng lên; nhãn = dòng chữ VLM
-  │                  KHÔNG đọc text layer PDF (bỏ 2026-10-08) — mọi chữ là vlm
-  │                  >= nửa số dòng là link -> role "links", robot không đọc địa chỉ
+  ├─> [link]         >= nửa số dòng là URL in ra chữ -> role "links", robot không đọc địa chỉ
+  │                  KHÔNG đọc text layer / annotation PDF — mọi chữ là vlm
   │
   ├─> [luật] sections   từ trang mục lục: trang đầu tiên có tiêu đề khớp mục = mở chương
   │          slide_type từ bbox tiêu đề + tiêu đề "Bài tập…"
   │          KHÔNG gọi model cho hai thứ này
   │
-  ├─> [patch tay]  data/patches/<ten>.json ─> khối id pNNN.mNN
-  │                cho trang mọi đường đều đọc sai
   │
   └─> [hash]  page_hash = SHA(nội dung + bbox từng mẩu)   <- incremental
                     │
@@ -357,7 +354,7 @@ VÀO  mọi artifact + flags.json + BẢN NGHE THỬ    <- CHỈ duyệt phần 
   │     2  S0 image_not_described       <- mất nội dung thật của trang
   │     3  S0 empty_page                <- trang rỗng mà KHÔNG phải section_divider
   │     4  S6a chunk trùng / self_retrieval_fail
-  │     5  S0 no_sections / layout_failed  <- dựng chương / bố cục trượt, chỉ ghi nhận
+  │     5  S0 no_sections                  <- không dựng được chương, chỉ ghi nhận
   │     6  S6b                          <- kỹ thuật
   │           │
   │           ├─ accept / whitelist ─> review.json   (BỀN qua các lần build)
@@ -369,7 +366,7 @@ VÀO  mọi artifact + flags.json + BẢN NGHE THỬ    <- CHỈ duyệt phần 
   │       sửa pronunciation.json ─> đếm lại âm tiết + synth lại câu liên quan
   │
   ├─ image_not_described ─> người chọn 1 trong 2:
-  │       ảnh có nội dung thật ─> gõ tay vào data/patches/ (fix_images)
+  │       ảnh có nội dung thật ─> sửa prompt ② rồi chạy lại (--redo)
   │       ảnh trang trí        ─> đánh dấu is_decorative, hết flag
   │
   └─ chunk trùng ─> người chọn 1 trong 2:
@@ -545,7 +542,7 @@ Mọi flag từ mọi stage đổ về một file, S7 đọc file đó. Chi ti�
 
 | Stage | Flag tiêu biểu                                                                                                                                                                  |
 | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| S0    | `empty_page`, `image_not_described`, `table_empty`, `layout_failed`, `no_sections` |
+| S0    | `empty_page` (gồm cả trang VLM trả JSON hỏng), `image_not_described`, `table_empty`, `no_sections` |
 | S5    | chunk trùng nhau (cosine >= 0.94, `audit.py`), chunk vượt 500 token (log `--stats`)                  |
 | S2    | `sections` không phủ kín / chồng nhau / đứt quãng — *chưa code*                                      |
 | S4    | **cờ đỏ:** `bad_grounding`, `empty_script`, `llm_failed` · **sửa ở pass 2:** `block_not_covered`, `number_missing` · **vàng:** `unknown_pronunciation` — luật nói tự nhiên bỏ khỏi bộ kiểm 2026-10-06 |

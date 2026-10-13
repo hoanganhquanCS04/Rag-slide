@@ -10,7 +10,7 @@ Xem docs/spec/embedding.md. Bốn điểm dễ sai:
      Lọc sớm thì audit không đo được hiện tượng trang phân mục cướp kết quả.
   3. `model_id` nằm trong TÊN FILE (`utils/vectors.py`). Đổi model mà không sinh lại thì truy
      vấn index cũ bằng vector mới -> trả rác mà không báo lỗi (§5 S6a).
-  4. API KHÔNG trả sparse vector. Nhánh sparse là BM25 dựng riêng ở `index/sparse/`, gộp với
+  4. API KHÔNG trả sparse vector. Nhánh sparse là BM25 dựng riêng ở `retrieval/sparse/`, gộp với
      dense ở `search.py` — KHÔNG có sẵn như bge-m3 trước đây.
 """
 

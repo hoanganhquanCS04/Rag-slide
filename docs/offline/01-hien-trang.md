@@ -21,7 +21,7 @@ data/raw/<file>.pdf  (| .pptx + .pdf CÙNG TÊN)     MỘT file vừa là DECK v
 src/output/parser/<ten>/docling_vlmpipeline.json           cache phản hồi VLM (raw: logs/vlm_pipeline/)
         │
         │ ③ đối chiếu text layer (khớp nguyên văn -> text_layer)   miễn phí
-        │    · link ẩn trong PDF · chương từ trang mục lục · vá tay data/patches/ · cờ
+        │    · chương từ trang mục lục · cờ
         ▼
 src/output/parser/<ten>/document.json            ★ ParsedDocument — NGUỒN của mọi bước sau
         │
@@ -81,14 +81,13 @@ Chi tiết: [spec/parsed-document.md](../spec/parsed-document.md) · code: `src/
 
 ```
 ParsedDocument   doc_id · source · parser · sections[] · flags[]
- └─ pages[]      page_no · title · section_id · page_hash · layout_error
+ └─ pages[]      page_no · title · section_id · page_hash
      ├─ slide_type    section_divider · exercise · content — LUẬT, tính lại mỗi lần nạp
      └─ blocks[]      NỘI DUNG, theo thứ tự đọc
-          └─ id · kind · role · content · hrefs · polygon
+          └─ id · page_no · kind · role · content · polygon
 ```
 
-Back-reference (không ghi JSON, gán lại mỗi lần nạp): `block.page` · `block.page_no` ·
-`block.section` · `page.document` · `page.section` — đứng ở block chấm ra được trang / chương.
+Block lưu `page_no` thẳng trong JSON; chương thì hỏi `doc.section_of(block.page_no)`.
 
 Mỗi block trả lời hai câu, loại nào cũng vậy:
 
@@ -97,20 +96,20 @@ Mỗi block trả lời hai câu, loại nào cũng vậy:
 | nói gì | `content` | chữ (`paragraph`) · mô tả hình (`image`) · markdown sinh từ `cells` (`table`) |
 | nằm đâu | `polygon` | 4 góc, `[0,1]`, gốc trên-trái |
 
-Mọi chữ do VLM đọc từ ảnh trang — có thể sai. `id` cho biết khối từ đâu ra: `p007.v01` = VLM sắp (②), `p007.b03` = docling (trang trượt
-kiểm tra bố cục), `p015.m00` = vá tay.
+Mọi chữ do VLM đọc từ ảnh trang — có thể sai. `id` = `p<trang>.b<số>` theo thứ tự đọc (vd `p007.b04`
+= trang 7, khối thứ 4); số có thể nhảy vì ảnh trang trí bị bỏ.
 
 ```json
-{"id": "p007.v00", "kind": "paragraph", "role": "title", "content": "CÁCH TÍNH LÀM THÊM GIỜ",
+{"id": "p007.b00", "kind": "paragraph", "role": "title", "content": "CÁCH TÍNH LÀM THÊM GIỜ",
  "polygon": [[0.499, 0.094], [0.843, 0.094], [0.843, 0.141], [0.499, 0.141]]}
 ```
 
 - **Chương** dựng từ trang mục lục trong 5 trang đầu: trang đầu tiên có tiêu đề khớp một
   mục là trang mở chương. Không có mục lục khớp → 0 chương, không đoán.
-- **Link ẩn** (annotation PDF) gắn vào `hrefs` của block chồng lên nó. Block có ≥ nửa số
-  dòng là link → `role: "links"` — robot không đọc địa chỉ thành tiếng.
+- Block có ≥ nửa số dòng là URL in ra chữ → `role: "links"` — robot không đọc địa chỉ thành tiếng.
+  Link ẩn sau chữ (annotation PDF) không đọc nữa (bỏ 2026-10-12).
 - **Cờ** cho người duyệt: `empty_page` · `image_not_described` · `table_empty` ·
-  `layout_failed` · `no_sections`. Block rỗng không có cờ (ảnh nhỏ, ảnh trang trí) bị bỏ.
+  `no_sections`. Block rỗng không có cờ (ảnh nhỏ, ảnh trang trí) bị bỏ.
 
 ### ④ `KBChunk` + vector — để TÌM
 
@@ -130,7 +129,7 @@ KHÔNG overlap · trang phân mục -> content_type "section_divider", lọc lú
 {"chunk_id": "thoi_gian_lam_viec_chinh_sach_nhan_su#p007", "page_no": 7,
  "section_title": "LÀM THÊM GIỜ", "vector_role": "page", "content_type": "content",
  "text_enriched": "[LÀM THÊM GIỜ · CÁCH TÍNH LÀM THÊM GIỜ · trang 7/17] CÁCH TÍNH LÀM THÊM GIỜ\n|  | GIỜ LÀM THÊM BAN NGÀY | ...",
- "token_count": 237, "block_ids": ["p007.v00", "p007.v01", "p007.v02"], "n_images": 0}
+ "token_count": 237, "block_ids": ["p007.b00", "p007.b01", "p007.b02"], "n_images": 0}
 ```
 
 Trang bị cắt thì chunk mang đuôi `.1`, `.2` (`…#p009.1`). Mọi chunk đều trỏ về `page_no` —
@@ -193,7 +192,7 @@ Scenario        doc_id · model · prompt_hash · pronunciation_hash
 {"kind": "delivery", "text": "Cách tính cụ thể ra sao?",
  "grounding": {"type": "structure", "ref": null}, "syllables": 6}
 {"kind": "content", "text": "Làm thêm ngày lễ tết tính hệ số 3 ban ngày và hệ số 3.9 ban đêm.",
- "grounding": {"type": "kb_chunk", "ref": "p007.v01"}, "syllables": 19,
+ "grounding": {"type": "kb_chunk", "ref": "p007.b01"}, "syllables": 19,
  "prosody": {"emphasis": ["3", "3.9"], "pause_before_ms": 0, "speed": 1.0}}
 ```
 
@@ -203,7 +202,6 @@ Scenario        doc_id · model · prompt_hash · pronunciation_hash
 - `syllables` do **code** đếm theo `data/pronunciation.json`, không để LLM khai.
 - Không có cờ "người đã sửa tay" (`edited_by` bỏ 2026-10-12): sửa tay `scenario.json` sẽ bị máy viết
   đè khi trang / prompt / model đổi hoặc chạy `--force`.
-- Back-reference: `sentence.slide` · `sentence.page_no` (không ghi JSON).
 
 ### Bảng phát âm — `data/pronunciation.json`
 
@@ -224,8 +222,8 @@ không bao giờ đè. Sửa kho rồi chạy lại S4 = chỉ đếm lại âm 
 ```
  ParsedDocument               KB                                  Scenario
  page 7                       chunk …#p007                        trang 7
-  p007.v01 (bảng hệ số)  ◄─── block_ids: [p007.v00, p007.v01, …]  câu "Làm thêm ngày lễ tết… hệ số 3"
-                         ◄──────────────────────────────────────── grounding.ref: "p007.v01"
+  p007.b01 (bảng hệ số)  ◄─── block_ids: [p007.b00, p007.b01, …]  câu "Làm thêm ngày lễ tết… hệ số 3"
+                         ◄──────────────────────────────────────── grounding.ref: "p007.b01"
 ```
 
 Từ bất kỳ câu robot nói hay kết quả tìm kiếm nào cũng lần ngược được về đúng mẩu trên
@@ -257,7 +255,7 @@ Hai deck đang làm:
 | trang | 51 | 17 |
 | block | 272 | 71 |
 | bố cục VLM / dùng docling | 51 / 0 | 17 / 0 |
-| bảng · ảnh có mô tả · link ẩn | 18 · 26 · 57 | 1 · 3 · 1 |
+| bảng · ảnh có mô tả · link ẩn (đo trước 2026-10-12, nay bỏ) | 18 · 26 · 57 | 1 · 3 · 1 |
 | chương (từ mục lục) | 5 | 5 |
 | cờ cho người duyệt | 0 | 0 |
 | chunk (tìm được) | 104 (104) — 85 trang + 19 ảnh, 25 trang bị cắt | 18 (17) — 1 trang phân mục |

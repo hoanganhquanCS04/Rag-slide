@@ -79,7 +79,7 @@ Bên trong `parser\cli.py`:
 | Bước | Ra | Tốn | Bỏ qua khi |
 |---|---|---|---|
 | ① docling VlmPipeline: VLM đọc cả trang — bố cục + chữ + bảng (HTML) + mô tả ảnh | `docling_vlmpipeline.json` (raw: `logs\vlm_pipeline\<ten>\`) | 1 lần gọi/trang | đã có file (trừ `--redo`) |
-| ③ đối chiếu text layer + link + chương + vá tay + cờ | `document.json` | không | không bao giờ — luôn dựng lại |
+| ③ link + chương + cờ (enrich) | trong bộ nhớ | không | không bao giờ — tính lại mỗi lần nạp |
 
 Ghi chú:
 
@@ -91,7 +91,6 @@ Ghi chú:
   + cờ `empty_page`: xem phản hồi thô `logs\vlm_pipeline\<ten>\pNNN.txt`.
 - Xem khung vẽ lên trang: `python scripts\try_docling_gemma.py "<file>" --draw-only` ->
   `src\output\parser\<ten>\boxes\pages\`.
-- ③ tự áp file vá tay `data\patches\<ten>.json` nếu có (xem đầu `src\parser\patch.py`).
 - `run` thoát mã `3` khi có cờ mức `error` — vẫn ghi file bình thường, mã lỗi để CI bắt.
   `run_deck.sh` gặp mã 3 vẫn chạy tiếp; mã khác (không thấy file, thiếu khoá API…) thì DỪNG.
 - ④ chữ không đổi thì lấy vector từ cache (`src\output\embedders\cache\`), không gọi API.
@@ -139,14 +138,14 @@ LLM mỗi trang ĐỔI — trang không đổi thì giữ nguyên. Chạy riêng
 ```
 --- trang 7 | CÁCH TÍNH LÀM THÊM GIỜ | chuong: sec_02 (LÀM THÊM GIỜ, p6-8)
     hash=b56b4b44a58afe10  slide_type=content
-    p007.v00   para/title     1.62% CÁCH TÍNH LÀM THÊM GIỜ
-    p007.v01   table         13.66% |  | GIỜ LÀM THÊM BAN NGÀY | GIỜ LÀM THÊM BAN ĐÊM | ⏎ |---|---|---| ⏎ | …
-    p007.v02   para/list    100.00% Đảm bảo số giờ làm thêm không quá 40 giờ trong 01 tháng, không quá 200 g…
+    p007.b00   para/title     1.62% CÁCH TÍNH LÀM THÊM GIỜ
+    p007.b01   table         13.66% |  | GIỜ LÀM THÊM BAN NGÀY | GIỜ LÀM THÊM BAN ĐÊM | ⏎ |---|---|---| ⏎ | …
+    p007.b02   para/list    100.00% Đảm bảo số giờ làm thêm không quá 40 giờ trong 01 tháng, không quá 200 g…
 ```
 
-Mỗi dòng: `id` · loại · % diện tích trang · nội dung. `vNN` = khối VLM sắp, `bNN` =
-khối docling (trang chưa có / trượt bố cục VLM), `mNN` = vá tay. Mọi chữ đều do VLM đọc từ ảnh
-— chỗ cần soi. Block có link ẩn in thêm dòng `↳ link <chữ> -> <url>`.
+Mỗi dòng: `id` · loại · % diện tích trang · nội dung. `pNNN.bNN` = trang NNN, khối thứ NN theo thứ
+tự đọc (số có thể nhảy: ảnh trang trí đã bị bỏ). Mọi chữ đều do VLM đọc từ ảnh
+— chỗ cần soi.
 `--page` nhận một hoặc nhiều số cách nhau bằng dấu cách: `11` · `9 11` · `{9..15}` (bash tự bung dải).
 
 Xem cả deck bằng mắt: mở thẳng `src\output\parser\<ten>\document.json` trong VS Code — file đã gọn, đọc được.
@@ -177,10 +176,10 @@ Xem cả deck bằng mắt: mở thẳng `src\output\parser\<ten>\document.json`
 ```
 --- trang 7 · content · 6 câu · 112 âm tiết · ~34s · pass2  CỜ: too_long,vlm_number
     [delivery  6] Cách tính cụ thể ra sao?
-    [content  19] Làm thêm ngày lễ tết tính hệ số 3 ban ngày và hệ số 3.9 ban đêm.  → p007.v01
+    [content  19] Làm thêm ngày lễ tết tính hệ số 3 ban ngày và hệ số 3.9 ban đêm.  → p007.b01
 ```
 
-- `[content 19]` = câu mang thông tin, 19 âm tiết · `→ p007.v01` = block làm nguồn
+- `[content 19]` = câu mang thông tin, 19 âm tiết · `→ p007.b01` = block làm nguồn
 - `[delivery 6]` = câu dẫn dắt, không mang thông tin mới
 - `pass2` = lần đầu viết bị trượt bộ kiểm, đã sửa một lần — đáng soi
 - `CỜ:` = lỗi cần xem. Cuối bảng có tổng: thời lượng, tỉ lệ câu thiếu nguồn, cờ đỏ
@@ -267,7 +266,6 @@ bash scripts/tune.sh src/output/chunker/<ten>/chunks.json --k 5,10,20 --wd 1,1.5
 | Vừa sửa | Chạy lại |
 |---|---|
 | file slide gốc | `run_deck.sh "<file>" --redo` (→ S4 nếu cần kịch bản) |
-| `data\patches\<ten>.json` (vá tay) | `run_deck.sh "<file>"` → S4 (không gọi VLM) |
 | `src\prompts\s0_vlm_layout_prompt.md` / `VLM_MODEL` | `run_deck.sh "<file>" --redo` — gọi lại VLM cả file |
 | luật chunk (`src\chunker\`) | `run_deck.sh "<file>"` — chỉ chunk có chữ đổi mới gọi API nhúng |
 | `EMBED_MODEL` | `run_deck.sh` — nhúng lại TOÀN BỘ, ra file vector + collection mới mang tên model mới |

@@ -1,4 +1,4 @@
-"""Index từ khoá (nhánh sparse) — cùng hình với `index/store/` của nhánh dense.
+"""Index từ khoá (nhánh sparse) — cùng hình với `vectordb/` của nhánh dense.
 
 Một lớp cha chung + các biến thể THAY THẾ nhau + factory chọn theo `SPARSE_INDEX` trong .env.
 `search.py` chỉ gọi lớp cha — đổi cách làm BM25 là thêm một file biến thể, không sửa search.

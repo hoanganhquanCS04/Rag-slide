@@ -57,7 +57,7 @@ def save_vectors(cs: ChunkSet, mat: np.ndarray, *, model_id: str,
         "normalized": True,
         "n_vectors": len(cs.chunks),
         **info,
-        "sparse": False,   # API khong tra sparse — BM25 dung rieng o index/sparse/
+        "sparse": False,   # API khong tra sparse — BM25 dung rieng o retrieval/sparse/
         "rows": [c.chunk_id for c in cs.chunks],
         "keys": [text_key(c.text_enriched, model_id) for c in cs.chunks],
     }, ensure_ascii=False, indent=2), encoding="utf-8")

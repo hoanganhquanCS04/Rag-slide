@@ -5,7 +5,7 @@
     python src/parser/cli.py data/raw/onboarding_kit.pdf --table-pages 21 22 # chỉ chép lại bảng 2 trang
 
 Luồng: ① bố cục -> ②b chép bảng -> ② xét ảnh -> document.json. Cache cùng thư mục:
-docling_vlmpipeline.json · tables.json · pictures.json. Link / chương / vá tay / cờ: `parser.enrich`.
+docling_vlmpipeline.json · tables.json · pictures.json. Chương / cờ: `parser.enrich`.
 Xem lại kết quả: `python src/parser/show.py <doc_id> [--page 7]`.
 """
 
@@ -18,12 +18,10 @@ import sys
 from pathlib import Path
 
 if __package__ in (None, ""):  # chạy thẳng file: THAY src/parser/ bằng src/ — để tables.py,
-    sys.path[0] = str(Path(__file__).resolve().parents[1])  # links.py… không che module trùng tên
+    sys.path[0] = str(Path(__file__).resolve().parents[1])  # flags.py… không che module trùng tên
 
-from dotenv import load_dotenv
-
-from parser.factory import PARSERS, create_parser
-from utils.config import PARSER_OUTPUT, ROOT
+from parser.variants.docling import DoclingParser
+from utils.config import PARSER_OUTPUT
 from parser.enrich import enrich, page_pdf
 from models.parsed_document import ParsedDocument, slugify_doc_id
 
@@ -36,7 +34,7 @@ log = logging.getLogger("parser")
 OUT = PARSER_OUTPUT
 
 
-def parse_file(src: Path, *, model: str, parser: str = "docling", redo: bool = False,
+def parse_file(src: Path, *, model: str, redo: bool = False,
                table_pages: set[int] | None = None) -> int:
     """`table_pages`: chỉ chép lại bảng ở các trang này (bảng khác dùng cache)."""
     if not src.exists():
@@ -44,7 +42,7 @@ def parse_file(src: Path, *, model: str, parser: str = "docling", redo: bool = F
     if (pdf := page_pdf(src)) is None:
         raise SystemExit(f"can PDF cung ten: {src.with_suffix('.pdf')} (scripts/pptx2pdf.ps1)")
 
-    p = create_parser(parser, model, OUT / slugify_doc_id(src.stem))
+    p = DoclingParser(model, OUT / slugify_doc_id(src.stem))
     doc = p.run(src, pdf, redo=redo, table_pages=table_pages)
     p.save(doc)
     report(enrich(doc))      # chương / cờ không nằm trong document.json — tính lại để in
@@ -54,8 +52,7 @@ def parse_file(src: Path, *, model: str, parser: str = "docling", redo: bool = F
 def report(doc: ParsedDocument) -> None:
     log.info("")
     log.info("=== %s", doc.doc_id)
-    log.info("    %d trang | %d block | %d link an", doc.n_pages,
-             sum(len(p.blocks) for p in doc.pages), sum(len(b.hrefs) for p in doc.pages for b in p.blocks))
+    log.info("    %d trang | %d block", doc.n_pages, sum(len(p.blocks) for p in doc.pages))
     log.info("    anh co mo ta %d | bang %d", doc.n_described_images,
              sum(len(p.tables) for p in doc.pages))
 
@@ -67,10 +64,8 @@ def report(doc: ParsedDocument) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    load_dotenv(ROOT / ".env")
     ap = argparse.ArgumentParser(prog="parser", description=__doc__.splitlines()[0])
     ap.add_argument("file", type=Path, help="data/raw/<ten>.pdf | .pptx (can .pdf cung ten)")
-    ap.add_argument("--parser", default="docling", choices=PARSERS)
     ap.add_argument("--redo", action="store_true", help="goi VLM lai du da co cache")
     ap.add_argument("--model", default=os.environ.get("VLM_MODEL", "gemma4"))
     ap.add_argument("--table-pages", nargs="+", type=int, default=None,
@@ -80,7 +75,7 @@ def main(argv: list[str] | None = None) -> int:
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
     table_pages = set(args.table_pages) if args.table_pages else None
-    return parse_file(args.file, model=args.model, parser=args.parser, redo=args.redo,
+    return parse_file(args.file, model=args.model, redo=args.redo,
                       table_pages=table_pages)
 
 

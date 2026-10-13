@@ -35,9 +35,8 @@ ParsedDocument
 ├── flags[]     {kind, severity, page_no, block_id, detail}           ← enrich(), không ghi file
 └── pages[]
      ├── page_no · title · section_id · page_hash
-     ├── layout_error    chỉ có khi VLM sắp bố cục trượt kiểm tra -> trang dùng block docling
      └── blocks[]        NỘI DUNG, theo thứ tự đọc
-          └── id · kind · role · content · hrefs · polygon  (+ trường riêng từng loại)
+          └── id · page_no · kind · role · content · polygon  (+ trường riêng từng loại)
 ```
 
 Header / footer / số trang lặp ở mọi trang **không có trong file** — docling gắn nhãn
@@ -62,7 +61,6 @@ mục lục.
 | `title` | tiêu đề trang = khối `role: title` ĐẦU TIÊN (không có thì vắng) |
 | `section_id` | trỏ lên `sections[].id`; trang trước chương đầu (bìa, mục lục) thì vắng |
 | `page_hash` | hash nội dung + vị trí mọi block — đổi thì kịch bản trang đó viết lại |
-| `layout_error` | lý do VLM sắp bố cục trượt kiểm tra (sót chữ / id bịa / bỏ quên vùng) |
 
 ### Tầng block — hai câu mọi block đều trả lời
 
@@ -72,19 +70,12 @@ mục lục.
 | nằm đâu | `polygon` | 4 góc `[[l,t],[r,t],[r,b],[l,b]]`, `[0,1]`, gốc **trên-trái**, làm tròn 3 chữ số |
 
 **Tin được không:** MỌI chữ do VLM đọc từ ảnh trang (chữ slide, bảng) hoặc là **mô tả hình** —
-CÓ THỂ SAI. Chữ slide hay mô tả ảnh: xem `kind` (`image` = mô tả). Khối người vá tay: id
-`pNNN.mNN`. Trường `provenance` đã bỏ (2026-10-12) — mọi khối đều `vlm`, nó không phân biệt gì;
+CÓ THỂ SAI. Chữ slide hay mô tả ảnh: xem `kind` (`image` = mô tả). Trường `provenance` đã bỏ (2026-10-12) — mọi khối đều `vlm`, nó không phân biệt gì;
 document.json cũ còn khoá này thì nạp vẫn được, khoá bị bỏ qua.
 
-**`id`**: `p<trang>.<loại><số>`, ổn định — chunk và câu kịch bản trỏ vào đây.
-
-| loại | nghĩa |
-|---|---|
-| `p007.v01` | khối VLM sắp (trang có bố cục VLM) |
-| `p007.b03` | khối docling (trang chưa có bố cục VLM, hoặc trượt kiểm tra) |
-| `p007.m00` | khối vá tay |
-
-Id không đánh lại khi bỏ block rỗng → có thể nhảy số (`b03` → `b18`).
+**`id`**: `p<trang>.b<số>` (vd `p007.b04` = trang 7, khối thứ 4 theo thứ tự đọc của bước ①),
+ổn định — chunk và câu kịch bản trỏ vào đây. Id KHÔNG đánh lại khi bỏ khối (ảnh trang trí ở ②, khối
+rỗng ở enrich) → số có thể nhảy (`b01`, `b03`, `b04`…).
 
 **Trường riêng theo `kind`:**
 
@@ -101,15 +92,9 @@ Id không đánh lại khi bỏ block rỗng → có thể nhảy số (`b03` �
 | `title` | tiêu đề trang / tiêu đề mục / nhãn một nhóm |
 | `body` | đoạn văn thường |
 | `list` | bó gạch đầu dòng, MỘT block, các dòng ngăn bằng xuống dòng — S4 diễn đạt lại, không đọc bullet |
-| `links` | ≥ nửa số dòng là link (URL in ra chữ, hoặc chữ có link ẩn) — **không đọc URL thành tiếng**. Chỉ body/list mới đổi; title có link vẫn là title. Luật, tự gán cả lúc nạp lại |
+| `links` | ≥ nửa số dòng là URL in ra chữ — **không đọc URL thành tiếng**. Chỉ body/list mới đổi; title có link vẫn là title. Luật, tự gán cả lúc nạp lại. Link ẩn sau chữ (annotation PDF) KHÔNG đọc (bỏ 2026-10-12) |
 | `caption` | chú thích |
 
-**`hrefs`** — link ẨN sau chữ, đọc thẳng từ annotation PDF (`links.py`), gắn vào block chồng
-lên vùng link. Mỗi link kèm chữ nằm dưới nó — một block list có thể mang nhiều link:
-
-```json
-"hrefs": [{"text": "Cẩm nang phân quyền", "url": "https://camnangtt.vingroup.net/..."}]
-```
 
 Khác `urls` (URL in ra thành chữ). Không vào hash, không vào KB — runtime hiện ra khi được hỏi.
 
@@ -174,18 +159,18 @@ viết trên một dòng.
   "page_hash": "dfb5bdf1a09d1feb",
   "blocks": [
     {
-      "id": "p007.v00", "kind": "paragraph", "role": "title",
+      "id": "p007.b00", "kind": "paragraph", "role": "title",
       "content": "CÁCH TÍNH LÀM THÊM GIỜ",
       "polygon": [[0.499, 0.094], [0.843, 0.094], [0.843, 0.141], [0.499, 0.141]]
     },
     {
-      "id": "p007.v01", "kind": "table",
+      "id": "p007.b01", "kind": "table",
       "content": "|  | GIỜ LÀM THÊM BAN NGÀY | GIỜ LÀM THÊM BAN ĐÊM |\n|---|---|---|\n| Ngày thường | Hệ số 1.5 | Hệ số 2.1 |\n...",
       "cells": [["", "GIỜ LÀM THÊM BAN NGÀY", "GIỜ LÀM THÊM BAN ĐÊM"], ["Ngày thường", "Hệ số 1.5", "Hệ số 2.1"], "..."],
       "polygon": [[0.407, 0.287], [0.96, 0.287], [0.96, 0.534], [0.407, 0.534]]
     },
     {
-      "id": "p007.v02", "kind": "paragraph", "role": "list",
+      "id": "p007.b02", "kind": "paragraph", "role": "list",
       "content": "Đảm bảo số giờ làm thêm không quá 40 giờ trong 01 tháng, không quá 200 giờ trong 01 năm\nGiờ làm việc ban đêm được tính từ 22 giờ đến 06 giờ sáng ngày hôm sau.",
       "polygon": [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]
     }
@@ -218,27 +203,24 @@ page = doc.page(10)
 doc.section_of(10)                          # chương của trang
 
 for b in page.blocks:
-    b.content, b.polygon, b.hrefs                 # field lưu
+    b.page_no, b.content, b.polygon               # field lưu
     b.box, b.center, b.area                       # tính từ polygon
-    b.page, b.page_no, b.section                  # back-reference: trang / số trang / chương chứa nó
+    doc.section_of(b.page_no)                     # chương chứa block
 
 page.paragraphs · page.images · page.tables # lọc theo loại
 page.slide_type                             # loại trang — tính, không lưu
 page.compute_hash()                         # nội dung + vị trí
-page.document · page.section                # back-reference: deck / chương chứa trang
 
 doc.to_json()                               # đúng định dạng ghi ra file
 ```
 
 Luật dễ quên:
 
-- **Không LƯU `page_no` / `reading_order` / `layer` trong block.** Block nằm trong trang nào là
-  biết trang; thứ tự đọc là thứ tự trong mảng. Cần thì hỏi back-reference `b.page` / `b.page_no` /
-  `b.section` — gán bởi `link()` lúc nạp, KHÔNG ghi JSON. Thêm / thay block sau khi dựng trang thì
-  gọi lại `doc.link()` (`enrich()` và `BaseParser.run()` đã gọi sẵn).
+- **Block LƯU `page_no`** (lấy block ra khỏi trang vẫn biết nó ở đâu). Thứ tự đọc là thứ tự trong
+  mảng `page.blocks` — không lưu riêng.
 - **Lưới hàng/cột của bảng có thể sai** (VLM xếp nhầm hàng), dù chữ trong ô đúng.
 - **`content` của bảng, `urls` và `role: links` được tính lại mỗi lần NẠP** — không lệch được
-  với `cells` / chữ gốc / `hrefs`. `content` của bảng không ghi vào `document.json`.
+  với `cells` / chữ gốc. `content` của bảng không ghi vào `document.json`.
 
 ---
 
@@ -246,10 +228,9 @@ Luật dễ quên:
 
 | `kind` | mức | nghĩa |
 |---|---|---|
-| `empty_page` | error | không chữ, không mô tả ảnh → vào KB gần như rỗng. Không bắn ở trang `section_divider` |
-| `image_not_described` | error | ảnh đủ to không có mô tả (trang chưa có bố cục VLM) |
+| `empty_page` | error | không chữ, không mô tả ảnh → vào KB gần như rỗng — gồm cả trang VLM trả JSON hỏng ở ① (mất cả trang; `detail` trỏ tới `logs/vlm_pipeline/<doc_id>/pNNN.txt`). Không bắn ở trang `section_divider` |
+| `image_not_described` | error | ảnh đủ to mà bước ② không cho mô tả (VLM bỏ sót / lỗi) |
 | `table_empty` | error | docling khoanh được bảng mà 0 ô có chữ — thường là ảnh chụp bảng. Trang có bố cục VLM thì VLM đọc bảng từ ảnh |
-| `layout_failed` | warn | chỉ còn trong document.json cũ (`--mode layout`, đã bỏ 2026-10-08) — luồng hiện tại không bắn |
 | `no_sections` | info | không tìm thấy trang mục lục khớp → không có chương |
 
 ---
@@ -262,7 +243,7 @@ Luật dễ quên:
 .venv\Scripts\python.exe src\parser\cli.py "data\raw\<file>.pdf" --redo               # gọi lại VLM cả file
 .venv\Scripts\python.exe src\parser\cli.py "data\raw\<file>.pdf" --table-pages 21 22  # chỉ chép lại bảng 2 trang
 
-# xem (đã enrich: link · chương · vá tay · cờ)
+# xem (đã enrich: link · chương · cờ)
 .venv\Scripts\python.exe src\parser\show.py <doc_id> --page 9 10 11
 ```
 
@@ -273,10 +254,10 @@ parser.run(src, pdf)                       parser/base.py
 parser.save(doc)  -> document.json
 
 enrich(ParsedDocument.load(...))           parser/enrich.py — KB / S4 / runtime tự gọi khi nạp
-  links.py → sections.py → patch.py → flags.py → bỏ block rỗng không cờ
+  sections.py → flags.py → bỏ block rỗng không cờ
 ```
 
-- `enrich` áp `data\patches\<doc_id>.json` mỗi lần nạp, không ghi lại file nên vá không bị áp chồng.
+- `enrich` không ghi lại file: kết quả chỉ nằm trong bộ nhớ, tính lại mỗi lần nạp.
 
 ---
 
@@ -288,7 +269,7 @@ enrich(ParsedDocument.load(...))           parser/enrich.py — KB / S4 / runtim
 | trang có bố cục VLM | 8 (còn 43 trang dùng docling) | 17 |
 | block | 281: 111 title · 81 list · 30 body · 12 caption · 5 links · 26 ảnh · 16 bảng | 71: 34 title · 19 list · 14 body · 3 ảnh · 1 bảng |
 | block `vlm` | 28 | 5 |
-| link ẩn | 57 | 1 |
+| link ẩn (đo trước 2026-10-12, nay bỏ) | 57 | 1 |
 | chương | 5, từ mục lục p2 (p3 · p14 · p37 · p42 · p47) | 5, từ mục lục p2 (p3 · p4 · p6 · p9 · p12) |
 | cờ | 21 — 16 `image_not_described` · 4 `empty_page` · 1 `table_empty`, đều ở trang chưa có bố cục VLM | **0** |
 | kích thước | 185 KB | 33 KB |

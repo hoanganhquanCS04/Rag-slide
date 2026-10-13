@@ -95,7 +95,7 @@ tiền tố `· trang 11/40` là thứ duy nhất tách chúng.
 
 ## 4. Embed bao nhiêu: TẤT CẢ 51
 
-Kể cả 7 trang phân mục và `p15` (trang docling bỏ sót nội dung, nay đã vá tay).
+Kể cả 7 trang phân mục và `p15` (trang docling bỏ sót nội dung — lúc đo còn vá tay, cơ chế vá tay đã bỏ 2026-10-12).
 
 **Lọc ở bước TRUY VẤN, không phải ở bước nhúng.** Đây là hai việc khác nhau:
 

@@ -71,8 +71,8 @@ def rrf_fuse(r_dense: dict[Key, int], r_sparse: dict[Key, int], *, k: int = RRF_
 class Searcher:
     """Nạp một lần, hỏi nhiều lần.
 
-    Nhánh dense hỏi KHO VECTOR (`VECTOR_DB` trong .env: inmem | chroma, xem index/store/).
-    Nhánh sparse hỏi INDEX TỪ KHOÁ (`SPARSE_INDEX`: rank_bm25, xem index/sparse/).
+    Nhánh dense hỏi KHO VECTOR (`VECTOR_DB` trong .env: inmem | chroma, xem vectordb/).
+    Nhánh sparse hỏi INDEX TỪ KHOÁ (`SPARSE_INDEX`: rank_bm25, xem retrieval/sparse/).
     Khởi tạo gọi `sync` cả hai: lệch `chunks.json` thì nạp / dựng lại, khớp thì thôi.
     """
 

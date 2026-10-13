@@ -15,7 +15,7 @@ Khác bản gốc — CỐ Ý, đừng sửa lại cho giống:
     tìm trả về chữ (page_content)             trả (chunk_id, cosine) — R2 cần page_no, RRF cần hạng
     lọc: inmem nhận HÀM, chroma nhận DICT     cả hai nhận CÙNG một dict phẳng
          (lệch nhau -> lọc ở inmem hỏng)
-    chỉ dense                                 vẫn chỉ dense — BM25 ở index/sparse/, RRF ở search.py
+    chỉ dense                                 vẫn chỉ dense — BM25 ở retrieval/sparse/, RRF ở search.py
 
 Kho chỉ là BẢN SAO để tìm. Nguồn vẫn là `chunks.json` + `.npy` (§9 resume được từ bất kỳ
 stage nào): xoá cả thư mục chroma thì lần chạy sau `sync` tự dựng lại, không tốn API.
@@ -78,7 +78,7 @@ class VectorStore(ABC):
         So cả metadata chứ không chỉ `page_hash`: đổi luật chunk (tiền tố, cắt) thì chữ đổi mà
         trang không đổi; đổi luật `slide_type` thì `is_searchable` đổi mà chữ không đổi.
         Lệch là thay CẢ tài liệu — vài trăm vector, vài chục ms. Phần đắt (gọi API nhúng) thì
-        cache của index/embedder/ đã lo.
+        cache của embedders/ đã lo.
         """
         want = {c.chunk_id: chunk_metadata(c, self.model_id) for c in cs.chunks}
         if self.metadata(cs.doc_id) == want:

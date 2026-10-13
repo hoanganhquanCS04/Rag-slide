@@ -40,7 +40,7 @@ def main(argv: list[str] | None = None) -> int:
         if hasattr(s, "reconfigure"):
             s.reconfigure(encoding="utf-8", errors="replace")
     logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stdout)
-    for noisy in ("httpx", "kb", "llm"):               # log nội bộ, không phải lời robot
+    for noisy in ("httpx", "retrieval", "utils.llm"):               # log nội bộ, không phải lời robot
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
     session = Session(args.doc, RuntimeConfig.load(args.config), args.model, args.speed)

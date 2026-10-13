@@ -19,13 +19,11 @@ from pathlib import Path
 if __package__ in (None, ""):  # chạy thẳng file, không qua -m
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from dotenv import load_dotenv
-
 from chunker.base import MAX_TOKENS
 from chunker.factory import CHUNKERS, create_chunker
 from models.kb_chunk import ChunkSet
 from parser.enrich import enrich
-from utils.config import CHUNKER_OUTPUT, ROOT
+from utils.config import CHUNKER_OUTPUT
 from models.parsed_document import ParsedDocument
 
 for _s in (sys.stdout, sys.stderr):
@@ -67,7 +65,6 @@ def stats(cs: ChunkSet) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    load_dotenv(ROOT / ".env")
     ap = argparse.ArgumentParser(prog="chunker", description=__doc__.splitlines()[0])
     ap.add_argument("parsed", type=Path, help="src/output/parser/<ten>/document.json")
     ap.add_argument("--chunker", default="page", choices=CHUNKERS)
@@ -80,7 +77,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.parsed.exists():
         raise SystemExit(f"khong thay file: {args.parsed}")
-    doc = enrich(ParsedDocument.load(args.parsed))   # chương / vá tay / cờ không nằm trong document.json
+    doc = enrich(ParsedDocument.load(args.parsed))   # chương / cờ không nằm trong document.json
 
     chunker = create_chunker(args.chunker, OUT / doc.doc_id, args.max_tokens)
     cs = chunker.run(doc)

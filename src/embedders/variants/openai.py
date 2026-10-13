@@ -7,7 +7,7 @@ Vì sao bỏ bge-m3 local (đo được, ghi lại để sau khỏi tranh cãi l
 
 API CHẬM GẤP 4 ở runtime (mất round-trip mạng) và ăn ~29% budget 2.5s của §2.
 Đổi lại máy không phải giữ model. Offline thì API nhanh hơn vì gửi cả lô một lần.
-Muốn quay lại local: thêm `variants/bge_m3.py` + một dòng trong `embedder/factory.py`.
+Muốn quay lại local: thêm `variants/bge_m3.py` + một dòng trong `embedders/factory.py`.
 """
 
 from __future__ import annotations

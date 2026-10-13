@@ -59,11 +59,9 @@ class BaseChunker(ABC):
     # ------------------------------------------------------------------ dùng chung cho biến thể
 
     def prefix(self, doc: ParsedDocument, page: ParsedPage) -> str:
-        """'[Nhân sự · Thuế và đăng ký giảm trừ gia cảnh · trang 18/51] '.
-
-        Tiêu đề trang nằm ở TIỀN TỐ chứ không chỉ trong thân: trang dài bị cắt thì mảnh sau vẫn
-        mang nó (Onboarding p9 mảnh 2 mở bằng "Chỉ gửi email cho đúng người…" — thiếu tiêu đề là
-        không biết đang nói chuyện email). Trang phân mục có tiêu đề trùng tên chương -> ghi một lần.
+        """ 
+        tạo dòng đầu gắn vào mỗi chunk trước khi đem đi nhúng vector. 
+        Dòng đó cho biết mẩu chữ thuộc chương nào, trang nào.
         """
         sec = doc.section_of(page.page_no)
         heads = [h for h in dict.fromkeys([sec.title if sec else None, page.title]) if h]

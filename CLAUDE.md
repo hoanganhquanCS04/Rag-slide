@@ -26,7 +26,7 @@ và có nguồn truy nguyên được.
    phải đẩy vào offline. Runtime budget: < 2.5s tới byte audio đầu tiên.
 2. **Dữ liệu chính xác KHÔNG BAO GIỜ để model sinh lại.** Title, chart series, ô bảng
    đã có bản đúng 100% từ parsing pptx. Đưa cho LLM là tự tạo cơ hội bịa lại cái đang đúng.
-   Nguồn gốc ghi theo LOẠI khối và id (ảnh = `ParsedImage`, vá tay = id `pNNN.mNN`), không còn
+   Nguồn gốc ghi theo LOẠI khối (ảnh = `ParsedImage`), không còn
    trường `provenance` riêng (bỏ 2026-10-12 — v0 mọi chữ đều do VLM đọc, trường đó không phân biệt gì).
 3. **Ảo giác offline nguy hiểm gấp nhiều lần online.** Bịa runtime sai một lần;
    bịa trong `Scenario` thì robot nói sai ở MỌI buổi thuyết trình.
@@ -65,7 +65,7 @@ Ba hệ quả bắt buộc phải chấp nhận, không được lờ đi:
 1. **Mất bản đúng 100% của `chart_data`, `tables`, `build_steps`.** Chúng đến từ XML
    của pptx; PDF không có. NT2 vẫn giữ nguyên nhưng phạm vi co lại về **0**: S0 không đọc
    text layer PDF (bỏ 2026-10-08 — text layer Onboarding thiếu dấu cách, đem thay chữ VLM làm
-   dính 126 từ), nên MỌI chữ do VLM đọc; chỉ khối vá tay (id `pNNN.mNN`) là chắc đúng. Phân biệt
+   dính 126 từ), nên MỌI chữ do VLM đọc, không khối nào chắc đúng 100%. Phân biệt
    "chữ trên slide" với "mô tả ảnh" bằng LOẠI khối (`ParsedImage`).
 2. **S3 Alignment suy biến.** Align slide với nguồn mà nguồn chính là slide → mỗi
    slide map vào chính nó, không sinh thêm tri thức nào. Chưa có tài liệu nguồn
@@ -181,9 +181,9 @@ Xem [docs/spec/parsed-document.md](docs/spec/parsed-document.md) cho schema đ�
 - Ảnh không có mô tả phải ghi `why_empty` — phân biệt *chưa gọi* (`area_below_threshold`)
   với *gọi mà fail* (`api_error`) và *đủ to mà không có* (`not_described`)
 - KHÔNG đọc text layer PDF, KHÔNG OCR (OCR chậm 8.4×, phá dấu tiếng Việt). PDF chỉ dùng để vẽ ảnh
-  trang và đọc link ẩn (annotation — URL không có trong ảnh; nhãn link lấy từ chữ VLM)
+  trang. Link ẩn sau chữ (annotation) KHÔNG đọc (bỏ 2026-10-12): `role: links` chỉ bắt URL in ra chữ
 - `page_hash` = SHA(nội dung + polygon từng block), cho incremental build
-- Mỗi block có `content` · `polygon`. MỘT file, vừa để người đọc vừa để
+- Mỗi block có `page_no` · `content` · `polygon`. MỘT file, vừa để người đọc vừa để
   pipeline chạy — trường rỗng không ghi, không lưu thứ suy ra được
 
 **Mấy luật dưới đây chỉ áp dụng khi quay lại `.pptx`** (đích, chưa làm):
@@ -392,7 +392,7 @@ input → regex fast-path ──(khớp)──→ goto_slide()          [~5ms]
   - **Reranker: BỎ (chốt 2026-10-01).** Không chạy local (cùng lý do đã bỏ `bge-m3`), và
     không chờ quyền `/rerank` trên API key nữa (cổng trả 403 `capability_not_allowed`).
     Muốn xếp hạng tốt hơn thì làm ở tầng gộp (RRF K, trọng số — `scripts/tune.sh`), ở dữ
-    liệu (chunk, patch, mô tả ảnh) hoặc viết lại câu hỏi.
+    liệu (chunk, mô tả ảnh) hoặc viết lại câu hỏi.
   - ⚠️ **Hệ quả: KHÔNG có confidence gate calibrate được.** Phải chấp nhận và ghi rõ,
     đừng lờ đi:
 
@@ -450,11 +450,11 @@ BẢN SAO để tìm, xoá đi thì tự dựng lại từ `.npy`, không tốn 
 
 ```
 src/models/      schema Pydantic dùng chung — parsed_document.py (S0) · kb_chunk.py (S5) ·
-                 scenario.py (S4) · backref.py (con trỏ ngược, xem dưới)
+                 scenario.py (S4)
 src/utils/       dùng chung, không thuộc stage nào — config.py (gốc repo, .env, MODEL_ID,
                  PROMPTS_DIR, OUTPUT_DIR) · llm.py · vectors.py · filters.py · tokens.py · syllables.py
-src/parser/      S0 — cli.py · factory.py · base.py · variants/docling.py · vlm.py ·
-                 enrich.py (link ẩn → chương → vá tay → cờ) · links · sections · flags · patch ·
+src/parser/      S0 — cli.py · base.py · variants/docling.py (biến thể DUY NHẤT, cli gọi thẳng) · vlm.py ·
+                 enrich.py (chương → cờ) · sections · flags ·
                  pictures (②) · tables (②b) · show.py (xem document.json)
 src/chunker/     S5 chunk — cli.py · factory.py · base.py · variants/page.py
 src/embedders/   S5 nhúng — base.py · cache.py · factory.py · variants/openai.py
@@ -467,23 +467,18 @@ src/prompts/     MỌI prompt (*.md)
 src/output/      MỌI artifact pipeline sinh ra (gitignore)
 ```
 
-Khuôn mỗi stage có biến thể: `base.py` (ABC + phần dùng chung) + `variants/` + `factory.py` (dict
+Khuôn mỗi stage có NHIỀU biến thể (chunker, embedders, vectordb, sparse): `base.py` (ABC + phần dùng chung) + `variants/` + `factory.py` (dict
 `"module:Class"`, import lười). **Các thư mục stage KHÔNG import nhau qua lại tuỳ tiện** — phần
 chung ở `src/utils/`, schema ở `src/models/`. Cache embedding là lớp bọc `embedders/cache.py`.
 Đường dẫn gốc / prompt / output CHỈ lấy từ `utils.config` — không tự tính `Path(__file__).parents[...]`.
 
-**Back-reference** (`models/backref.py`): đứng ở object con chấm ra được object cha —
-`block.page` · `block.page_no` · `block.section` · `page.document` · `page.section` ·
-`chunk.chunk_set` · `sentence.slide` · `sentence.page_no`. Giữ trong `PrivateAttr` (KHÔNG ghi
-JSON), gán bằng `link()` của object cha mỗi lần nạp. Sửa cây (thêm / thay block) thì gọi lại
-`doc.link()` — `enrich()` và `BaseParser.run()` đã gọi sẵn. `BackRef` luôn `==` nhau: pydantic so
-cả attribute ẩn, không thế thì so hai cây khác nhau là đệ quy vô hạn.
+**Vị trí trong cây LƯU THẲNG, không dùng con trỏ ngược** (back-reference bỏ 2026-10-12): block có
+`page_no`, chunk có `page_no`, kịch bản trang có `page_no`. Cần chương thì `doc.section_of(page_no)`.
 
 **Dữ liệu:**
 
 ```
 data/raw/<file>.pdf                       file gốc — VỪA là deck VỪA là KB (.pptx cần .pdf cùng tên)
-data/patches/<doc_id>.json                nội dung gõ tay cho trang parser vẫn sai
 data/eval/<doc_id>.queries.json           câu hỏi có nhãn để đo retrieval
 data/pronunciation.json                   KHO PHÁT ÂM CHUNG mọi deck — máy đề xuất từ kịch bản, người chốt
 .env  VLM_MODEL · LLM_MODEL · EMBED_MODEL  tên model dùng — sửa ở đây, KHÔNG sửa trong code
@@ -501,7 +496,7 @@ src/output/
 ├── parser/<doc_id>/              S0 — python src/parser/cli.py <file>  (① + ②b + ②)
 │   ├── docling_vlmpipeline.json  ① DoclingDocument VlmPipeline (cache — có rồi thì không gọi VLM)
 │   ├── tables.json · pictures.json   ②b chép bảng · ② xét ảnh (cache theo bảng / trang)
-│   ├── document.json             ParsedDocument — link / chương / vá tay / cờ KHÔNG có trong file:
+│   ├── document.json             ParsedDocument — link / chương / cờ KHÔNG có trong file:
 │   │                             KB, S4, runtime gọi `parser.enrich.enrich()` lúc nạp
 │   │                             xem: python src/parser/show.py <doc_id> [--page 7]
 │   └── boxes/                    ảnh khung từng trang (scripts/try_docling_gemma.py), chỉ để soi

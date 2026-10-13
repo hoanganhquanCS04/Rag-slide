@@ -256,18 +256,18 @@ class DoclingParser(BaseParser):
             bid = f"p{page.page_no:03d}.b{len(page.blocks):02d}"
             block: AnyBlock
             if isinstance(item, PictureItem):
-                block = ParsedImage(id=bid, polygon=polygon)
+                block = ParsedImage(id=bid, page_no=page.page_no, polygon=polygon)
                 block.why_empty = ("area_below_threshold" if block.area < self.picture_area_threshold
                                    else "not_described")
             elif isinstance(item, TableItem):
-                block = ParsedTable(id=bid, polygon=polygon,
+                block = ParsedTable(id=bid, page_no=page.page_no, polygon=polygon,
                                     cells=[[norm_text(c.text) for c in row] for row in item.data.grid])
             else:
                 # chuẩn hoá TỪNG DÒNG, giữ `\n`: dồn cả khối làm mục lục p2 thành 1 dòng -> sections.py
                 # bỏ qua p2, vớ mục lục con p3 -> một chương phủ p12–p51
                 if not (text := "\n".join(ln for raw in item.text.splitlines() if (ln := norm_text(raw)))):
                     continue
-                block = ParsedParagraph(id=bid, polygon=polygon, content=text,
+                block = ParsedParagraph(id=bid, page_no=page.page_no, polygon=polygon, content=text,
                                         role=_ROLE.get(item.label, "body"))  # type: ignore[arg-type]
             page.blocks.append(block)
 

@@ -311,7 +311,7 @@ c. bỏ rerank, gate bằng RRF   ← ĐÃ CHỌN
 ```
 
 Retrieval cố định **top-5**, không nới `k`. Muốn xếp hạng tốt hơn thì làm ở tầng gộp (§4,
-`scripts/tune.sh`), ở dữ liệu (chunk, patch, mô tả ảnh) hoặc viết lại câu hỏi. Cái giá phải
+`scripts/tune.sh`), ở dữ liệu (chunk, mô tả ảnh) hoặc viết lại câu hỏi. Cái giá phải
 nhận: cổng tin cậy ở runtime dùng **biên RRF** — chỉ là thứ tự, không calibrate được —
 nên config khai `calibrated: false` và §11 `harmful_jump` chỉ báo cáo, không làm gate.
 
@@ -463,7 +463,7 @@ nói trang này **dùng để làm gì**.
 
 Bản thiết kế cũ giao việc này cho S1 (sinh `message` — *"trang này muốn nói gì"*), nhưng S1
 đã bỏ. Chỗ chữa còn lại nằm ở **dữ liệu**: một câu kiểu *"lưu biểu đồ đã vẽ ra file ảnh bằng
-plt.savefig"* trong mô tả ảnh hoặc vá tay (`data/patches/`) là khớp ngay cả hai nhánh — hoặc
+plt.savefig"* trong mô tả ảnh là khớp ngay cả hai nhánh — hoặc
 viết lại câu hỏi ở runtime (R3b).
 
 Ghi lại ở đây để sau khỏi đi sửa nhầm chỗ: **ca này chữa ở dữ liệu, không ở search.**

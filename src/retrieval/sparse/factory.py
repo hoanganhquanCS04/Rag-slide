@@ -1,4 +1,4 @@
-"""Chọn index từ khoá theo `SPARSE_INDEX` trong .env — cùng kiểu `index/store/factory.py`."""
+"""Chọn index từ khoá theo `SPARSE_INDEX` trong .env — cùng kiểu `vectordb/factory.py`."""
 
 from __future__ import annotations
 

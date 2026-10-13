@@ -22,6 +22,9 @@ log = logging.getLogger(__name__)
 def _empty_page(doc: ParsedDocument) -> list[Flag]:
     """Không chữ (ngoài tiêu đề) mà cũng không mô tả ảnh nào -> vào KB gần như rỗng.
 
+    Cũng bắt trang VLM trả JSON hỏng ở bước ① (mất CẢ trang -> 0 khối) — lý do xem ở phản hồi thô
+    `logs/vlm_pipeline/<doc_id>/pNNN.txt`, gọi lại bằng `python src/parser/cli.py <file> --redo`.
+
     Trang phân mục rỗng là ĐÚNG thiết kế — không bắn (trước đây bắn oan 7 cờ error,
     CLI thoát mã 1, CI đỏ giả). Trang chỉ có tiêu đề + MỘT BẢNG có chữ cũng không rỗng —
     Onboarding p21/p22/p49/p50 (bảng chấm công, danh mục văn bản ATTT) từng bị bắn oan.
@@ -38,7 +41,8 @@ def _empty_page(doc: ParsedDocument) -> list[Flag]:
                 page_no=page.page_no,
                 detail=(
                     f"{len(page.paragraphs)} block chu, "
-                    f"{len(page.images)} anh nhung 0 co mo ta"
+                    f"{len(page.images)} anh nhung 0 co mo ta — "
+                    f"xem logs/vlm_pipeline/{doc.doc_id}/p{page.page_no:03d}.txt"
                 ),
                 severity="error",
             )
@@ -69,7 +73,7 @@ def _table_empty(doc: ParsedDocument) -> list[Flag]:
 
     Đo trên Onboarding Kit: cả 3 bảng rỗng (p20 hệ số OT, p33 mã giảm giá Vinpearl, p38 quy
     định XLVP) là ẢNH CHỤP bảng dán vào slide — không có text layer, OCR tắt. VLM cũng không
-    chạm tới vì docling gán nhãn `table` chứ không phải `picture`. Chỉ vá tay được.
+    chạm tới vì docling gán nhãn `table` chứ không phải `picture`. Người duyệt phải xem.
     """
     return [
         Flag(
@@ -82,19 +86,6 @@ def _table_empty(doc: ParsedDocument) -> list[Flag]:
         for page in doc.pages
         for t in page.tables
         if not t.content
-    ]
-
-
-def _layout_failed(doc: ParsedDocument) -> list[Flag]:
-    """VLM sắp bố cục mà trượt kiểm tra (sót chữ, bịa id, bỏ quên vùng) -> trang dùng docling.
-
-    Docling có thể trộn cột, băm vụn chữ (Onboarding p10: đảo nghĩa quy định xe xăng) —
-    trang này cần người xem lại, hoặc gọi lại VLM: `python src/parser/cli.py <file> --redo`.
-    """
-    return [
-        Flag(kind="layout_failed", page_no=p.page_no, detail=p.layout_error, severity="warn")
-        for p in doc.pages
-        if p.layout_error
     ]
 
 
@@ -115,7 +106,6 @@ def build_flags(doc: ParsedDocument) -> list[Flag]:
         _empty_page(doc)
         + _image_not_described(doc)
         + _table_empty(doc)
-        + _layout_failed(doc)
         + _no_sections(doc)
     )
     order = {"error": 0, "warn": 1, "info": 2}

@@ -1,7 +1,7 @@
 # KBChunk — cắt tài liệu thành mẩu để tìm
 
 **Vào:** `src/output/parser/<doc_id>/document.json` (`ParsedDocument`) — file DUY NHẤT, không đọc
-`docling_vlmpipeline.json` / `data/patches/` (đã gộp vào đó ở S0) · **Ra:**
+`docling_vlmpipeline.json` / `tables.json` / `pictures.json` (đã gộp vào đó ở S0) · **Ra:**
 `src/output/chunker/<doc_id>/chunks.json` · **Code:** [src/chunker/](../../src/chunker/) — `BaseChunker`
 ([base.py](../../src/chunker/base.py)) + biến thể `page` ([variants/page.py](../../src/chunker/variants/page.py))
 
@@ -146,7 +146,6 @@ vector_role    "page"                        ← "image" không còn sinh, xem �
 cảnh hơn). Không ghi tỉ lệ thì lúc R4 trả lời không biết phần nào đáng dè dặt. Trường
 `provenance` cũ (đếm `{"vlm": 3}`) đã bỏ 2026-10-12 — mọi khối đều `vlm`, nó không phân biệt gì.
 
-**Back-reference** (không ghi JSON): `chunk.chunk_set` -> cả bộ chunk chứa nó.
 
 `block_ids` cho phép truy ngược về `ParsedDocument`, nên `grounding` của NT3 chỉ được
 đúng vào ảnh `p019.b02` chứ không phải chung chung cả trang.

@@ -186,7 +186,7 @@ def apply_tables(doc: ParsedDocument, tables_json: Path) -> Counter[str]:
                 out["giu_bang_buoc_1"] += 1
                 continue
             page.blocks[i] = ParsedTable(                      # dựng lại: fill_down + content tính lại
-                id=b.id, polygon=b.polygon, caption=b.caption, cells=res["cells"])
+                id=b.id, page_no=b.page_no, polygon=b.polygon, caption=b.caption, cells=res["cells"])
             out["chep_lai_buoc_2b"] += 1
             touched = True
         if touched:

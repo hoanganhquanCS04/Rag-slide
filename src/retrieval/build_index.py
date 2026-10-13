@@ -53,7 +53,7 @@ def embed_chunkset(cs: ChunkSet, embedder: Embedder) -> tuple[Path, Path]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="index", description=__doc__.splitlines()[0])
+    ap = argparse.ArgumentParser(prog="build_index", description=__doc__.splitlines()[0])
     ap.add_argument("chunks", type=Path, help="src/output/chunker/<ten>/chunks.json")
     ap.add_argument("--embedder", default=None, choices=EMBEDDERS, help="mac dinh EMBEDDER trong .env")
     ap.add_argument("--model", default=MODEL_ID, help="mac dinh EMBED_MODEL trong .env")

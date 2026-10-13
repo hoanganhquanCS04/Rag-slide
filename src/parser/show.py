@@ -1,4 +1,4 @@
-"""Xem `src/output/parser/<doc_id>/document.json` đã enrich (link / chương / vá tay / cờ).
+"""Xem `src/output/parser/<doc_id>/document.json` đã enrich (chương / cờ).
 
     python src/parser/show.py onboarding_kit                  # tổng quan + chương + cờ
     python src/parser/show.py onboarding_kit --page 7 --full  # một trang, không cắt chữ
@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 if __package__ in (None, ""):  # chạy thẳng file: THAY src/parser/ bằng src/ — để tables.py,
-    sys.path[0] = str(Path(__file__).resolve().parents[1])  # links.py… không che module trùng tên
+    sys.path[0] = str(Path(__file__).resolve().parents[1])  # flags.py… không che module trùng tên
 
 from parser.cli import OUT, report
 from parser.enrich import enrich
@@ -41,7 +41,7 @@ def show_pages(doc: ParsedDocument, pages: list[int], full: bool) -> None:
         if page is None:
             log.warning("khong co trang %d", pg)
             continue
-        sec = page.section
+        sec = doc.section_of(pg)
         where = f"{sec.id} ({sec.title}, p{sec.start_page}-{sec.end_page})" if sec else "—"
         log.info("")
         log.info("--- trang %d | %s | chuong: %s", pg, page.title or "(khong tieu de)", where)
@@ -52,8 +52,6 @@ def show_pages(doc: ParsedDocument, pages: list[int], full: bool) -> None:
             body = b.content or f"(rong — {getattr(b, 'why_empty', None)})"
             log.info("    %-10s %-12s %6.2f%% %s",
                      b.id, kind, b.area * 100, _cut(body, full))
-            for h in b.hrefs:
-                log.info("    %-10s ↳ link %s -> %s", "", h.text, h.url)
 
         for f in doc.flags:
             if f.page_no == pg:

@@ -15,7 +15,7 @@ trên slide.
 
 |    | Bước            | Code                            | Làm gì                                                                                                                                                                                                   |
 | -- | ----------------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ✅ | S0 Parse          | `src/parser/`                | docling đọc chữ + toạ độ (tắt OCR) · VLM nhìn cả trang sắp chữ thành khối · VLM chép bảng từ ảnh bảng · chương từ trang mục lục · link ẩn · vá tay · cờ cho người duyệt |
+| ✅ | S0 Parse          | `src/parser/`                | docling đọc chữ + toạ độ (tắt OCR) · VLM nhìn cả trang sắp chữ thành khối · VLM chép bảng từ ảnh bảng · chương từ trang mục lục · cờ cho người duyệt |
 | ✅ | S5 KB             | `src/retrieval/`                     | 1 trang = 1 chunk (cắt khi > 500 token) · nhúng`text-embedding-3-small` qua API, cache theo nội dung · kho vector Chroma hoặc RAM · index BM25                                                    |
 | ✅ | Tìm kiếm        | `src/retrieval/search.py`            | hybrid vector + BM25, gộp bằng RRF (K=15, 1:1), trả**top-5 trang**                                                                                                                                |
 | ✅ | Đo chất lượng | `src/retrieval/{eval,audit,tune}.py` | bộ câu hỏi có nhãn · self-retrieval + quét chunk trùng · quét tham số RRF                                                                                                                       |
@@ -41,7 +41,7 @@ Số hiện tại (2026-10-02), hai deck đang làm:
 data/raw/<file>.pdf
    │ ① docling VlmPipeline: VLM đọc từng trang — bố cục + chữ        API + cache
    │   + bảng (HTML) + mô tả ảnh          (raw -> logs/vlm_pipeline/)
-   │ ③ đối chiếu text layer + link + chương + vá tay + cờ              CPU
+   │ ③ link + chương + cờ (enrich, mỗi lần nạp)                        CPU
    ▼
 src/output/parser/<ten>/document.json      ParsedDocument — nguồn của mọi bước sau
    │ ④a chunk                                                        miễn phí
@@ -150,22 +150,20 @@ python scripts/try_ask.py onboarding_kit
 
 ```
 src/
-├── parser/       S0 — file gốc -> ParsedDocument          cli.py (đường DUY NHẤT để parse)
-├── parsing/      ParsedDocument + enrich (link · chương · vá tay · cờ)   cli.py show
+├── models/       schema Pydantic dùng chung: ParsedDocument · KBChunk · Scenario
+├── utils/        dùng chung: config (đường dẫn, .env) · llm · vectors · tokens · syllables
+├── parser/       S0 — file gốc -> ParsedDocument   cli.py (parse) · show.py (xem) · enrich (link · chương · cờ)
 ├── chunker/      S5 — ParsedDocument -> chunks.json
-├── index/        S5 — chunks.json -> vector + kho           cli.py
-│   ├── embedder/ chữ -> vector: openai (EMBEDDER), cache bọc ngoài
-│   ├── store/    kho vector: inmem | chroma (VECTOR_DB)
-│   └── sparse/   index từ khoá: rank_bm25 (SPARSE_INDEX)
-├── kb/           tìm (hybrid + RRF) · đo (audit, eval, tune) · deck_map
+├── embedders/    S5 — chữ -> vector: openai (EMBEDDER), cache bọc ngoài
+├── vectordb/     S5 — kho vector: inmem | chroma (VECTOR_DB)
+├── retrieval/    tìm (hybrid + RRF, BM25 ở sparse/) · build_index · deck_map · đo (audit, eval, tune)
+├── scenario/     S4 kịch bản
 ├── runtime/      hỏi đáp thử bản chữ (try_ask.py dùng retrieve + router)
-├── scenario/     S4 kịch bản — ngoài giai đoạn hiện tại
-└── llm.py        gọi LLM/VLM qua API, retry, log vào logs/
+├── prompts/      mọi prompt (không hardcode trong .py)
+└── output/       mọi thứ sinh ra, mỗi thư mục con trùng tên thư mục code   (gitignore)
 scripts/          run_deck.sh · try_ask.py · tune.sh · pptx2pdf.ps1 · extract_terms.py
-src/prompts/          mọi prompt (không hardcode trong .py)
 config/           runtime.json — tham số hỏi đáp
-data/             raw/ file gốc · eval/ câu hỏi có nhãn · patches/ vá tay · pronunciation.json
-src/output/              mọi thứ sinh ra: parsed/ · kb/ · index/ · deck/            (gitignore)
+data/             raw/ file gốc · eval/ câu hỏi có nhãn · pronunciation.json
 docs/             tài liệu — xem dưới
 ```
 

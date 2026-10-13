@@ -36,7 +36,7 @@ scenario.json    LLM sinh + NGƯỜI duyệt    mất là phải trả tiền + 
 ```
 
 Trộn hai loại vào một file thì mỗi lần parse lại là đe doạ kịch bản — đúng cái bẫy đã
-dính với trang 15, phải đẻ ra `data/patches/` để nội dung gõ tay sống sót.
+dính với trang 15 (nội dung gõ tay mất sau một lần parse lại).
 
 **Lưu tách, xem chung:** `src/scenario/cli.py <parsed> --show --page 11` in kịch bản của trang,
 mỗi câu content kèm `block_id` nó trỏ tới — mở `python src/parser/show.py <ten> --page 11` cạnh bên là đối chiếu được.
@@ -206,7 +206,6 @@ p20). Cấm số thì các trang đó mất hết nội dung, trái luật ĐỦ
 - câu nêu số từ block ẢNH mang cờ **vàng** `vlm_number` (chưa có code) — chỉ đánh dấu để ai muốn đối
   chiếu với ảnh thì biết câu nào, KHÔNG bắt pass 2
 - vẫn cấm nêu tên riêng / dịp lễ mà chữ trên slide không nhắc — đó là VLM đoán bối cảnh ảnh
-- block vá tay (id `pNNN.mNN`) là người gõ, không mang cờ
 
 **Tầng 4 — người duyệt S7**, chỉ phần bị cờ (§10).
 

@@ -5,23 +5,20 @@
                                               |-- ParsedTable       (bảng)
                                               `-- ParsedImage       (ảnh)
 
-Mỗi block trả lời hai câu, loại nào cũng vậy:
+Mỗi block trả lời ba câu, loại nào cũng vậy:
 
+    page_no      trang nào        số trang chứa block
     content      nói gì           chữ · mô tả VLM · markdown bảng
     polygon      nằm đâu          4 góc, [0,1], gốc TRÊN-TRÁI
 
-Mọi chữ do VLM đọc từ ảnh trang (CÓ THỂ SAI); khối người vá tay có id `pNNN.mNN` (parser/patch.py).
+Mọi chữ do VLM đọc từ ảnh trang (CÓ THỂ SAI). Id khối `pNNN.bNN` = trang NNN, khối thứ NN theo thứ tự đọc.
 
 Ghi ra JSON: trường rỗng (None / [] / {}) KHÔNG ghi — trừ `content`, để nhìn là thấy
 block nào không có nội dung. Nạp lại thì trường vắng lấy giá trị mặc định.
-
-Back-reference (KHÔNG ghi JSON, gán lại mỗi lần nạp bằng `link()`): `block.page`,
-`block.page_no`, `block.section`, `page.document`, `page.section`.
 """
 
 from __future__ import annotations
 
-import difflib
 import hashlib
 import json
 import re
@@ -32,14 +29,11 @@ from typing import Annotated, Any, ClassVar, Literal
 from pydantic import (
     BaseModel,
     Field,
-    PrivateAttr,
     ValidationError,
     field_validator,
     model_serializer,
     model_validator,
 )
-
-from models.backref import BackRef
 
 # Một dòng chỉ gồm một URL — "https://moso.vn/" · "www.abc.com/x"
 URL_LINE = re.compile(r"(?:https?://|www\.)\S+")
@@ -88,41 +82,25 @@ class _Base(BaseModel):
 
 # --------------------------------------------------------------------------- Block
 
-
-class Href(_Base):
-    """Một link ẩn: `text` = dòng chữ VLM mà vùng link phủ gần hết ("Cẩm nang phân quyền"); rỗng =
-    link chỉ phủ một cụm trong câu (dòng đó không tính là dòng link — links.py). `url` = đích.
-
-    Một block list có thể mang nhiều link (p3 Onboarding: 7) — `text` mới chọn được đúng cái.
-    """
-
-    text: str
-    url: str
-
-
 class Block(_Base):
     """Lớp cha của mọi mẩu nội dung trên trang.
 
-    Không LƯU `page_no` / `reading_order`: block nằm trong `page.blocks` là đã nói lên trang
-    nào, thứ tự đọc là thứ tự trong mảng. Muốn biết trang / chương thì hỏi back-reference
-    `.page` / `.page_no` / `.section` (gán bởi `ParsedPage.link()`, không ghi JSON).
+    `page_no` LƯU trong block: lấy block ra khỏi trang (vd gom ảnh cần duyệt cả deck) vẫn biết
+    nó ở trang nào. Thứ tự đọc là thứ tự trong `page.blocks` (và số NN trong id `pNNN.bNN`).
+    Muốn biết chương: `doc.section_of(block.page_no)`.
     Header/footer lặp của docling bị bỏ ở parser — không phải nội dung, chương lấy từ mục lục.
     """
 
     _KEEP_EMPTY: ClassVar[set[str]] = {"content"}
     _ORDER: ClassVar[tuple[str, ...]] = (
-        "id", "kind", "role", "content", "urls", "hrefs", "cells", "caption",
+        "id", "page_no", "kind", "role", "content", "urls", "cells", "caption",
         "polygon", "why_empty",
     )
 
     id: str                     # "p010.b03" — ổn định, chunk và câu kịch bản trỏ vào
+    page_no: int                # trang chứa block
     content: str | None = None
     polygon: list[Point]
-    # Link ẨN sau chữ (annotation PDF, parser/links.py) — khác `urls` là URL IN RA thành chữ.
-    # Không vào hash / KB: robot không đọc URL, runtime chỉ hiện ra khi được hỏi.
-    hrefs: list[Href] = Field(default_factory=list)
-
-    _page_ref: BackRef = PrivateAttr(default_factory=BackRef)
 
     @field_validator("polygon")
     @classmethod
@@ -150,37 +128,9 @@ class Block(_Base):
         l, t, r, b = self.box
         return max(0.0, r - l) * max(0.0, b - t)
 
-    # -------- back-reference
-
-    @property
-    def page(self) -> ParsedPage | None:
-        """Trang chứa block này."""
-        return self._page_ref.target
-
-    @property
-    def page_no(self) -> int | None:
-        return self.page.page_no if self.page else None
-
-    @property
-    def section(self) -> SectionSpan | None:
-        """Chương chứa block này — đi qua trang để hỏi deck."""
-        return self.page.section if self.page else None
-
 
 def polygon_from_box(l: float, t: float, r: float, b: float) -> list[Point]:
     return [(l, t), (r, t), (r, b), (l, b)]
-
-
-def _is_anchor(line: str, hrefs: list[Href]) -> bool:
-    """Dòng này là chữ của một link ẩn? So sau khi bỏ khoảng trắng: docling chèn cách lung tung
-    ("q u y chế"), chữ dưới vùng link lại lẫn mảnh chữ bên cạnh ("quy định, h, quy chế")."""
-    a = re.sub(r"\s+", "", line).lower()
-    for h in hrefs:
-        b = re.sub(r"\s+", "", h.text).lower()
-        if b and (b in a and 2 * len(b) >= len(a) or len(a) >= 4 and a in b
-                  or difflib.SequenceMatcher(None, a, b).ratio() >= 0.8):
-            return True
-    return False
 
 
 class ParsedParagraph(Block):
@@ -192,8 +142,7 @@ class ParsedParagraph(Block):
         title     tiêu đề trang
         list      bó gạch đầu dòng, một block, các dòng ngăn bằng xuống dòng
                   -> S4 diễn đạt lại, không đọc bullet nguyên văn (§5 S4)
-        links     >= nửa số dòng là LINK — URL in ra chữ, hoặc chữ có link ẩn (`hrefs`)
-                  -> KHÔNG đọc URL thành tiếng. Luật, tự gán.
+        links     >= nửa số dòng là URL in ra chữ -> KHÔNG đọc URL thành tiếng. Luật, tự gán.
         caption   chú thích
 
     Chỉ body/list mới đổi sang `links`. Nửa số dòng chứ không phải "có link là đổi": p18/p19
@@ -209,16 +158,11 @@ class ParsedParagraph(Block):
     @model_validator(mode="after")
     def _links(self) -> ParsedParagraph:
         """Suy `role="links"` + tách `urls` từ chữ. Chạy cả lúc nạp lại -> không lệch được."""
-        self.refresh_role()
-        return self
-
-    def refresh_role(self) -> None:
-        """Gọi lại sau khi gắn `hrefs` (parser/links.py) — validator chạy lúc tạo, trước khi có link."""
         found = [ln for ln in self.lines if URL_LINE.fullmatch(ln)]
-        n_link = sum(1 for ln in self.lines if URL_LINE.fullmatch(ln) or _is_anchor(ln, self.hrefs))
-        if self.role in ("body", "list") and n_link and 2 * n_link >= len(self.lines):
+        if self.role in ("body", "list") and found and 2 * len(found) >= len(self.lines):
             self.role = "links"
         self.urls = found if self.role == "links" else []
+        return self
 
     @property
     def lines(self) -> list[str]:
@@ -272,7 +216,7 @@ class ParsedTable(Block):
 
 
 class ParsedImage(Block):
-    """Ảnh. `content` = mô tả của VLM (hoặc người sửa trong data/patches/).
+    """Ảnh. `content` = mô tả của VLM.
 
     `content: null` thì `why_empty` nói VÌ SAO — *chưa gọi* hay *gọi mà không có* xử lý
     khác hẳn nhau:
@@ -306,41 +250,14 @@ AnyBlock = Annotated[
 
 class ParsedPage(_Base):
     _ORDER: ClassVar[tuple[str, ...]] = (
-        "page_no", "title", "section_id", "page_hash", "layout_error", "blocks",
+        "page_no", "title", "section_id", "page_hash", "blocks",
     )
 
     page_no: int
     title: str | None = None
     section_id: str | None = None         # trỏ lên ParsedDocument.sections
     page_hash: str = ""                   # đổi nội dung / vị trí -> đổi hash -> S4 viết lại (§8)
-    # VLM sắp bố cục trang mà trượt kiểm tra -> trang dùng block docling, ghi lý do ở đây
-    layout_error: str | None = None
     blocks: list[AnyBlock] = Field(default_factory=list)
-
-    _document_ref: BackRef = PrivateAttr(default_factory=BackRef)
-
-    @model_validator(mode="after")
-    def _link(self) -> ParsedPage:
-        return self.link()
-
-    def link(self) -> ParsedPage:
-        """Gán `block.page` cho mọi block. Gọi lại sau khi thêm / thay block (vá tay, chép bảng)."""
-        for b in self.blocks:
-            b._page_ref = BackRef(self)
-        return self
-
-    def __deepcopy__(self, memo: dict[int, Any] | None = None) -> ParsedPage:
-        return super().__deepcopy__(memo).link()
-
-    @property
-    def document(self) -> ParsedDocument | None:
-        """Deck chứa trang này."""
-        return self._document_ref.target
-
-    @property
-    def section(self) -> SectionSpan | None:
-        """Chương chứa trang này — bản ĐÃ TRA của `section_id`, khỏi tự gọi `section_of()`."""
-        return self.document.section_of(self.page_no) if self.document else None
 
     @property
     def images(self) -> list[ParsedImage]:
@@ -435,7 +352,6 @@ class Flag(_Base):
         "empty_page",
         "image_not_described",
         "table_empty",
-        "layout_failed",
         "no_sections",
     ]
     severity: Literal["info", "warn", "error"] = "warn"
@@ -469,20 +385,6 @@ class ParsedDocument(_Base):
     sections: list[SectionSpan] = Field(default_factory=list)
     flags: list[Flag] = Field(default_factory=list)
     pages: list[ParsedPage] = Field(default_factory=list)
-
-    @model_validator(mode="after")
-    def _link(self) -> ParsedDocument:
-        return self.link()
-
-    def link(self) -> ParsedDocument:
-        """Gán back-reference cả cây: `page.document`, rồi `block.page`. Gọi lại sau khi sửa cây."""
-        for p in self.pages:
-            p._document_ref = BackRef(self)
-            p.link()
-        return self
-
-    def __deepcopy__(self, memo: dict[int, Any] | None = None) -> ParsedDocument:
-        return super().__deepcopy__(memo).link()
 
     # -------- truy vấn
 

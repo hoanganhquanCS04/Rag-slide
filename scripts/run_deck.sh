@@ -15,7 +15,7 @@
 #   ⑥ S4    kịch bản      -> src/output/scenario/<ten>/scenario.json+.md src/scenario/cli.py     [LLM: trang đổi]
 #   (--eval) eval         -> src/output/retrieval/<ten>/eval.json     src/retrieval/eval.py[nhúng câu hỏi]
 #
-# Tham số khác (--redo, --model, --parser, --table-pages) chuyển cho bước parse (`src/parser/cli.py --help`).
+# Tham số khác (--redo, --model, --table-pages) chuyển cho bước parse (`src/parser/cli.py --help`).
 # Kịch bản có cờ đỏ (mã 3) thì vẫn chạy tiếp — file vẫn ghi, cờ để người duyệt.
 # Kịch bản INCREMENTAL: chỉ trang có page_hash / prompt / LLM_MODEL đổi mới gọi LLM (~1–2 lần/trang).
 # Mã khác 0 và 3 (không thấy file, thiếu khoá API…) -> DỪNG, không chạy tiếp trên dữ liệu cũ.
