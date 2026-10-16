@@ -1,6 +1,6 @@
 # S4 — Scenario
 
-> ⚠️ **Đọc trước: input đã đổi.** S4 (đã code, `src/scenario/`) nhận **block của CHÍNH
+> ⚠️ **Đọc trước: input đã đổi.** S4 (đã code, `src/offline/scenario/`) nhận **block của CHÍNH
 > TRANG ĐÓ** (kèm `id` để câu trỏ `ref` vào) + `title` trang trước/sau +
 > `slide_type` + kịch bản các trang trước cùng chương. **Không** còn `SlideRepr`, `message`,
 > `concept_map`, `AlignmentMap` — S1 và S3 đã bỏ — và **chưa có `time_budget`**: pass 2 hiện

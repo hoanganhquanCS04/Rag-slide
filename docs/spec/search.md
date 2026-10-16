@@ -1,6 +1,6 @@
 # Search — từ câu hỏi ra số trang
 
-**Vào:** `src/output/chunker/*/chunks.json` + `src/output/embedders/*/vectors__<model>.npy` · **Ra:** `SearchHit[]` · **Code:** `src/runtime/retrieve.py` + `src/sparse/` (BM25) · đo: `src/evaluation/{eval,tune}.py`
+**Vào:** `src/output/chunker/*/chunks.json` + `src/output/embedders/*/vectors__<model>.npy` · **Ra:** `SearchHit[]` · **Code:** `src/utils/ensemble_search.py` + `src/components/keyword_search.py` (BM25) · đo: `src/evaluation/{eval,tune}.py`
 
 ---
 
@@ -8,7 +8,7 @@
 
 Đang có 52 chunk và 52 vector nằm trong file. **Chưa có gì dùng chúng.**
 
-`runtime/retrieve.py` là tầng biến đống số đó thành thứ trả lời được:
+`utils/ensemble_search.py` là tầng biến đống số đó thành thứ trả lời được:
 
 ```
 "làm sao lưu biểu đồ ra file ảnh"   →   [p11, p10, p13]
@@ -104,7 +104,7 @@ bỏ chữ quá ngắn (1 ký tự)      trừ chữ số
    được mờ mờ, BM25 thì bằng không. Đã đo: gõ không dấu, cả 4 câu thử đều trượt.
    → Nếu kênh hỏi là form web (kế hoạch v1) thì phải tính tới chuyện người gõ không dấu.
    Cách xử: index **hai bản** — có dấu và bỏ dấu — chưa làm ở v0, ghi lại ở §9.
-3. **Chunk 0 điểm KHÔNG được xếp hạng** (đã sửa, `src/sparse/variants/rankbm25.py`). Bản đầu lấy
+3. **Chunk 0 điểm KHÔNG được xếp hạng** (đã sửa, `src/components/keyword_search.py`). Bản đầu lấy
    top-50 bất kể điểm: câu hỏi toàn từ hiếm thì gần hết pool là chunk 0 điểm, hoà nhau nên
    giữ thứ tự file — p1 hạng 2, p2 hạng 3… — và trang đầu deck ăn điểm RRF không vì lý do
    gì. Đo trên onboarding_kit: `VGRFOC`, `VGRDBIZ`, `kscv` trước ra **p1 (trang bìa) top-1**,
@@ -161,7 +161,7 @@ không đoán. Đo trên Onboarding 200 câu (2026-10-01): K = 60 phẳng quá �
 thấy (dense hạng 1, BM25 không lọt pool) thua trang hạng 8–10 ở cả hai nhánh; K = 10,
 dense × 2 lên top-5 từ 187 → 191 nhưng top-1 149 → 147.
 
-**Mặc định trong code: K = 10, dense 1.5 : sparse 1** (đổi 2026-10-14, `runtime/retrieve.py`). Đo trên
+**Mặc định trong code: K = 10, dense 1.5 : sparse 1** (đổi 2026-10-14, `utils/ensemble_search.py`). Đo trên
 Onboarding 200 câu (chunk theo trang): top-1/3/5 = 153/186/194, so với 153/186/192 của K = 15 1:1.
 
 Bản trước — K = 15, dense 1 : sparse 1 (2026-10-02). Đo trên
@@ -288,7 +288,7 @@ Dựng bảng BM25 mất ~10ms cho 52 chunk, làm **một lần lúc khởi đ�
 ## 8. Chạy
 
 ```bash
-python src/runtime/retrieve.py src/output/chunker/3_datavisualization/chunks.json "làm sao lưu biểu đồ ra file ảnh"
+python src/utils/ensemble_search.py src/output/chunker/3_datavisualization/chunks.json "làm sao lưu biểu đồ ra file ảnh"
 ```
 
 | cờ | nghĩa |
@@ -434,7 +434,7 @@ chứng đo được rằng R3b **bắt buộc phải có**, không phải tính
 src/output/evaluation/3_datavisualization/eval.json              kết quả từng câu hỏi, từng kiểu
 ```
 
-`runtime/retrieve.py` **không ghi file** — nó là hàm chạy lúc runtime, trả `SearchHit[]` trong bộ
+`utils/ensemble_search.py` **không ghi file** — nó là hàm chạy lúc runtime, trả `SearchHit[]` trong bộ
 nhớ cho R4 dùng ngay, không phải stage offline sinh artifact.
 
 Nghi ngờ cần soi riêng: 7 trang p9–p15 cùng tiêu đề *"Đồ thị dạng đường"*. Tiền tố

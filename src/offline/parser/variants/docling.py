@@ -37,8 +37,8 @@ from docling_core.types.doc import (  # noqa: E402
 )
 from docling_core.types.doc.base import Size  # noqa: E402
 
-from parser.base import BaseParser  # noqa: E402
-from parser.vlm import load_json_array, vlm_endpoint  # noqa: E402
+from offline.parser.base import BaseParser  # noqa: E402
+from offline.parser.vlm import load_json_array, vlm_endpoint  # noqa: E402
 from utils.config import PROMPTS_DIR, ROOT  # noqa: E402
 from models.parsed_document import (  # noqa: E402
     AnyBlock,

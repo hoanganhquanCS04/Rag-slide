@@ -166,7 +166,7 @@ R2  hỏi điều hướng   →  KHÔNG lọc            (trang mở chương l
 Chưa dựng Qdrant và **chưa cần**: 52 vector quét vét cạn hết **0.01ms**, 100.000 vector
 cũng chỉ 25ms — trong khi gọi API nhúng câu hỏi đã mất ~700ms. Kho vector mua về metadata
 filter và nhiều deck, **không phải tốc độ**. v0 dùng Chroma (ghi đĩa, một collection cho mọi
-tài liệu, lọc bằng `doc_id`) hoặc RAM — chọn bằng `VECTOR_DB`, xem `src/vectordb/`.
+tài liệu, lọc bằng `doc_id`) hoặc RAM — chọn bằng `VECTOR_DB`, xem `src/components/vectordb/`.
 
 ### 3.2 Thời gian thật (đo 2026-10-02)
 
@@ -184,7 +184,7 @@ Build lần đầu bị chi phối bởi ①. Chạy lại khi không đổi gì
 
 #### S0 · Ingest — `deck.pdf` → `ParsedDocument`  ✅ ĐÃ CÓ
 
-`src/parser/` · xem [spec đầy đủ](../spec/parsed-document.md)
+`src/offline/parser/` · xem [spec đầy đủ](../spec/parsed-document.md)
 
 ```
 VÀO  data/raw/<ten>.pdf
@@ -226,7 +226,7 @@ RA   src/output/parser/<doc_id>/{docling_vlmpipeline,tables,pictures,document}.j
 
 #### S5 · KB Construction — `ParsedDocument` → `KBChunk[]` + vector  ✅ ĐÃ CÓ
 
-`src/chunker/` · `src/embedders/` · `src/vectordb/` · `src/sparse/` · `src/runtime/retrieve.py` · xem [kb-chunk.md](../spec/kb-chunk.md), [embedding.md](../spec/embedding.md),
+`src/offline/chunker/` · `src/components/embedders/` · `src/components/vectordb/` · `src/components/keyword_search.py` · `src/utils/ensemble_search.py` · xem [kb-chunk.md](../spec/kb-chunk.md), [embedding.md](../spec/embedding.md),
 [search.md](../spec/search.md)
 
 ```
@@ -247,7 +247,7 @@ VÀO  src/output/parser/<doc_id>/document.json
   │            nhúng CẢ BỘ, kể cả phân mục — lọc là việc của lúc TRUY VẤN
   │
   └─> [index]  dense: kho vector chroma | inmem (BẢN SAO của .npy, tự đồng bộ)
-               sparse: BM25 dựng trong RAM lúc khởi động (src/sparse/)
+               sparse: BM25 dựng trong RAM lúc khởi động (src/components/keyword_search.py)
                gộp bằng RRF K=10, dense 1.5 : sparse 1   <- đo bằng scripts/tune.sh
                KHÔNG cộng điểm: hai thang đo không so được
 RA   src/output/chunker/<doc_id>/chunks.json · src/output/embedders/<doc_id>/vectors__<model_id>.npy + src/output/vectordb/chroma/
@@ -273,7 +273,7 @@ RA   DeckStructure  ──> S4
 
 #### S4 · Scenario — từng trang → `Scenario`  🟡 ĐÃ CÓ, bước 4 của `run_deck.sh`
 
-`src/scenario/` · xem [scenario.md](../spec/scenario.md)
+`src/offline/scenario/` · xem [scenario.md](../spec/scenario.md)
 
 ```
 VÀO  block của CHÍNH TRANG ĐÓ (id + loại khối) + title trang trước/sau + slide_type
@@ -471,7 +471,7 @@ dirty += {MỌI trang sau nó trong cùng chương}    (vì đọc kịch bản 
 
 - Python 3.11+, type hints bắt buộc, Pydantic v2 cho schema.
 - Mỗi stage là một module độc lập, **chạy riêng được qua CLI**:
-  `python src/embedders/cli.py src/output/chunker/<ten>/chunks.json`
+  `python src/offline/embedder/cli.py src/output/chunker/<ten>/chunks.json`
 - Gọi LLM/VLM: retry exponential backoff, log **full prompt + response** vào `logs/`.
   Không log thì không bao giờ debug được vì sao model bịa.
 - Mọi prompt nằm trong `src/prompts/*.md`. **Không hardcode prompt trong file `.py`.**

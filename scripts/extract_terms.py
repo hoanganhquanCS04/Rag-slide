@@ -40,7 +40,7 @@ GUIDE = [
     "1. Sửa 'say' chỗ đọc chưa đúng — viết bằng chữ Việt, cách nhau bởi khoảng trắng.",
     "2. Đổi 'by' từ 'auto' thành 'nguoi' ở mục đã duyệt — chạy lại script không đè mục 'nguoi'.",
     "3. Số âm tiết TÍNH từ 'say' lúc chạy, không ghi ở đây.",
-    "4. Sửa xong chạy lại S4 (src/scenario/cli.py): chỉ đếm lại âm tiết, không gọi LLM.",
+    "4. Sửa xong chạy lại S4 (src/offline/scenario/cli.py): chỉ đếm lại âm tiết, không gọi LLM.",
     "mode: spell = đánh vần từng chữ · phonetic_vi = phiên âm Việt · as_english = để nguyên chữ Anh",
 ]
 

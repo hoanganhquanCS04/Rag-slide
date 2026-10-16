@@ -1,7 +1,7 @@
 """Lệnh dựng index (S5): chunks.json -> file vector + nạp kho vector.
 
-    python src/embedders/cli.py src/output/chunker/<ten>/chunks.json
-    python src/embedders/cli.py src/output/chunker/<ten>/chunks.json --no-cache   # bỏ cache, gọi API lại
+    python src/offline/embedder/cli.py src/output/chunker/<ten>/chunks.json
+    python src/offline/embedder/cli.py src/output/chunker/<ten>/chunks.json --no-cache   # bỏ cache, gọi API lại
 
 Ra: `src/output/embedders/<doc_id>/vectors__<model>.{npy,json}`, cache vector ở
 `src/output/embedders/cache/`, kho Chroma ở `src/output/vectordb/chroma/` (chỉ khi VECTOR_DB=chroma).
@@ -15,13 +15,13 @@ import logging
 import sys
 from pathlib import Path
 
-if __package__ in (None, ""):  # chạy thẳng file: THAY src/embedders/ bằng src/
-    sys.path[0] = str(Path(__file__).resolve().parents[1])
+if __package__ in (None, ""):  # chạy thẳng file: THAY src/offline/embedder/ bằng src/
+    sys.path[0] = str(Path(__file__).resolve().parents[2])
 
 from utils.config import MODEL_ID, console_setup
-from embedders.base import embed_chunkset
-from embedders.factory import EMBEDDERS, create_embedder
-from vectordb.factory import create_store
+from components.embedders.base import embed_chunkset
+from components.embedders.factory import EMBEDDERS, create_embedder
+from components.vectordb.factory import create_store
 from models.kb_chunk import ChunkSet
 
 log = logging.getLogger("embedders")

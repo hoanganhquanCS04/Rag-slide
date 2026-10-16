@@ -1,7 +1,7 @@
 # S2 — Deck Structure
 
 > ⚠️ **BẢN CŨ — đã co lại nhiều.** `sections` giờ dựng bằng **luật** từ **trang mục lục**
-> ngay ở S0 (`src/parser/sections.py`): Onboarding 5 chương, Thời gian làm việc 5 chương,
+> ngay ở S0 (`src/offline/parser/sections.py`): Onboarding 5 chương, Thời gian làm việc 5 chương,
 > không cần LLM. `concept_map`, `dependencies`, `arc` đã **BỎ** — chúng sinh ra để bơm ngữ
 > cảnh toàn cục vào prompt, mà thiết kế hiện tại không nhồi. S2 nay chỉ còn
 > **`time_budget`**: chia theo số trang `content` mỗi section — **chưa code**, và S4 hiện

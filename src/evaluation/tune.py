@@ -25,9 +25,9 @@ import numpy as np
 if __package__ in (None, ""):  # chạy thẳng file: THAY src/evaluation/ bằng src/
     sys.path[0] = str(Path(__file__).resolve().parents[1])
 
-from embedders.base import embed_chunkset
+from components.embedders.base import embed_chunkset
 from utils.config import EVALUATION_OUTPUT, MODEL_ID, console_setup
-from embedders.factory import create_embedder
+from components.embedders.factory import create_embedder
 from utils.vectors import load_vectors, vectors_file
 from evaluation.eval import SearchSetup, default_queries, first_hit
 from models.kb_chunk import ChunkSet

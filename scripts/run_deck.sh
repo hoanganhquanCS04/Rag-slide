@@ -8,13 +8,13 @@
 #   bash scripts/run_deck.sh data/raw/onboarding_kit.pdf   --eval       # thêm bước đo bộ câu hỏi có nhãn
 #   bash scripts/run_deck.sh data/raw/onboarding_kit.pdf   --no-scenario  # bỏ bước kịch bản (S4)
 #
-#   ①②      parse         -> src/output/parser/<ten>/document.json        src/parser/cli.py       [VLM: mỗi trang 1 lần]
-#   ④a      chunk         -> src/output/chunker/<ten>/chunks.json         src/chunker/cli.py      [không API]
-#   ④b      index         -> src/output/embedders/<ten>/vectors__* + kho  src/embedders/cli.py    [embedding: chunk đổi]
-#   ⑥ S4    kịch bản      -> src/output/scenario/<ten>/scenario.json+.md  src/scenario/cli.py     [LLM: trang đổi]
+#   ①②      parse         -> src/output/parser/<ten>/document.json        src/offline/parser/cli.py       [VLM: mỗi trang 1 lần]
+#   ④a      chunk         -> src/output/chunker/<ten>/chunks.json         src/offline/chunker/cli.py      [không API]
+#   ④b      index         -> src/output/embedders/<ten>/vectors__* + kho  src/offline/embedder/cli.py    [embedding: chunk đổi]
+#   ⑥ S4    kịch bản      -> src/output/scenario/<ten>/scenario.json+.md  src/offline/scenario/cli.py     [LLM: trang đổi]
 #   (--eval) eval         -> src/output/evaluation/<ten>/eval.json        src/evaluation/eval.py  [nhúng câu hỏi]
 #
-# Tham số khác (--redo, --model, --table-pages) chuyển cho bước parse (`src/parser/cli.py --help`).
+# Tham số khác (--redo, --model, --table-pages) chuyển cho bước parse (`src/offline/parser/cli.py --help`).
 # Kịch bản có cờ đỏ (mã 3) thì vẫn chạy tiếp — file vẫn ghi, cờ để người duyệt.
 # Kịch bản INCREMENTAL: chỉ trang có page_hash / prompt / LLM_MODEL đổi mới gọi LLM (~1–2 lần/trang).
 # Mã khác 0 và 3 (không thấy file, thiếu khoá API…) -> DỪNG, không chạy tiếp trên dữ liệu cũ.
@@ -51,17 +51,17 @@ CHUNKS="src/output/chunker/$DOC_ID/chunks.json"
 EVAL_OUT="src/output/evaluation/$DOC_ID"
 
 echo "=== [1/4] parse  $SRC -> $PARSED"
-"$PY" src/parser/cli.py "$SRC" ${PARSE_ARGS[@]+"${PARSE_ARGS[@]}"}
+"$PY" src/offline/parser/cli.py "$SRC" ${PARSE_ARGS[@]+"${PARSE_ARGS[@]}"}
 
 echo "=== [2/4] chunk -> $CHUNKS"
-"$PY" src/chunker/cli.py "$PARSED" --stats
+"$PY" src/offline/chunker/cli.py "$PARSED" --stats
 
 echo "=== [3/4] index (nhung + nap kho) -> src/output/embedders/$DOC_ID/"
-"$PY" src/embedders/cli.py "$CHUNKS"
+"$PY" src/offline/embedder/cli.py "$CHUNKS"
 
 if [ "$SCENARIO" -eq 1 ]; then
   echo "=== [4/4] kich ban (S4) -> src/output/scenario/$DOC_ID/scenario.json + scenario.md"
-  rc=0; "$PY" src/scenario/cli.py "$PARSED" || rc=$?
+  rc=0; "$PY" src/offline/scenario/cli.py "$PARSED" || rc=$?
   if [ "$rc" -eq 3 ]; then echo "    (co trang CO DO — xem bang tren / scenario.md, van chay tiep)"
   elif [ "$rc" -ne 0 ]; then echo "=== DUNG: buoc kich ban loi (ma $rc) — xem dong loi o tren" >&2; exit "$rc"
   fi

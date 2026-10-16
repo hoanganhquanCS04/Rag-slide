@@ -26,7 +26,7 @@ $env:PYTHONIOENCODING = "utf-8"      # không có thì lỗi in chữ Việt
 | `VLM_BASE_URL`, `VLM_SOFT_TOKENS` | `http://localhost:8000/v1`, `1120` | cổng VLM riêng (Gemma local qua vLLM) |
 | `LLM_MODEL` | `gpt-5-mini` | S4 kịch bản, hỏi đáp |
 | `EMBED_MODEL` | `text-embedding-3-small` | ④ nhúng vector, tìm kiếm |
-| `VECTOR_DB` | `chroma` hoặc `inmem` | ④ + tìm kiếm — kho vector (`src\vectordb\`), bỏ trống = `inmem` |
+| `VECTOR_DB` | `chroma` hoặc `inmem` | ④ + tìm kiếm — kho vector (`src\components\vectordb\`), bỏ trống = `inmem` |
 | `CHROMA_PATH` | `src/output/vectordb/chroma` | chỗ Chroma ghi đĩa (bỏ trống = giá trị này) |
 
 Trong các lệnh dưới, `<ten>` = tên file bỏ dấu, viết thường:
@@ -62,13 +62,13 @@ Từng bước riêng lẻ (chính là những gì `run_deck.sh` gọi):
 
 ```powershell
 # ①③ đọc file -> src\output\parser\<ten>\{docling_vlmpipeline.json, document.json}   [① tốn API]
-.venv\Scripts\python.exe src\parser\cli.py "data\raw\<file>.pdf"
+.venv\Scripts\python.exe src\offline\parser\cli.py "data\raw\<file>.pdf"
 
 # ④a chunk -> src\output\chunker\<ten>\chunks.json
-.venv\Scripts\python.exe src\chunker\cli.py src\output\parser\<ten>\document.json
+.venv\Scripts\python.exe src\offline\chunker\cli.py src\output\parser\<ten>\document.json
 
 # ④b nhúng vector + nạp kho -> src\output\embedders\<ten>\vectors__<model>.{npy,json} + src\output\vectordb\chroma\  [tốn API]
-.venv\Scripts\python.exe src\embedders\cli.py src\output\chunker\<ten>\chunks.json
+.venv\Scripts\python.exe src\offline\embedder\cli.py src\output\chunker\<ten>\chunks.json
 ```
 
 Bên trong `parser\cli.py`:
@@ -106,10 +106,10 @@ LLM mỗi trang ĐỔI — trang không đổi thì giữ nguyên. Chạy riêng
 
 ```powershell
 # viết kịch bản                       -> src\output\scenario\<ten>\scenario.json + scenario.md   [tốn API]
-.venv\Scripts\python.exe src\scenario\cli.py src\output\parser\<ten>\document.json
+.venv\Scripts\python.exe src\offline\scenario\cli.py src\output\parser\<ten>\document.json
 
 # chỉ ghi lại scenario.md (sau khi sửa tay scenario.json), không gọi API
-.venv\Scripts\python.exe src\scenario\cli.py src\output\parser\<ten>\document.json --md
+.venv\Scripts\python.exe src\offline\scenario\cli.py src\output\parser\<ten>\document.json --md
 
 # bảng phát âm — gom từ kịch bản NÓI mà kho chưa có -> data\pronunciation.json (KHO CHUNG)
 .venv\Scripts\python.exe scripts\extract_terms.py src\output\scenario\<ten>\scenario.json
@@ -127,9 +127,9 @@ LLM mỗi trang ĐỔI — trang không đổi thì giữ nguyên. Chạy riêng
 ### Nội dung một trang
 
 ```powershell
-.venv\Scripts\python.exe src\parser\show.py <ten>                       # tổng quan + chương + cờ
-.venv\Scripts\python.exe src\parser\show.py <ten> --page 7              # một trang
-.venv\Scripts\python.exe src\parser\show.py <ten> --page 2 3 4 5 --full     # nhiều trang, không cắt chữ
+.venv\Scripts\python.exe src\offline\parser\show.py <ten>                       # tổng quan + chương + cờ
+.venv\Scripts\python.exe src\offline\parser\show.py <ten> --page 7              # một trang
+.venv\Scripts\python.exe src\offline\parser\show.py <ten> --page 2 3 4 5 --full     # nhiều trang, không cắt chữ
 ```
 
 ```
@@ -150,8 +150,8 @@ Xem cả deck bằng mắt: mở thẳng `src\output\parser\<ten>\document.json`
 ### Chunk trong KB
 
 ```powershell
-.venv\Scripts\python.exe src\chunker\cli.py src\output\parser\<ten>\document.json --page 9 --full   # chunk của trang 9
-.venv\Scripts\python.exe src\chunker\cli.py src\output\parser\<ten>\document.json --stats           # thống kê cả KB
+.venv\Scripts\python.exe src\offline\chunker\cli.py src\output\parser\<ten>\document.json --page 9 --full   # chunk của trang 9
+.venv\Scripts\python.exe src\offline\chunker\cli.py src\output\parser\<ten>\document.json --stats           # thống kê cả KB
 ```
 
 ```
@@ -166,8 +166,8 @@ Xem cả deck bằng mắt: mở thẳng `src\output\parser\<ten>\document.json`
 ### Kịch bản
 
 ```powershell
-.venv\Scripts\python.exe src\scenario\cli.py src\output\parser\<ten>\document.json --show            # cả deck
-.venv\Scripts\python.exe src\scenario\cli.py src\output\parser\<ten>\document.json --show --page 7   # một trang
+.venv\Scripts\python.exe src\offline\scenario\cli.py src\output\parser\<ten>\document.json --show            # cả deck
+.venv\Scripts\python.exe src\offline\scenario\cli.py src\output\parser\<ten>\document.json --show --page 7   # một trang
 ```
 
 ```
@@ -210,7 +210,7 @@ nap 18 chunk | kho chroma | tu khoa rank_bm25 | model text-embedding-3-small    
 nap 18 chunk | kho chroma (nap lai 18 vector) | tu khoa rank_bm25 | model text-embedding-3-small  <- vừa tự nạp lại từ .npy
 ```
 
-`nap lai` lặp lại MỌI lần chạy = `chunks.json` bị đổi mà chưa chạy ④b `src\embedders\cli.py`.
+`nap lai` lặp lại MỌI lần chạy = `chunks.json` bị đổi mà chưa chạy ④b `src\offline\embedder\cli.py`.
 
 Hỏi đáp trọn vòng (tìm → LLM → code kiểm nguồn): `scripts\try_ask.py`, xem mục A.
 
@@ -223,7 +223,7 @@ Hỏi đáp trọn vòng (tìm → LLM → code kiểm nguồn): `scripts\try_as
 .venv\Scripts\python.exe src\evaluation\eval.py src\output\chunker\<ten>\chunks.json
 # chỉ BM25 — không gọi API, chạy được khi không có mạng / khoá
 .venv\Scripts\python.exe src\evaluation\eval.py src\output\chunker\<ten>\chunks.json --mode sparse
-# thử cấu hình gộp khác (mặc định = hằng số của runtime/retrieve.py: K=10, dense 1.5 : sparse 1)
+# thử cấu hình gộp khác (mặc định = hằng số của utils/ensemble_search.py: K=10, dense 1.5 : sparse 1)
 .venv\Scripts\python.exe src\evaluation\eval.py src\output\chunker\<ten>\chunks.json --rrf-k 7 --wd 1.25
 ```
 
@@ -241,7 +241,7 @@ bash scripts/tune.sh src/output/chunker/<ten>/chunks.json --k 5,10,20 --wd 1,1.5
   top-5 của cấu hình tốt nhất, cùng dạng file câu hỏi — đưa thẳng vào `--queries` được).
 - `tune.sh` lấy câu hỏi ở `data\eval\<ten>.queries.json` (không có thì `queries.json`, đổi bằng
   `--queries`). Đổi cách chunk thì chỉ đổi file vào — bộ chunk chưa nhúng thì tự nhúng.
-  Chỉ ĐO, không đổi mặc định của `runtime/retrieve.py`. Thoát mã 1 khi kho vector trả pool lệch — chạy
+  Chỉ ĐO, không đổi mặc định của `utils/ensemble_search.py`. Thoát mã 1 khi kho vector trả pool lệch — chạy
   lại. Chi tiết: `docs\spec\search.md` §4.
 - Toàn bộ câu eval hiện do AI viết rồi tự chấm — số thiên vị, log in `CANH BAO`.
 
@@ -251,17 +251,17 @@ bash scripts/tune.sh src/output/chunker/<ten>/chunks.json --k 5,10,20 --wd 1,1.5
 
 ```powershell
 # viết lại kịch bản vài trang, kể cả khi trang không đổi
-.venv\Scripts\python.exe src\scenario\cli.py src\output\parser\<ten>\document.json --page 2 5 --force
+.venv\Scripts\python.exe src\offline\scenario\cli.py src\output\parser\<ten>\document.json --page 2 5 --force
 
 # xem prompt sẽ gửi LLM, không gọi API
-.venv\Scripts\python.exe src\scenario\cli.py src\output\parser\<ten>\document.json --page 2 --dry-run
+.venv\Scripts\python.exe src\offline\scenario\cli.py src\output\parser\<ten>\document.json --page 2 --dry-run
 ```
 
 | Vừa sửa | Chạy lại |
 |---|---|
 | file slide gốc | `run_deck.sh "<file>" --redo` (→ S4 nếu cần kịch bản) |
 | `src\prompts\s0_vlm_layout_prompt.md` / `VLM_MODEL` | `run_deck.sh "<file>" --redo` — gọi lại VLM cả file |
-| luật chunk (`src\chunker\`) | `run_deck.sh "<file>"` — chỉ chunk có chữ đổi mới gọi API nhúng |
+| luật chunk (`src\offline\chunker\`) | `run_deck.sh "<file>"` — chỉ chunk có chữ đổi mới gọi API nhúng |
 | `EMBED_MODEL` | `run_deck.sh` — nhúng lại TOÀN BỘ, ra file vector + collection mới mang tên model mới |
 | `VECTOR_DB` / xoá `src\output\vectordb\chroma\` | không cần chạy gì — lần tìm sau tự nạp kho từ `.npy`, 0 lần gọi API |
 | `data\pronunciation.json` | S4 — trang không đổi chỉ được đếm lại âm tiết, không gọi LLM |

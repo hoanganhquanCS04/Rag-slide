@@ -6,12 +6,12 @@ import importlib
 import os
 
 from utils.config import MODEL_ID
-from embedders.base import RETRY, Embedder
-from embedders.cache import CachedEmbedder
+from components.embedders.base import RETRY, Embedder
+from components.embedders.cache import CachedEmbedder
 
 # import lúc chọn — biến thể này hỏng không kéo biến thể kia theo
 EMBEDDERS = {
-    "openai": "embedders.variants.openai:OpenAIEmbedder",
+    "openai": "components.embedders.variants.openai:OpenAIEmbedder",
 }
 
 

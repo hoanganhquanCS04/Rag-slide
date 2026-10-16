@@ -439,7 +439,7 @@ class ParsedDocument(_Base):
         except ValidationError as e:
             raise SystemExit(
                 f"{path}: khong nap duoc ({e.error_count()} loi) — co the la dinh dang cu.\n"
-                "Dung lai (co docling_vlmpipeline.json thi khong ton API): python src/parser/cli.py <file raw>"
+                "Dung lai (co docling_vlmpipeline.json thi khong ton API): python src/offline/parser/cli.py <file raw>"
             ) from None
 
     def to_json(self) -> str:

@@ -1,10 +1,10 @@
 """Lệnh chunk (S5): document.json -> `src/output/chunker/<doc_id>/chunks.json`.
 
-    python src/chunker/cli.py src/output/parser/<ten>/document.json              # cắt + in mọi chunk
-    python src/chunker/cli.py src/output/parser/<ten>/document.json --page 19    # in chunk của trang 19
-    python src/chunker/cli.py src/output/parser/<ten>/document.json --stats      # chỉ in thống kê
+    python src/offline/chunker/cli.py src/output/parser/<ten>/document.json              # cắt + in mọi chunk
+    python src/offline/chunker/cli.py src/output/parser/<ten>/document.json --page 19    # in chunk của trang 19
+    python src/offline/chunker/cli.py src/output/parser/<ten>/document.json --stats      # chỉ in thống kê
 
-Bước sau — nhúng + nạp kho: `src/embedders/cli.py`.
+Bước sau — nhúng + nạp kho: `src/offline/embedder/cli.py`.
 """
 
 from __future__ import annotations
@@ -17,12 +17,12 @@ from collections import Counter
 from pathlib import Path
 
 if __package__ in (None, ""):  # chạy thẳng file, không qua -m
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from chunker.base import MAX_TOKENS
-from chunker.factory import CHUNKERS, create_chunker
+from offline.chunker.base import MAX_TOKENS
+from offline.chunker.factory import CHUNKERS, create_chunker
 from models.kb_chunk import ChunkSet
-from parser.enrich import enrich
+from offline.parser.enrich import enrich
 from utils.config import CHUNKER_OUTPUT
 from models.parsed_document import ParsedDocument
 

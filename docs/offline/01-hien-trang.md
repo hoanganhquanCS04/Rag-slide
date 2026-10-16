@@ -72,7 +72,7 @@ bash scripts/run_deck.sh "data/raw/<file>.pdf" --eval     # + đo bộ câu hỏ
 
 ### ③ `ParsedDocument` — tài liệu → trang → block
 
-Chi tiết: [spec/parsed-document.md](../spec/parsed-document.md) · code: `src/parser/`
+Chi tiết: [spec/parsed-document.md](../spec/parsed-document.md) · code: `src/offline/parser/`
 
 ```
 ParsedDocument   doc_id · source · parser · sections[] · flags[]
@@ -109,7 +109,7 @@ Mọi chữ do VLM đọc từ ảnh trang — có thể sai. `id` = `p<trang>.b
 ### ④ `KBChunk` + vector — để TÌM
 
 Chi tiết: [spec/kb-chunk.md](../spec/kb-chunk.md) · [spec/embedding.md](../spec/embedding.md) ·
-[spec/search.md](../spec/search.md) · code: `src/chunker/` (chunk) · `src/embedders/` (nhúng) · `src/runtime/retrieve.py` + `src/sparse/` (tìm) · `src/evaluation/` (đo)
+[spec/search.md](../spec/search.md) · code: `src/offline/chunker/` (chunk) · `src/components/embedders/` (nhúng) · `src/utils/ensemble_search.py` + `src/components/keyword_search.py` (tìm) · `src/evaluation/` (đo)
 
 ```
 1 trang = 1 chunk        (mô tả ảnh nằm trong chunk trang, không có vector ảnh phụ)
@@ -142,16 +142,16 @@ src/output/embedders/cache/<model>/<sha1>.npy             cache dùng chung, kho
 Tên model nằm trong tên file vector: đổi model mà quên nhúng lại thì tìm kiếm trả rác
 **không báo lỗi** — nhúng tên vào là để không lẫn được.
 
-**Kho vector** (`src/vectordb/`, chọn bằng `VECTOR_DB`): `chroma` ghi đĩa, một collection
+**Kho vector** (`src/components/vectordb/`, chọn bằng `VECTOR_DB`): `chroma` ghi đĩa, một collection
 `kb__<model>` cho mọi tài liệu, lọc bằng `doc_id` · `inmem` giữ trong RAM, nạp lại mỗi lần
 chạy. Kho chỉ lo nhánh vector và là BẢN SAO của `.npy` — lệch với `chunks.json` thì tự nạp
 lại, xoá đi thì tự dựng lại, không gọi API.
 
-**Tìm** (`src/runtime/retrieve.py`) = hai nhánh, gộp bằng RRF:
+**Tìm** (`src/utils/ensemble_search.py`) = hai nhánh, gộp bằng RRF:
 
 ```
 câu hỏi ─┬─ dense: nhúng câu hỏi (API) → kho vector → top 50 ─┐
-         └─ sparse: BM25 (src/sparse/, dựng trong RAM) → top 50 ┴─ RRF K=10, dense 1.5 : sparse 1
+         └─ sparse: BM25 (src/components/keyword_search.py, dựng trong RAM) → top 50 ┴─ RRF K=10, dense 1.5 : sparse 1
                                                                     → gộp theo trang (điểm max)
                                                                     → top-5
 ```
@@ -168,7 +168,7 @@ tìm ra trang mục lục (xem CLAUDE.md §5 S6a).
 
 ### S4 `Scenario` — robot NÓI gì
 
-Chi tiết: [spec/scenario.md](../spec/scenario.md) · code: `src/scenario/`
+Chi tiết: [spec/scenario.md](../spec/scenario.md) · code: `src/offline/scenario/`
 
 ```
 Scenario        doc_id · model · prompt_hash · pronunciation_hash
@@ -260,7 +260,7 @@ câu người thật viết (giọng nói, có dấu, văn nói đủ chữ).
 
 | | Việc | Ghi chú |
 |---|---|---|
-| ⬜ S4 Onboarding | kịch bản 51 trang | chưa có lệnh thuyết trình thử — `src/runtime/` v0 chỉ hỏi đáp (`scripts/try_ask.py`) |
+| ⬜ S4 Onboarding | kịch bản 51 trang | chưa có lệnh thuyết trình thử — `src/chat_engine.py` v0 chỉ hỏi đáp (`scripts/try_ask.py`) |
 | 🚫 luật nói tự nhiên | nhịp, tỉ lệ delivery, văn viết… | BỎ khỏi bộ kiểm S4 (2026-10-06) — chỉ còn hướng dẫn trong prompt, xem [spec/scenario.md §11](../spec/scenario.md) |
 | ⬜ S2 | `time_budget` theo chương | luật, không gọi model. S4 hiện không có trần độ dài trang — đi theo nội dung |
 | ⬜ `slide_type` đủ loại | `title` · `agenda` | đã có `section_divider` · `exercise` · `content` |

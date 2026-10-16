@@ -16,7 +16,7 @@ import re
 from dataclasses import dataclass
 from enum import Enum
 
-from chunker.base import BaseChunker
+from offline.chunker.base import BaseChunker
 from models.kb_chunk import KBChunk
 from models.parsed_document import Block, ParsedDocument, ParsedPage, ParsedParagraph, ParsedTable
 from utils.tokens import count_tokens

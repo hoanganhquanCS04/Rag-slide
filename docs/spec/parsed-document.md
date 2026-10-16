@@ -1,6 +1,6 @@
 # ParsedDocument — cấu trúc dữ liệu sau khi parse
 
-**Code:** [`src/parser/`](../../src/parser/) · **Vào:** `data/raw/<file>.pdf` (hoặc `.pptx` + `.pdf` cùng tên)
+**Code:** [`src/offline/parser/`](../../src/offline/parser/) · **Vào:** `data/raw/<file>.pdf` (hoặc `.pptx` + `.pdf` cùng tên)
 · **Ra:** `src/output/parser/<doc_id>/document.json` — **một file**, vừa để người đọc vừa để pipeline chạy
 
 ---
@@ -239,12 +239,12 @@ Luật dễ quên:
 
 ```powershell
 # ①②b② file gốc -> src\output\parser\<doc_id>\document.json   (gọi VLM; có cache thì không gọi)
-.venv\Scripts\python.exe src\parser\cli.py "data\raw\<file>.pdf"
-.venv\Scripts\python.exe src\parser\cli.py "data\raw\<file>.pdf" --redo               # gọi lại VLM cả file
-.venv\Scripts\python.exe src\parser\cli.py "data\raw\<file>.pdf" --table-pages 21 22  # chỉ chép lại bảng 2 trang
+.venv\Scripts\python.exe src\offline\parser\cli.py "data\raw\<file>.pdf"
+.venv\Scripts\python.exe src\offline\parser\cli.py "data\raw\<file>.pdf" --redo               # gọi lại VLM cả file
+.venv\Scripts\python.exe src\offline\parser\cli.py "data\raw\<file>.pdf" --table-pages 21 22  # chỉ chép lại bảng 2 trang
 
 # xem (đã enrich: link · chương · cờ)
-.venv\Scripts\python.exe src\parser\show.py <doc_id> --page 9 10 11
+.venv\Scripts\python.exe src\offline\parser\show.py <doc_id> --page 9 10 11
 ```
 
 ```

@@ -1,11 +1,11 @@
 """Lệnh parse (S0): file gốc -> `src/output/parser/<doc_id>/document.json`.
 
-    python src/parser/cli.py data/raw/onboarding_kit.pdf                     # có cache thì dùng cache
-    python src/parser/cli.py data/raw/onboarding_kit.pdf --redo              # gọi lại VLM cả file
-    python src/parser/cli.py data/raw/onboarding_kit.pdf --table-pages 21 22 # chỉ chép lại bảng 2 trang
+    python src/offline/parser/cli.py data/raw/onboarding_kit.pdf                     # có cache thì dùng cache
+    python src/offline/parser/cli.py data/raw/onboarding_kit.pdf --redo              # gọi lại VLM cả file
+    python src/offline/parser/cli.py data/raw/onboarding_kit.pdf --table-pages 21 22 # chỉ chép lại bảng 2 trang
 
 Cách làm: ① bố cục -> ②b chép bảng -> ② xét ảnh -> document.json; cache nằm cùng thư mục.
-Xem lại kết quả: `python src/parser/show.py <doc_id> [--page 7]`.
+Xem lại kết quả: `python src/offline/parser/show.py <doc_id> [--page 7]`.
 """
 
 from __future__ import annotations
@@ -16,12 +16,12 @@ import os
 import sys
 from pathlib import Path
 
-if __package__ in (None, ""):  # chạy thẳng file: THAY src/parser/ bằng src/ — để tables.py,
-    sys.path[0] = str(Path(__file__).resolve().parents[1])  # flags.py… không che module trùng tên
+if __package__ in (None, ""):  # chạy thẳng file: THAY src/offline/parser/ bằng src/ — để tables.py,
+    sys.path[0] = str(Path(__file__).resolve().parents[2])  # flags.py… không che module trùng tên
 
-from parser.variants.docling import DoclingParser
+from offline.parser.variants.docling import DoclingParser
 from utils.config import PARSER_OUTPUT
-from parser.enrich import enrich, page_pdf
+from offline.parser.enrich import enrich, page_pdf
 from models.parsed_document import ParsedDocument, slugify_doc_id
 
 for _s in (sys.stdout, sys.stderr):

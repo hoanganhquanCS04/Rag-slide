@@ -25,7 +25,7 @@ from typing import Any
 
 from utils.config import PROMPTS_DIR, ROOT
 from utils.llm import LLM
-from parser.vlm import FENCE, load_json_array, vlm_endpoint
+from offline.parser.vlm import FENCE, load_json_array, vlm_endpoint
 from models.parsed_document import ParsedDocument, ParsedImage
 
 log = logging.getLogger(__name__)

@@ -15,12 +15,12 @@ trên slide.
 
 |    | Bước            | Code                            | Làm gì                                                                                                                                                                                                   |
 | -- | ----------------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ✅ | S0 Parse          | `src/parser/`                | docling đọc chữ + toạ độ (tắt OCR) · VLM nhìn cả trang sắp chữ thành khối · VLM chép bảng từ ảnh bảng · chương từ trang mục lục · cờ cho người duyệt |
-| ✅ | S5 KB             | `src/chunker/` · `src/embedders/` · `src/vectordb/` · `src/sparse/` | 1 trang = 1 chunk (cắt khi > 500 token) · nhúng`text-embedding-3-small` qua API, cache theo nội dung · kho vector Chroma hoặc RAM · index BM25                                                    |
-| ✅ | Tìm kiếm        | `src/runtime/retrieve.py`            | hybrid vector + BM25, gộp bằng RRF (K=10, vector 1.5 : BM25 1), trả**top-5 trang**                                                                                                                                |
+| ✅ | S0 Parse          | `src/offline/parser/`                | docling đọc chữ + toạ độ (tắt OCR) · VLM nhìn cả trang sắp chữ thành khối · VLM chép bảng từ ảnh bảng · chương từ trang mục lục · cờ cho người duyệt |
+| ✅ | S5 KB             | `src/offline/chunker/` · `src/components/embedders/` · `src/components/vectordb/` · `src/components/keyword_search.py` | 1 trang = 1 chunk (cắt khi > 500 token) · nhúng`text-embedding-3-small` qua API, cache theo nội dung · kho vector Chroma hoặc RAM · index BM25                                                    |
+| ✅ | Tìm kiếm        | `src/utils/ensemble_search.py`            | hybrid vector + BM25, gộp bằng RRF (K=10, vector 1.5 : BM25 1), trả**top-5 trang**                                                                                                                                |
 | ✅ | Đo chất lượng | `src/evaluation/{eval,tune}.py` | bộ câu hỏi có nhãn · quét tham số RRF                                                                                                                                                            |
 | 🟡 | Hỏi đáp thử   | `scripts/try_ask.py`          | tìm → 1 lần gọi LLM → code kiểm nguồn, trong terminal                                                                                                                                               |
-| 🟡 | S4 kịch bản     | `src/scenario/`               | bước 4 của`run_deck.sh` (`--no-scenario` để bỏ), chỉ viết lại trang đổi                                                                                                                    |
+| 🟡 | S4 kịch bản     | `src/offline/scenario/`               | bước 4 của`run_deck.sh` (`--no-scenario` để bỏ), chỉ viết lại trang đổi                                                                                                                    |
 |    |                   |                                 |                                                                                                                                                                                                            |
 |    |                   |                                 |                                                                                                                                                                                                            |
 
@@ -107,11 +107,11 @@ python scripts/try_ask.py "data/raw/<file>.pdf"            # tên file gốc cũ
 python scripts/try_ask.py <ten> "nghỉ phép năm được mấy ngày"
 
 # 3. Chỉ tìm, xem trang nào ra và do nhánh nào kéo lên
-python src/runtime/retrieve.py src/output/chunker/<ten>/chunks.json "làm thêm ngày lễ hệ số bao nhiêu" --explain
+python src/utils/ensemble_search.py src/output/chunker/<ten>/chunks.json "làm thêm ngày lễ hệ số bao nhiêu" --explain
 
 # Xem nội dung đã parse / chunk của một trang
-python src/parser/show.py <ten> --page 7
-python src/chunker/cli.py src/output/parser/<ten>/document.json --page 7 --full
+python src/offline/parser/show.py <ten> --page 7
+python src/offline/chunker/cli.py src/output/parser/<ten>/document.json --page 7 --full
 ```
 
 ### Ví dụ — 2 deck đang làm, copy chạy luôn
@@ -146,19 +146,23 @@ python scripts/try_ask.py onboarding_kit
 
 ```
 src/
-├── models/       schema Pydantic dùng chung: ParsedDocument · KBChunk · Scenario
-├── utils/        dùng chung: config (đường dẫn, .env) · llm · vectors · tokens · syllables
-├── parser/       S0 — file gốc -> ParsedDocument   cli.py (parse) · show.py (xem) · enrich (link · chương · cờ)
-├── chunker/      S5 — ParsedDocument -> chunks.json
-├── embedders/    S5 — chữ -> vector: openai (EMBEDDER), cache bọc ngoài · cli.py nhúng + nạp kho
-├── vectordb/     S5 — kho vector: inmem | chroma (VECTOR_DB)
-├── sparse/       S5 — index từ khoá BM25 (SPARSE_INDEX), cùng bộ hàm với vectordb/
-├── evaluation/   đo tìm kiếm: eval (câu hỏi có nhãn) · tune (quét tham số RRF)
-├── scenario/     S4 kịch bản
-├── runtime/      hỏi đáp bản chữ: retrieve.py (tìm vector + BM25 gộp RRF · tìm thử) ·
-│                 chat_engine.py (tìm -> 1 lần LLM -> kiểm nguồn) · models.py — try_ask.py gọi ChatEngine
-├── prompts/      mọi prompt (không hardcode trong .py)
-└── output/       mọi thứ sinh ra, mỗi thư mục con trùng tên thư mục code   (gitignore)
+├── chat_engine.py   HỎI ĐÁP: vector_search · keyword_search -> ensemble_search -> 1 lần LLM -> kiểm nguồn
+│                    (try_ask.py gọi ChatEngine)
+├── models/          schema Pydantic dùng chung: ParsedDocument · KBChunk · Scenario · Reply/Answer
+├── components/      LINH KIỆN thay được, không biết gì về slide
+│   ├── embedders/     chữ -> vector: openai (EMBEDDER), cache bọc ngoài
+│   ├── vectordb/      kho vector: inmem | chroma (VECTOR_DB)
+│   └── keyword_search.py   BM25 trong RAM, cùng bộ hàm với vectordb/
+├── offline/         CHUẨN BỊ DỮ LIỆU, chạy một lần, mỗi bước một cli.py
+│   ├── parser/        S0 — file gốc -> ParsedDocument   cli.py (parse) · show.py (xem) · enrich (chương · cờ)
+│   ├── chunker/       S5 — ParsedDocument -> chunks.json
+│   ├── embedder/      S5 — cli.py nhúng chunks + nạp kho
+│   └── scenario/      S4 kịch bản
+├── utils/           dùng chung: config (đường dẫn, .env) · llm · vectors · tokens · syllables ·
+│                    ensemble_search (gộp RRF)
+├── evaluation/      đo tìm kiếm: eval (câu hỏi có nhãn) · tune (quét tham số RRF)
+├── prompts/         mọi prompt (không hardcode trong .py)
+└── output/          mọi thứ sinh ra: parser/ chunker/ embedders/ … (đường dẫn cố định trong utils/config.py, gitignore)
 scripts/          run_deck.sh · try_ask.py · tune.sh · pptx2pdf.ps1 · extract_terms.py
 config/           runtime.json — tham số hỏi đáp
 data/             raw/ file gốc · eval/ câu hỏi có nhãn · pronunciation.json

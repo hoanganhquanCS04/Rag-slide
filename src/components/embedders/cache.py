@@ -14,7 +14,7 @@ from pathlib import Path
 import numpy as np
 
 from utils.config import EMBEDDERS_OUTPUT
-from embedders.base import BATCH, Embedder
+from components.embedders.base import BATCH, Embedder
 from utils.vectors import model_slug, text_key
 
 log = logging.getLogger(__name__)

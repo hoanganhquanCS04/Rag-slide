@@ -17,7 +17,7 @@ import numpy as np
 from utils.config import EMBEDDERS_OUTPUT
 from models.kb_chunk import ChunkSet
 
-REBUILD = "chay `python src/embedders/cli.py src/output/chunker/<ten>/chunks.json` (trung cache, khong ton API)"
+REBUILD = "chay `python src/offline/embedder/cli.py src/output/chunker/<ten>/chunks.json` (trung cache, khong ton API)"
 
 
 def model_slug(model_id: str) -> str:

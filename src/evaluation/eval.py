@@ -20,15 +20,15 @@ from typing import Literal
 if __package__ in (None, ""):  # chạy thẳng file: THAY src/evaluation/ bằng src/
     sys.path[0] = str(Path(__file__).resolve().parents[1])
 
-from embedders.base import Embedder
-from embedders.factory import create_embedder
+from components.embedders.base import Embedder
+from components.embedders.factory import create_embedder
 from models.kb_chunk import ChunkSet, SearchHit
 from utils.config import EVAL_QUERIES_DIR, MODEL_ID, console_setup
 from utils.ensemble_search import POOL, RRF_K, TOP_K, W_DENSE, W_SPARSE, ensemble_search
 from utils.filters import Hit, Where
-from utils.keyword_search import BM25Index
+from components.keyword_search import BM25Index
 from utils.vectors import vectors_file
-from vectordb.factory import create_store
+from components.vectordb.factory import create_store
 
 log = logging.getLogger(__name__)
 

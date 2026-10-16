@@ -1,6 +1,6 @@
 """Chạy S0 (docling VlmPipeline + Gemma -> document.json) rồi VẼ khung từng trang để soi bằng mắt.
 
-Lớp mỏng: không có logic VLM / parse riêng — gọi đúng `src/parser/cli.py` (= `parser/cli.py <file> --redo`), nên ảnh
+Lớp mỏng: không có logic VLM / parse riêng — gọi đúng `src/offline/parser/cli.py` (= `parser/cli.py <file> --redo`), nên ảnh
 khung chính là document.json mà KB / kịch bản đọc.
 
     python scripts/try_docling_gemma.py "data/raw/3_DataVisualization (1).pdf"
@@ -28,9 +28,9 @@ import pypdfium2 as pdfium  # noqa: E402
 from dotenv import load_dotenv  # noqa: E402
 from PIL import Image, ImageDraw, ImageFont  # noqa: E402
 
-from parser.cli import parse_file  # noqa: E402
+from offline.parser.cli import parse_file  # noqa: E402
 from utils.config import PARSER_OUTPUT  # noqa: E402
-from parser.enrich import enrich, page_pdf  # noqa: E402
+from offline.parser.enrich import enrich, page_pdf  # noqa: E402
 from models.parsed_document import ParsedDocument, ParsedPage, ParsedParagraph, slugify_doc_id  # noqa: E402
 
 load_dotenv(ROOT / ".env")     # VLM_MODEL làm mặc định cho --model bên dưới

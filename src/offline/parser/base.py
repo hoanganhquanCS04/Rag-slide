@@ -11,8 +11,8 @@ from pathlib import Path
 from typing import ClassVar
 
 from models.parsed_document import ParsedDocument
-from parser.pictures import apply_pictures, run_pictures
-from parser.tables import apply_tables, run_tables
+from offline.parser.pictures import apply_pictures, run_pictures
+from offline.parser.tables import apply_tables, run_tables
 
 log = logging.getLogger(__name__)
 

@@ -25,19 +25,19 @@ import re
 import time
 from pathlib import Path
 
-from embedders.base import EmbedError, Embedder
-from embedders.factory import create_embedder
+from components.embedders.base import EmbedError, Embedder
+from components.embedders.factory import create_embedder
 from models.kb_chunk import ChunkSet, SearchHit
 from models.parsed_document import ParsedDocument
 from models.runtime import Answer, Reply, RuntimeConfig
-from parser.enrich import enrich
+from offline.parser.enrich import enrich
 from utils.config import CHUNKER_OUTPUT, MODEL_ID, PARSER_OUTPUT, PROMPTS_DIR
 from utils.ensemble_search import POOL, ensemble_search
 from utils.filters import Hit, Where
-from utils.keyword_search import BM25Index
+from components.keyword_search import BM25Index
 from utils.llm import LLM
 from utils.vectors import vectors_file
-from vectordb.factory import create_store
+from components.vectordb.factory import create_store
 
 log = logging.getLogger(__name__)
 

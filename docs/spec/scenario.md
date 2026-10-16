@@ -1,7 +1,7 @@
 # Scenario — kịch bản robot nói cho từng trang (S4)
 
 **Vào:** `src/output/parser/<doc_id>/document.json` + kho phát âm chung `data/pronunciation.json`
-· **Ra:** `src/output/scenario/<doc_id>/scenario.json` · **Code:** `src/scenario/` · **LLM:** `gpt-5-mini`
+· **Ra:** `src/output/scenario/<doc_id>/scenario.json` · **Code:** `src/offline/scenario/` · **LLM:** `gpt-5-mini`
 · **Prompt:** `src/prompts/s4_scenario.md`
 
 ---
@@ -38,8 +38,8 @@ scenario.json    LLM sinh + NGƯỜI duyệt    mất là phải trả tiền + 
 Trộn hai loại vào một file thì mỗi lần parse lại là đe doạ kịch bản — đúng cái bẫy đã
 dính với trang 15 (nội dung gõ tay mất sau một lần parse lại).
 
-**Lưu tách, xem chung:** `src/scenario/cli.py <parsed> --show --page 11` in kịch bản của trang,
-mỗi câu content kèm `block_id` nó trỏ tới — mở `python src/parser/show.py <ten> --page 11` cạnh bên là đối chiếu được.
+**Lưu tách, xem chung:** `src/offline/scenario/cli.py <parsed> --show --page 11` in kịch bản của trang,
+mỗi câu content kèm `block_id` nó trỏ tới — mở `python src/offline/parser/show.py <ten> --page 11` cạnh bên là đối chiếu được.
 
 ---
 
@@ -375,9 +375,9 @@ trang sau có thể lặp ý. Lan tới hết section là an toàn.
 ## 14. Chạy
 
 ```bash
-python src/scenario/cli.py src/output/parser/3_datavisualization/document.json
-python src/scenario/cli.py src/output/parser/3_datavisualization/document.json --page 11     # một trang
-python src/scenario/cli.py src/output/parser/3_datavisualization/document.json --dry-run     # in prompt, không gọi API
+python src/offline/scenario/cli.py src/output/parser/3_datavisualization/document.json
+python src/offline/scenario/cli.py src/output/parser/3_datavisualization/document.json --page 11     # một trang
+python src/offline/scenario/cli.py src/output/parser/3_datavisualization/document.json --dry-run     # in prompt, không gọi API
 ```
 
 | cờ | nghĩa |

@@ -6,7 +6,7 @@
 >
 > So với bản thiết kế cũ: **S1 đã bỏ** (gộp vào S0), **S3 đã bỏ** (align vào chính mình),
 > **multi-field embed đã bỏ**. Lý do ở [CLAUDE.md §5](../CLAUDE.md).
-> `runtime/` mới có bản chữ chạy thử (`src/runtime/`, `scripts/try_ask.py`) — chưa giọng
+> Runtime mới có bản chữ chạy thử (`src/chat_engine.py`, `scripts/try_ask.py`) — chưa giọng
 > nói, chưa ngắt lời.
 
 | Nhóm | Nội dung |
@@ -19,12 +19,12 @@
 ## Đã code đến đâu
 
 ```
-✅ S0  file raw → ParsedDocument   src/parser/           docling + VLM bố cục trang + chép bảng
-✅ S5  chunk + vector + kho        src/chunker/ · src/embedders/ · src/vectordb/ · src/sparse/   1536 chiều · cache · chroma | inmem · BM25
-✅     tìm hybrid + đo             src/runtime/retrieve.py · src/evaluation/{eval,tune}.py
+✅ S0  file raw → ParsedDocument   src/offline/parser/           docling + VLM bố cục trang + chép bảng
+✅ S5  chunk + vector + kho        src/offline/chunker/ · src/components/embedders/ · src/components/vectordb/ · src/components/keyword_search.py   1536 chiều · cache · chroma | inmem · BM25
+✅     tìm hybrid + đo             src/utils/ensemble_search.py · src/evaluation/{eval,tune}.py
    ─── bốn dòng trên + S4: MỘT lệnh  bash scripts/run_deck.sh "<file>"
-🟡 S4  kịch bản                    src/scenario/         bước 4 của run_deck.sh, nhịp chưa đạt gate
-🟡     runtime bản chữ             src/runtime/          chỉ hỏi đáp trong terminal (scripts/try_ask.py)
+🟡 S4  kịch bản                    src/offline/scenario/         bước 4 của run_deck.sh, nhịp chưa đạt gate
+🟡     runtime bản chữ             src/chat_engine.py          chỉ hỏi đáp trong terminal (scripts/try_ask.py)
 🚫 S1, S3                          BỎ — xem bảng dưới
 ⬜ S2 time_budget · S6b TTS · S7 duyệt · R5 giọng nói · R7 ngắt lời
 ```

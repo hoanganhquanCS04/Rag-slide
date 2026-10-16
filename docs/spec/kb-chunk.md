@@ -2,12 +2,12 @@
 
 **Vào:** `src/output/parser/<doc_id>/document.json` (`ParsedDocument`) — file DUY NHẤT, không đọc
 `docling_vlmpipeline.json` / `tables.json` / `pictures.json` (đã gộp vào đó ở S0) · **Ra:**
-`src/output/chunker/<doc_id>/chunks.json` · **Code:** [src/chunker/](../../src/chunker/) — `BaseChunker`
-([base.py](../../src/chunker/base.py)) + biến thể `page` ([variants/page.py](../../src/chunker/variants/page.py))
+`src/output/chunker/<doc_id>/chunks.json` · **Code:** [src/offline/chunker/](../../src/offline/chunker/) — `BaseChunker`
+([base.py](../../src/offline/chunker/base.py)) + biến thể `page` ([variants/page.py](../../src/offline/chunker/variants/page.py))
 
 ```
-python src/chunker/cli.py src/output/parser/<doc_id>/document.json   # -> src/output/chunker/<doc_id>/chunks.json
-python src/embedders/cli.py src/output/chunker/<doc_id>/chunks.json            # -> src/output/embedders/<doc_id>/vectors__<model>.*
+python src/offline/chunker/cli.py src/output/parser/<doc_id>/document.json   # -> src/output/chunker/<doc_id>/chunks.json
+python src/offline/embedder/cli.py src/output/chunker/<doc_id>/chunks.json            # -> src/output/embedders/<doc_id>/vectors__<model>.*
 ```
 
 ---
@@ -258,7 +258,7 @@ nhúng         text_enriched · EMBED_MODEL trong .env (text-embedding-3-small) 
 
 ## 10. Phải đo, chưa biết
 
-Hai câu chỉ có số mới trả lời được — làm xong phần tìm (`src/runtime/retrieve.py`) thì chạy ngay:
+Hai câu chỉ có số mới trả lời được — làm xong phần tìm (`src/utils/ensemble_search.py`) thì chạy ngay:
 
 **Đo tìm kiếm bằng bộ câu hỏi có nhãn** (`src/evaluation/eval.py`, `data/eval/<doc_id>.queries.json`):
 trang đúng có ở top-1 / top-5 không. Đây là **vòng phản hồi đầu tiên** của cả dự án — nó đo xem

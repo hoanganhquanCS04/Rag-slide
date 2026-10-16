@@ -14,7 +14,7 @@ import numpy as np
 
 from utils.config import ROOT, VECTORDB_OUTPUT
 from utils.filters import Hit, Where
-from vectordb.base import VectorStore, chunk_metadata
+from components.vectordb.base import VectorStore, chunk_metadata
 from models.kb_chunk import KBChunk
 
 

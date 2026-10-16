@@ -1,10 +1,10 @@
 """Lệnh viết kịch bản (S4) cho từng trang.
 
-    python src/scenario/cli.py src/output/parser/<doc_id>/document.json                  # cả deck
-    python src/scenario/cli.py src/output/parser/<doc_id>/document.json --page 9 11 20   # vài trang
-    python src/scenario/cli.py src/output/parser/<doc_id>/document.json --dry-run --page 11
-    python src/scenario/cli.py src/output/parser/<doc_id>/document.json --show           # xem, không gọi API
-    python src/scenario/cli.py src/output/parser/<doc_id>/document.json --md             # chỉ ghi lại .md
+    python src/offline/scenario/cli.py src/output/parser/<doc_id>/document.json                  # cả deck
+    python src/offline/scenario/cli.py src/output/parser/<doc_id>/document.json --page 9 11 20   # vài trang
+    python src/offline/scenario/cli.py src/output/parser/<doc_id>/document.json --dry-run --page 11
+    python src/offline/scenario/cli.py src/output/parser/<doc_id>/document.json --show           # xem, không gọi API
+    python src/offline/scenario/cli.py src/output/parser/<doc_id>/document.json --md             # chỉ ghi lại .md
 
 Ra: `src/output/scenario/<doc_id>/scenario.json` + `scenario.md` (bản đọc).
 Cách làm: chạy lại chỉ viết trang đã đổi (page_hash / prompt / model); lưu sau MỖI trang nên dừng
@@ -21,13 +21,13 @@ import sys
 from pathlib import Path
 
 if __package__ in (None, ""):
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from utils.config import ROOT, SCENARIO_OUTPUT, console_setup
 from utils.llm import DEFAULT_MODEL
-from parser.enrich import enrich
+from offline.parser.enrich import enrich
 from models.parsed_document import ParsedDocument
-from scenario.generate import load_prompt, render_prompt, run_deck
+from offline.scenario.generate import load_prompt, render_prompt, run_deck
 from models.scenario import Scenario, SlideScript
 from utils.syllables import STORE, Pronunciation
 

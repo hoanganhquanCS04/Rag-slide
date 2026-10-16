@@ -5,11 +5,11 @@ from __future__ import annotations
 import importlib
 from pathlib import Path
 
-from chunker.base import BaseChunker
+from offline.chunker.base import BaseChunker
 
 # import lúc chọn — biến thể này hỏng không kéo biến thể kia theo
 CHUNKERS = {
-    "page": "chunker.variants.page:PageChunker",
+    "page": "offline.chunker.variants.page:PageChunker",
 }
 
 

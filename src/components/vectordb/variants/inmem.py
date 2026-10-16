@@ -11,7 +11,7 @@ from typing import Any
 import numpy as np
 
 from utils.filters import Hit, Where, matches
-from vectordb.base import VectorStore, chunk_metadata
+from components.vectordb.base import VectorStore, chunk_metadata
 from models.kb_chunk import KBChunk
 
 

@@ -1,9 +1,9 @@
 """Xem `document.json` đã enrich (chương / cờ) trên màn hình.
 
-    python src/parser/show.py onboarding_kit                  # tổng quan + chương + cờ
-    python src/parser/show.py onboarding_kit --page 7 --full  # từng khối của trang 7, không cắt chữ
+    python src/offline/parser/show.py onboarding_kit                  # tổng quan + chương + cờ
+    python src/offline/parser/show.py onboarding_kit --page 7 --full  # từng khối của trang 7, không cắt chữ
 
-CHỈ để xem. Parse (tạo document.json) đi đường `python src/parser/cli.py <file>`.
+CHỈ để xem. Parse (tạo document.json) đi đường `python src/offline/parser/cli.py <file>`.
 """
 
 from __future__ import annotations
@@ -13,11 +13,11 @@ import logging
 import sys
 from pathlib import Path
 
-if __package__ in (None, ""):  # chạy thẳng file: THAY src/parser/ bằng src/ — để tables.py,
-    sys.path[0] = str(Path(__file__).resolve().parents[1])  # flags.py… không che module trùng tên
+if __package__ in (None, ""):  # chạy thẳng file: THAY src/offline/parser/ bằng src/ — để tables.py,
+    sys.path[0] = str(Path(__file__).resolve().parents[2])  # flags.py… không che module trùng tên
 
-from parser.cli import OUT, report
-from parser.enrich import enrich
+from offline.parser.cli import OUT, report
+from offline.parser.enrich import enrich
 from models.parsed_document import ParsedDocument, ParsedParagraph
 
 for _s in (sys.stdout, sys.stderr):

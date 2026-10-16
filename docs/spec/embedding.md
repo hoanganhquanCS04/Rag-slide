@@ -1,6 +1,6 @@
 # Embedding — biến chunk thành vector để tìm
 
-**Vào:** `src/output/chunker/*/chunks.json` · **Ra:** `src/output/embedders/*/vectors__<model_id>.{npy,json}` · **Code:** `src/embedders/` · `src/utils/vectors.py` · `src/embedders/cli.py`
+**Vào:** `src/output/chunker/*/chunks.json` · **Ra:** `src/output/embedders/*/vectors__<model_id>.{npy,json}` · **Code:** `src/components/embedders/` · `src/utils/vectors.py` · `src/offline/embedder/cli.py`
 
 ---
 
@@ -101,8 +101,8 @@ Kể cả 7 trang phân mục và `p15` (trang docling bỏ sót nội dung — 
 
 ```
 embedders/cli.py    nhúng cả 51 chunk
-runtime/retrieve.py mặc định lọc content_type != "section_divider"
-runtime/retrieve.py  có cờ --no-filter để bật lại mà so
+chat_engine.py mặc định lọc content_type != "section_divider"
+chat_engine.py  có cờ --no-filter để bật lại mà so
 ```
 
 Ba lý do không lọc sớm:
@@ -206,7 +206,7 @@ Với deck này sparse không phải tuỳ chọn. Nội dung lẫn tiếng Vi�
 (`matplotlib`, `plt.savefig`, `Cartopy`, `cnames`) — đúng loại từ khoá mà dense hay
 trượt còn khớp chuỗi thì bắt chính xác.
 
-Đường bù, làm ở `runtime/retrieve.py`:
+Đường bù, làm ở `chat_engine.py`:
 
 ```
 rank-bm25 trên text_enriched  →  nhánh từ khoá
@@ -272,7 +272,7 @@ tiền tố `· trang N/40` tách được bao nhiêu phần?
 
 ```bash
 # cần OPENAI_API_KEY (và OPENAI_BASE_URL nếu đi qua proxy)
-.venv/Scripts/python.exe src/embedders/cli.py src/output/chunker/3_datavisualization/chunks.json
+.venv/Scripts/python.exe src/offline/embedder/cli.py src/output/chunker/3_datavisualization/chunks.json
                          # -> src/output/embedders/3_datavisualization/vectors__<model>.*
 ```
 

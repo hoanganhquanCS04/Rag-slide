@@ -23,7 +23,7 @@ from utils.config import PROMPTS_DIR
 from utils.llm import LLM
 from models.parsed_document import (ParsedDocument, ParsedImage, ParsedPage, ParsedParagraph,
                             ParsedTable)
-from scenario import validate
+from offline.scenario import validate
 from models.scenario import SlideScript
 from utils.syllables import Pronunciation, count
 

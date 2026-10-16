@@ -11,7 +11,7 @@ import os
 
 import numpy as np
 
-from embedders.base import BATCH, RETRY, Embedder
+from components.embedders.base import BATCH, RETRY, Embedder
 
 log = logging.getLogger(__name__)
 

@@ -9,9 +9,9 @@ import logging
 from collections import Counter
 from pathlib import Path
 
-from parser.flags import apply_flags
+from offline.parser.flags import apply_flags
 from models.parsed_document import ParsedDocument
-from parser.sections import apply_sections
+from offline.parser.sections import apply_sections
 
 log = logging.getLogger(__name__)
 

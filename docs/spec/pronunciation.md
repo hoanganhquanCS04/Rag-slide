@@ -90,7 +90,7 @@ không bị coi là lệch.
 ## 5. Quy trình
 
 ```
-1. S4 viết kịch bản        src/scenario/cli.py <document.json>
+1. S4 viết kịch bản        src/offline/scenario/cli.py <document.json>
                            từ lạ đếm ước lượng + cờ unknown_pronunciation
 
 2. gom từ lạ vào kho       scripts/extract_terms.py src/output/scenario/<doc_id>/scenario.json [...]

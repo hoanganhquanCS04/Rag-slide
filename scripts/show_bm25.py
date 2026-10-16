@@ -16,7 +16,7 @@ from rich.table import Table
 
 from models.kb_chunk import ChunkSet
 from utils.config import CHUNKER_OUTPUT, console_setup
-from utils.keyword_search import BM25Index, tokenize
+from components.keyword_search import BM25Index, tokenize
 
 console = Console()
 
