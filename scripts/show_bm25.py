@@ -15,9 +15,8 @@ from rich.console import Console
 from rich.table import Table
 
 from models.kb_chunk import ChunkSet
-from sparse.base import tokenize
-from sparse.factory import create_sparse
 from utils.config import CHUNKER_OUTPUT, console_setup
+from utils.keyword_search import BM25Index, tokenize
 
 console = Console()
 
@@ -33,15 +32,15 @@ def main() -> None:
     args = ap.parse_args()
 
     cs = ChunkSet.model_validate_json((CHUNKER_OUTPUT / args.doc_id / "chunks.json").read_text("utf-8"))
-    index = create_sparse()
-    built = index.sync(cs)  # đúng đường Retriever đi lúc khởi tạo
+    index = BM25Index()
+    built = index.sync(cs)  # đúng đường ChatEngine đi lúc khởi tạo
 
     # Tầng 1: thứ thật sự nằm trong RAM — một dict, mỗi deck một bộ 4
-    console.rule("[bold]index._docs  (dict trong RAM)")
+    console.rule("[bold]index._documents  (dict trong RAM)")
     console.print(f"kiểu: {type(index).__name__} · dựng lại {built} chunk")
-    for doc_id, (bm25, ids, meta, finger) in index._docs.items():
+    for doc_id, (bm25, ids, meta, finger) in index._documents.items():
         console.print(f"  '{doc_id}' -> (BM25Okapi, ids[{len(ids)}], meta[{len(meta)}], finger[{len(finger)}])")
-    bm25, ids, meta, _ = index._docs[args.doc_id]
+    bm25, ids, meta, _ = index._documents[args.doc_id]
 
     # Tầng 2: bên trong BM25Okapi
     console.rule("[bold]BM25Okapi")

@@ -9,7 +9,7 @@ Chạy SAU phần offline (`bash scripts/run_deck.sh <file raw>`).
     python scripts/try_ask.py onboarding_kit "..." -q                     # chỉ câu trả lời, không log
     python scripts/try_ask.py onboarding_kit < cau_hoi.txt                # mỗi dòng một câu
 
-Luồng (`ChatEngine.answer`, src/runtime/chat_engine.py): tìm (hybrid, RRF của runtime/retrieve.py) -> top 5 trang vào
+Luồng (`ChatEngine.process_question`, src/chat_engine.py): tìm (hybrid, RRF của utils/ensemble_search.py) -> top 5 trang vào
 prompt src/prompts/r_qa.md -> 1 lần gọi LLM (LLM_MODEL trong .env) -> code kiểm grounding. LLM chỉ được
 trả lời hoặc từ chối.
 
@@ -33,11 +33,11 @@ os.chdir(REPO)                                       # --config mặc định co
 
 from utils.config import CHUNKER_OUTPUT, PARSER_OUTPUT, ROOT
 from utils.tokens import count_tokens
-from runtime.retrieve import RRF_K, W_DENSE, W_SPARSE
+from utils.ensemble_search import RRF_K, W_DENSE, W_SPARSE
 from utils.llm import DEFAULT_MODEL
 from models.parsed_document import slugify_doc_id
 from chat_engine import ChatEngine
-from runtime.models import Answer, RuntimeConfig
+from models.runtime import Answer, RuntimeConfig
 
 PAGE_OF_CHUNK = re.compile(r"#p(\d+)")            # chunk_id "onboarding_kit#p022.3" -> trang 22
 
@@ -87,7 +87,7 @@ async def run(doc_id: str, questions: list[str], model: str, cfg: RuntimeConfig,
     try:
         for q in questions or ask_forever():
             t0 = time.perf_counter()
-            ans = await engine.answer(q)
+            ans = await engine.process_question(q)
             reply, ms = ans.reply, ans.ms
             ms["total"] = int((time.perf_counter() - t0) * 1000)
 

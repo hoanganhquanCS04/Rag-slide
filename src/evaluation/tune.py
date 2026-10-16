@@ -6,7 +6,7 @@
 Ra: `src/output/evaluation/<doc_id>/<tên chunks>_tune.md` (người đọc) + `.json` (máy đọc)
 + `<tên chunks>_misses.json` (các câu trượt).
 Cách làm: mỗi câu hỏi lấy kết quả từng nhánh MỘT lần, rồi gộp lại cho mọi cấu hình mà không gọi
-API thêm. Đây là công cụ ĐO — không tự đổi mặc định của runtime/retrieve.py.
+API thêm. Đây là công cụ ĐO — không tự đổi mặc định của utils/ensemble_search.py.
 """
 
 from __future__ import annotations
@@ -29,9 +29,9 @@ from embedders.base import embed_chunkset
 from utils.config import EVALUATION_OUTPUT, MODEL_ID, console_setup
 from embedders.factory import create_embedder
 from utils.vectors import load_vectors, vectors_file
-from evaluation.eval import default_queries, first_hit
+from evaluation.eval import SearchSetup, default_queries, first_hit
 from models.kb_chunk import ChunkSet
-from runtime.retrieve import POOL, RRF_K, TOP_K, W_DENSE, W_SPARSE, Retriever, rrf_fuse
+from utils.ensemble_search import POOL, RRF_K, TOP_K, W_DENSE, W_SPARSE, rrf_fuse
 
 log = logging.getLogger(__name__)
 
@@ -61,16 +61,15 @@ def ensure_vectors(cs: ChunkSet, model_id: str) -> None:
         embed_chunkset(cs, create_embedder(model_id=model_id))
 
 
-def branch_ranks(rt: Retriever, query: str) -> tuple[dict[str, int], dict[str, int]]:
+def branch_ranks(setup: SearchSetup, query: str) -> tuple[dict[str, int], dict[str, int]]:
     """Chạy riêng từng cách tìm cho một câu hỏi -> (hạng ở cách tìm vector, hạng ở cách tìm BM25), CHƯA gộp.
 
     Mỗi câu chỉ chạy một lần (gọi API nhúng một lần), rồi thử mọi cấu hình gộp trên kết quả này.
-    Hỏi thẳng hai kho của Retriever, cùng số kết quả (POOL) và cùng bộ lọc như lúc chạy thật.
+    Hỏi thẳng hai kho, cùng số kết quả (POOL) và cùng bộ lọc như lúc chạy thật.
     """
-    where = rt.where(True)
-    qv = rt.embedder.embed([query])[0]
-    dense = {cid: r for r, (cid, _) in enumerate(rt.store.retrieve_context(qv, POOL, where), 1)}
-    sparse = {cid: r for r, (cid, _) in enumerate(rt.sparse.retrieve_context(query, POOL, where), 1)}
+    where = setup.where(True)
+    dense = {cid: r for r, (cid, _) in enumerate(setup.vector_search(query, where), 1)}
+    sparse = {cid: r for r, (cid, _) in enumerate(setup.keyword_search(query, where), 1)}
     return dense, sparse
 
 
@@ -79,19 +78,19 @@ def page_order(fused: dict[str, float], page_of: dict[str, int]) -> list[int]:
     return list(dict.fromkeys(page_of[i] for i, _ in sorted(fused.items(), key=lambda kv: -kv[1])))
 
 
-def chroma_check(rt: Retriever, queries: list[dict[str, Any]]) -> int:
+def chroma_check(setup: SearchSetup, queries: list[dict[str, Any]]) -> int:
     """Đếm số câu mà kết quả nhánh vector của kho KHÁC kết quả tính tay từ .npy (để phát hiện kho trả sai)."""
-    mat = np.load(rt.vectors_path)
+    mat = np.load(setup.vectors_path)
     mat = mat / np.linalg.norm(mat, axis=1, keepdims=True)
-    ok = np.array([c.is_searchable for c in rt.chunks])
-    ids = [c.chunk_id for c in rt.chunks]
-    where = rt.where(True)
+    ok = np.array([c.is_searchable for c in setup.chunks])
+    ids = [c.chunk_id for c in setup.chunks]
+    where = setup.where(True)
     bad = 0
     for spec in queries:
-        qv = np.asarray(rt.embedder.embed([spec["q"]])[0], dtype=np.float64)
+        qv = np.asarray(setup.embedder.embed([spec["q"]])[0], dtype=np.float64)
         sims = mat @ (qv / np.linalg.norm(qv))
         exact = [ids[j] for j in np.argsort(-sims, kind="stable") if ok[j]][:POOL]
-        bad += exact != [cid for cid, _ in rt.store.retrieve_context(qv, POOL, where)]
+        bad += exact != [cid for cid, _ in setup.store.retrieve_context(qv, POOL, where)]
     return bad
 
 
@@ -129,7 +128,7 @@ def build_configs(pools: list[Pool], page_of: dict[str, int], tokens: dict[str, 
     top-5, rồi top-1, top-3, MRR.
     """
     grid = {(int(k), wd, ws) for k in ks for wd in wds for ws in wss}
-    grid.add((RRF_K, W_DENSE, W_SPARSE))                          # cấu hình retrieve.py đang dùng
+    grid.add((RRF_K, W_DENSE, W_SPARSE))                          # cấu hình ensemble_search.py đang dùng
     out = [score(pools, page_of, tokens, k, wd, ws) | {"label": f"K={k} dense={_num(wd)} sparse={_num(ws)}"}
            for k, wd, ws in sorted(grid)]
     out += [score(pools, page_of, tokens, RRF_K, 1, 0) | {"label": "chỉ dense", "k": None},
@@ -173,7 +172,7 @@ def write_md(path: Path, meta: dict[str, Any], configs: list[dict[str, Any]],
          f"- Kiểm kho: {meta['store_check']}",
          f"- Chạy lúc {meta['time']} ({meta['sec']}s)", "",
          f"Sắp theo top-{meta['top_k']}, hoà thì top-1, top-3, MRR. **cứu / hỏng** = câu top-{meta['top_k']} "
-         "đúng thêm / sai thêm so với cấu hình retrieve.py đang dùng.", "",
+         "đúng thêm / sai thêm so với cấu hình ensemble_search.py đang dùng.", "",
          "**token 5 kq** = tổng token chunk mạnh nhất của 5 trang đầu, trung bình — độ dài ngữ cảnh "
          "LLM phải đọc.", "",
          "| # | K | dense | sparse | top-1 | top-3 | top-5 | MRR | token 5 kq | cứu | hỏng | ghi chú |",
@@ -267,24 +266,24 @@ def main(argv: list[str] | None = None) -> int:
     log.info("%s: %d chunk | %s: %d cau", cp, len(cs.chunks), qpath.name, len(queries))
 
     ensure_vectors(cs, args.model)
-    rt = Retriever(cp, model_id=args.model)
+    setup = SearchSetup(cp, model_id=args.model)
     for name in ("embedders", "httpx"):                 # 200 dòng "cache: dung lai 1/1" -> tắt
         logging.getLogger(name).setLevel(logging.WARNING)
 
-    page_of = {c.chunk_id: c.page_no for c in rt.chunks}
+    page_of = {c.chunk_id: c.page_no for c in setup.chunks}
     pools: list[Pool] = []
     for spec in queries:
-        rd, rs = branch_ranks(rt, spec["q"])
+        rd, rs = branch_ranks(setup, spec["q"])
         pools.append((rd, rs, set(spec["page"] if isinstance(spec["page"], list) else [spec["page"]])))
 
-    bad = chroma_check(rt, queries)
+    bad = chroma_check(setup, queries)
     store_check = (f"pool dense của kho khớp cosine tính tay ở cả {len(queries)} câu" if not bad else
                    f"⚠ {bad}/{len(queries)} câu pool dense của kho KHÁC cosine tính tay — bảng lượt này "
                    "KHÔNG tin được, chạy lại")
     if bad:
-        log.warning("kho %s: %d/%d cau pool dense lech cosine tinh tay -> chay lai", rt.store.kind, bad, len(queries))
+        log.warning("kho %s: %d/%d cau pool dense lech cosine tinh tay -> chay lai", setup.store.kind, bad, len(queries))
 
-    tokens = {c.chunk_id: c.token_count for c in rt.chunks}
+    tokens = {c.chunk_id: c.token_count for c in setup.chunks}
     configs = build_configs(pools, page_of, tokens, _floats(args.k), _floats(args.wd), _floats(args.ws))
     best = next(c for c in configs if c["k"] is not None)      # dòng một nhánh không tính là cấu hình gộp
     base = next(c for c in configs if c["is_base"])
@@ -303,7 +302,7 @@ def main(argv: list[str] | None = None) -> int:
     meta = {"doc_id": cs.doc_id, "chunks": str(cp), "queries": str(qpath),
             "n_chunks": len(cs.chunks), "n_searchable": len(cs.searchable),
             "n_pages": len({c.page_no for c in cs.chunks}), "n_queries": len(queries),
-            "model": args.model, "store": rt.store.kind, "store_check": store_check,
+            "model": args.model, "store": setup.store.kind, "store_check": store_check,
             "store_mismatch": bad, "pool": POOL, "top_k": TOP_K,
             "time": time.strftime("%Y-%m-%d %H:%M"), "sec": round(time.perf_counter() - t0, 1)}
     types = {"base": by_type(base, queries), "best": by_type(best, queries)}
@@ -314,7 +313,7 @@ def main(argv: list[str] | None = None) -> int:
         {"meta": meta, "best": best["label"], "base": base["label"], "configs": configs,
          "misses_best": misses, "by_type": types}, ensure_ascii=False, indent=1), encoding="utf-8")
     ms = md.with_name(f"{cp.stem}_misses.json")
-    write_misses(ms, meta, best, misses, queries, page_titles(rt.chunks))
+    write_misses(ms, meta, best, misses, queries, page_titles(setup.chunks))
 
     log.info("")
     for name, c in (("dang dung", base), ("tot nhat ", best)):

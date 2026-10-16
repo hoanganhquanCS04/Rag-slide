@@ -1,7 +1,10 @@
 """Trả lời câu hỏi của người nghe dựa trên nội dung slide.
 
 Các bước cho mỗi câu hỏi:
-    1. Tìm các trang slide liên quan tới câu hỏi (dùng Retriever trong retrieve.py).
+    1. Tìm các trang slide liên quan tới câu hỏi, bằng hai cách rồi gộp lại:
+         vector_search   tìm bằng vector — hiểu Ý câu hỏi (gọi API nhúng)
+         keyword_search  tìm bằng từ khoá BM25 — khớp đúng CHỮ (không gọi API)
+         ensemble_search gộp hai kết quả bằng RRF, gộp các đoạn cùng trang, lấy 5 trang đầu
     2. Ghép các trang đó + câu hỏi thành prompt (mẫu prompt ở src/prompts/r_qa.md).
     3. Gọi LLM đúng MỘT lần. LLM chỉ được chọn: trả lời, hoặc từ chối.
     4. Code kiểm lại câu trả lời trước khi cho robot nói:
@@ -16,19 +19,25 @@ Mỗi câu hỏi xử lý riêng, không nhớ các câu hỏi trước.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import time
 from pathlib import Path
 
-from embedders.base import EmbedError
-from models.kb_chunk import SearchHit
+from embedders.base import EmbedError, Embedder
+from embedders.factory import create_embedder
+from models.kb_chunk import ChunkSet, SearchHit
 from models.parsed_document import ParsedDocument
+from models.runtime import Answer, Reply, RuntimeConfig
 from parser.enrich import enrich
-from utils.config import CHUNKER_OUTPUT, PARSER_OUTPUT, PROMPTS_DIR
+from utils.config import CHUNKER_OUTPUT, MODEL_ID, PARSER_OUTPUT, PROMPTS_DIR
+from utils.ensemble_search import POOL, ensemble_search
+from utils.filters import Hit, Where
+from utils.keyword_search import BM25Index
 from utils.llm import LLM
-from runtime.models import Answer, Reply, RuntimeConfig
-from runtime.retrieve import Retriever
+from utils.vectors import vectors_file
+from vectordb.factory import create_store
 
 log = logging.getLogger(__name__)
 
@@ -64,16 +73,35 @@ class ChatEngine:
         """
         # Nội dung bộ slide — chỉ dùng để lấy tên trang khi gợi ý "xem trang 3 – ..."
         self.doc = enrich(ParsedDocument.load(PARSER_OUTPUT / doc_id / "document.json"))
-        # Bộ tìm kiếm. embed_retry=1: API nhúng lỗi thì bỏ qua ngay, không thử lại nhiều lần
-        # (người nghe đang chờ, đợi lâu còn tệ hơn tìm kém một chút)
-        self.retriever = Retriever(CHUNKER_OUTPUT / doc_id / "chunks.json", embed_retry=1)
+
+        # Các đoạn của bộ slide + hai kho tìm kiếm. Kho nào lệch với chunks.json thì tự nạp lại.
+        chunks_path = CHUNKER_OUTPUT / doc_id / "chunks.json"
+        self.chunk_set = ChunkSet.model_validate(json.loads(chunks_path.read_text(encoding="utf-8")))
+        self.chunks_by_id = {c.chunk_id: c for c in self.chunk_set.chunks}
+        self.store = create_store(model_id=MODEL_ID)                        # kho vector
+        self.store.sync(self.chunk_set, vectors_file(self.chunk_set.doc_id, MODEL_ID))
+        self.bm25 = BM25Index()                                             # kho từ khoá, nằm trong RAM
+        self.bm25.sync(self.chunk_set)
+        self._embedder: Embedder | None = None
+
         self.cfg = cfg
         self.template = PROMPT_PATH.read_text(encoding="utf-8")
         self.llm = LLM(model, log_dir, retry=cfg.llm_retry, timeout=cfg.llm_timeout_s,
                        extra=cfg.llm_extra)
         self.llm.json_mode = cfg.json_mode
 
-    async def answer(self, question: str) -> Answer:
+    @property
+    def embedder(self) -> Embedder:
+        """Công cụ biến câu hỏi thành vector.
+
+        Chỉ tạo khi cần lần đầu. retry=1: API nhúng lỗi thì bỏ qua ngay, không thử lại nhiều lần
+        (người nghe đang chờ, đợi lâu còn tệ hơn tìm kém một chút).
+        """
+        if self._embedder is None:
+            self._embedder = create_embedder(model_id=MODEL_ID, retry=1)
+        return self._embedder
+
+    async def process_question(self, question: str) -> Answer:
         """Trả lời một câu hỏi.
 
         Vào: câu hỏi.
@@ -84,12 +112,12 @@ class ChatEngine:
 
         # Bước 1: tìm trang liên quan
         t0 = time.perf_counter()
-        out.hits, out.search_mode = await asyncio.to_thread(self._search, question)
+        out.hits, out.search_mode = await asyncio.to_thread(self.retrieve_context, question)
         out.ms["search"] = _ms(t0)
 
         # Bước 2: lấy vài trang đầu, ghép thành prompt
         found = out.hits[: self.cfg.max_contexts]
-        out.prompt = self._render(question, found)
+        out.prompt = self._prepare_context(question, found)
         tag = f"qa_{int(time.time() * 1000)}"
         out.log_path = self.llm.log_dir / f"{tag}.json"
 
@@ -105,7 +133,7 @@ class ChatEngine:
         out.raw = raw
 
         # Bước 4: kiểm câu trả lời trước khi cho nói
-        out.reply = self._check(raw, found)
+        out.reply = self._check_answer(raw, found)
         return out
 
     async def close(self) -> None:
@@ -114,21 +142,44 @@ class ChatEngine:
 
     # ------------------------------------------------------------------ tìm + dựng prompt
 
-    def _search(self, question: str) -> tuple[list[SearchHit], str]:
-        """Tìm các trang liên quan tới câu hỏi.
+    def _where(self) -> Where:
+        """Điều kiện lọc dùng cho cả hai cách tìm.
 
-        Bình thường tìm bằng cả vector lẫn từ khoá ("hybrid").
-        Nếu API nhúng vector lỗi thì tìm lại chỉ bằng từ khoá ("sparse").
-        Ra: (danh sách trang tìm được, cách đã dùng để tìm).
+        Chỉ tìm trong bộ slide này, và bỏ các trang chỉ có tên chương (trang chuyển chương),
+        vì chúng không có nội dung để trả lời.
         """
-        k = self.cfg.top_k
+        return {"doc_id": self.chunk_set.doc_id, "is_searchable": True}
+
+    def vector_search(self, question: str) -> list[Hit]:
+        """Tìm bằng vector: biến câu hỏi thành vector (gọi API) -> 50 đoạn gần nhất [(mã đoạn, cosine)].
+
+        API nhúng lỗi thì báo EmbedError ra ngoài, để retrieve_context quyết định.
+        """
+        query_vector = self.embedder.embed([question])[0]
+        return self.store.retrieve_context(query_vector, POOL, self._where())
+
+    def keyword_search(self, question: str) -> list[Hit]:
+        """Tìm bằng từ khoá BM25 -> 50 đoạn khớp chữ nhất [(mã đoạn, điểm)]. Không gọi API."""
+        return self.bm25.retrieve_context(question, POOL, self._where())
+
+    def retrieve_context(self, question: str) -> tuple[list[SearchHit], str]:
+        """Tìm các trang liên quan tới câu hỏi -> (các trang, cách đã dùng để tìm).
+
+        Bình thường tìm bằng cả vector lẫn từ khoá rồi gộp ("hybrid").
+        Nếu API nhúng vector lỗi thì câu này chỉ dùng kết quả từ khoá ("sparse").
+        """
+        if not any(c.is_searchable for c in self.chunk_set.chunks):
+            return [], "hybrid"
+        mode = "hybrid"
         try:
-            return self.retriever.search(question, k=k, mode="hybrid"), "hybrid"
+            dense = self.vector_search(question)
         except EmbedError as e:
             log.warning("  [API nhúng lỗi -> câu này chỉ tìm bằng từ khoá] %s", str(e)[:120])
-            return self.retriever.search(question, k=k, mode="sparse"), "sparse"
+            dense, mode = [], "sparse"
+        sparse = self.keyword_search(question)
+        return ensemble_search(dense, sparse, self.chunks_by_id, k=self.cfg.top_k), mode
 
-    def _render(self, question: str, found: list[SearchHit]) -> str:
+    def _prepare_context(self, question: str, found: list[SearchHit]) -> str:
         """Điền các trang tìm được và câu hỏi vào mẫu prompt -> prompt hoàn chỉnh."""
         fill = {"found": _ctx(found) or "(không tìm được đoạn nào)", "question": question}
         out = self.template
@@ -138,7 +189,7 @@ class ChatEngine:
 
     # ------------------------------------------------------------------ kiểm câu trả lời
 
-    def _check(self, raw: dict, found: list[SearchHit]) -> Reply:
+    def _check_answer(self, raw: dict, found: list[SearchHit]) -> Reply:
         """Kiểm câu LLM trả về, quyết định robot có được nói hay không.
 
         raw    câu LLM trả về (dạng JSON đã đọc ra dict)

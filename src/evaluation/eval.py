@@ -15,14 +15,76 @@ import json
 import logging
 import sys
 from pathlib import Path
+from typing import Literal
 
 if __package__ in (None, ""):  # chạy thẳng file: THAY src/evaluation/ bằng src/
     sys.path[0] = str(Path(__file__).resolve().parents[1])
 
+from embedders.base import Embedder
+from embedders.factory import create_embedder
+from models.kb_chunk import ChunkSet, SearchHit
 from utils.config import EVAL_QUERIES_DIR, MODEL_ID, console_setup
-from runtime.retrieve import RRF_K, W_DENSE, W_SPARSE, Mode, Retriever
+from utils.ensemble_search import POOL, RRF_K, TOP_K, W_DENSE, W_SPARSE, ensemble_search
+from utils.filters import Hit, Where
+from utils.keyword_search import BM25Index
+from utils.vectors import vectors_file
+from vectordb.factory import create_store
 
 log = logging.getLogger(__name__)
+
+# Cách tìm: cả hai / chỉ vector / chỉ BM25
+Mode = Literal["hybrid", "dense", "sparse"]
+
+
+class SearchSetup:
+    """Hai kho tìm kiếm của MỘT bộ chunk, nạp sẵn để đo — cùng cách nạp và cùng 3 bước tìm như chat_engine.py.
+
+    Không dùng thẳng ChatEngine: nó kéo theo LLM + prompt, mà đo tìm kiếm không cần.
+    """
+
+    def __init__(self, chunks_path: str | Path, *, vectors_path: str | Path | None = None,
+                 model_id: str = MODEL_ID):
+        """Đọc chunks.json, đưa kho vector + kho BM25 về đúng bộ chunk này."""
+        self.chunk_set = ChunkSet.model_validate(json.loads(Path(chunks_path).read_text(encoding="utf-8")))
+        self.chunks = self.chunk_set.chunks
+        self.chunks_by_id = {c.chunk_id: c for c in self.chunks}
+        self.model_id = model_id
+        self.vectors_path = Path(vectors_path) if vectors_path else vectors_file(self.chunk_set.doc_id, model_id)
+        self.store = create_store(model_id=model_id)
+        self.store.sync(self.chunk_set, self.vectors_path)
+        self.bm25 = BM25Index()
+        self.bm25.sync(self.chunk_set)
+        self._embedder: Embedder | None = None
+
+    @property
+    def embedder(self) -> Embedder:
+        """Công cụ nhúng câu hỏi — chỉ tạo khi cần, nên đo chỉ BM25 thì không cần khoá API."""
+        if self._embedder is None:
+            self._embedder = create_embedder(model_id=self.model_id)
+        return self._embedder
+
+    def where(self, filter_dividers: bool = True) -> Where:
+        """Bộ lọc chung hai nhánh: chỉ bộ slide này; filter_dividers=True thì bỏ trang chuyển chương."""
+        return {"doc_id": self.chunk_set.doc_id, **({"is_searchable": True} if filter_dividers else {})}
+
+    def vector_search(self, query: str, where: Where) -> list[Hit]:
+        """Tìm bằng vector -> POOL đoạn gần nhất [(mã đoạn, cosine)] (gọi API nhúng)."""
+        return self.store.retrieve_context(self.embedder.embed([query])[0], POOL, where)
+
+    def keyword_search(self, query: str, where: Where) -> list[Hit]:
+        """Tìm bằng BM25 -> POOL đoạn khớp chữ nhất [(mã đoạn, điểm)] (không gọi API)."""
+        return self.bm25.retrieve_context(query, POOL, where)
+
+    def search(self, query: str, *, k: int = TOP_K, mode: Mode = "hybrid", filter_dividers: bool = True,
+               rrf_k: int = RRF_K, w_dense: float = W_DENSE, w_sparse: float = W_SPARSE) -> list[SearchHit]:
+        """Tìm -> k trang đầu. mode="dense"/"sparse" thì nhánh còn lại để rỗng (và không gọi tới)."""
+        if not any(c.is_searchable or not filter_dividers for c in self.chunks):
+            return []
+        where = self.where(filter_dividers)
+        dense = self.vector_search(query, where) if mode in ("hybrid", "dense") else []
+        sparse = self.keyword_search(query, where) if mode in ("hybrid", "sparse") else []
+        return ensemble_search(dense, sparse, self.chunks_by_id, k=k,
+                               rrf_k=rrf_k, w_dense=w_dense, w_sparse=w_sparse)
 
 
 def default_queries(doc_id: str) -> Path:
@@ -45,15 +107,15 @@ def first_hit(pages: list[int], want: set[int] | list[int]) -> int | None:
     return next((r for r, p in enumerate(pages, 1) if p in want), None)
 
 
-def run(rt: Retriever, queries: list[dict], *, mode: Mode = "hybrid",
-        k: int = 5, filter_dividers: bool = True) -> tuple[int, int, list[str]]:
+def run(setup: SearchSetup, queries: list[dict], *, mode: Mode = "hybrid", k: int = 5,
+        filter_dividers: bool = True, rrf: dict | None = None) -> tuple[int, int, list[str]]:
     """Chạy cả bộ câu hỏi -> (số câu đúng top-1, số câu đúng top-k, các dòng kết quả để in)."""
     top1 = topk = 0
     lines: list[str] = []
     for spec in queries:
         want = spec["page"]
         want = want if isinstance(want, list) else [want]
-        hits = rt.search(spec["q"], k=k, mode=mode, filter_dividers=filter_dividers)
+        hits = setup.search(spec["q"], k=k, mode=mode, filter_dividers=filter_dividers, **(rrf or {}))
         pages = [h.page_no for h in hits]
 
         rank = first_hit(pages, want)
@@ -79,7 +141,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--by", default=None, choices=["ai", "nguoi"],
                     help="chi chay cau do ai/nguoi viet")
     ap.add_argument("--mode", default=None, choices=["hybrid", "dense", "sparse"])
-    ap.add_argument("--rrf-k", type=int, default=RRF_K, help=f"K cua RRF, mac dinh {RRF_K} (retrieve.py)")
+    ap.add_argument("--rrf-k", type=int, default=RRF_K, help=f"K cua RRF, mac dinh {RRF_K} (utils/ensemble_search.py)")
     ap.add_argument("--wd", type=float, default=W_DENSE, help=f"trong so dense, mac dinh {W_DENSE:g}")
     ap.add_argument("--ws", type=float, default=W_SPARSE, help=f"trong so sparse, mac dinh {W_SPARSE:g}")
     ap.add_argument("-o", "--out", default=None, help="ghi ket qua ra JSON")
@@ -87,9 +149,8 @@ def main(argv: list[str] | None = None) -> int:
 
     console_setup()
 
-    rt = Retriever(args.chunks, vectors_path=args.vectors, model_id=args.model,
-                   rrf_k=args.rrf_k, w_dense=args.wd, w_sparse=args.ws)
-    qpath = Path(args.queries) if args.queries else default_queries(rt.cs.doc_id)
+    setup = SearchSetup(args.chunks, vectors_path=args.vectors, model_id=args.model)
+    qpath = Path(args.queries) if args.queries else default_queries(setup.chunk_set.doc_id)
     qs = load_queries(qpath, args.by)
     if not qs:
         raise SystemExit(f"{qpath}: khong co cau hoi nao khop")
@@ -98,7 +159,7 @@ def main(argv: list[str] | None = None) -> int:
     # trọng số chỉ có tác dụng ở hybrid — dense/sparse riêng thì thứ hạng là thứ hạng của nhánh đó
     is_default = (args.rrf_k, args.wd, args.ws) == (RRF_K, W_DENSE, W_SPARSE)
     rrf = {"k": args.rrf_k, "w_dense": args.wd, "w_sparse": args.ws, "is_default": is_default}
-    report: dict = {"doc_id": rt.cs.doc_id, "model": args.model, "k": args.k,
+    report: dict = {"doc_id": setup.chunk_set.doc_id, "model": args.model, "k": args.k,
                     "queries": str(qpath), "rrf": rrf,
                     "n_queries": len(qs), "n_by_ai": n_ai, "modes": {}}
 
@@ -106,9 +167,10 @@ def main(argv: list[str] | None = None) -> int:
     log.info("=== %s: %d cau hoi  (%d do AI tu bia, %d nguoi that viet)",
              qpath.name, len(qs), n_ai, len(qs) - n_ai)
     log.info("=== gop RRF: K=%d dense=%g sparse=%g (%s)", args.rrf_k, args.wd, args.ws,
-             "mac dinh retrieve.py" if is_default else "KHAC mac dinh retrieve.py")
+             "mac dinh ensemble_search.py" if is_default else "KHAC mac dinh ensemble_search.py")
     for m in modes:
-        t1, tk, lines = run(rt, qs, mode=m, k=args.k)
+        t1, tk, lines = run(setup, qs, mode=m, k=args.k,
+                            rrf={"rrf_k": args.rrf_k, "w_dense": args.wd, "w_sparse": args.ws})
         report["modes"][m] = {"top1": t1, f"top{args.k}": tk, "n": len(qs),
                               "top1_rate": round(t1 / len(qs), 4),
                               "detail": [ln.strip() for ln in lines]}
