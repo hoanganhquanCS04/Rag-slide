@@ -9,11 +9,11 @@ Chạy SAU phần offline (`bash scripts/run_deck.sh <file raw>`).
     python scripts/try_ask.py onboarding_kit "..." -q                     # chỉ câu trả lời, không log
     python scripts/try_ask.py onboarding_kit < cau_hoi.txt                # mỗi dòng một câu
 
-Luồng (`Router.answer`, src/runtime/router.py): tìm (hybrid, RRF của search.py) -> top 5 trang vào
+Luồng (`ChatEngine.answer`, src/runtime/chat_engine.py): tìm (hybrid, RRF của runtime/retrieve.py) -> top 5 trang vào
 prompt src/prompts/r_qa.md -> 1 lần gọi LLM (LLM_MODEL trong .env) -> code kiểm grounding. LLM chỉ được
-trả lời hoặc từ chối. `deck_map` dựng tại chỗ bằng luật (không tốn API).
+trả lời hoặc từ chối.
 
-Log từng bước để soi: [1] tìm được chunk nào, hạng dense / BM25, đoạn nào vào prompt · [2] prompt
+Log từng bước để soi: [1] tìm được chunk nào, hạng dense / BM25, LLM chọn đoạn nào (★) · [2] prompt
 dài bao nhiêu, gồm gì, file log · [3] LLM trả thô · [4] code kiểm ra sao.
 """
 
@@ -27,19 +27,17 @@ import sys
 import time
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "src"))
-os.chdir(ROOT)                                       # src/output/, logs/, config/ tính từ gốc repo
+REPO = Path(__file__).resolve().parent.parent       # chỉ để nạp src/ — sau đó dùng ROOT của utils.config
+sys.path.insert(0, str(REPO / "src"))
+os.chdir(REPO)                                       # --config mặc định config/runtime.json tính từ gốc repo
 
+from utils.config import CHUNKER_OUTPUT, PARSER_OUTPUT, ROOT
 from utils.tokens import count_tokens
-from retrieval import deck_map
-from retrieval.search import RRF_K, W_DENSE, W_SPARSE
+from runtime.retrieve import RRF_K, W_DENSE, W_SPARSE
 from utils.llm import DEFAULT_MODEL
-from parser.enrich import enrich
-from models.parsed_document import ParsedDocument, slugify_doc_id
-from runtime.models import RuntimeConfig
-from runtime.retrieve import Retriever
-from runtime.router import Router
+from models.parsed_document import slugify_doc_id
+from chat_engine import ChatEngine
+from runtime.models import Answer, RuntimeConfig
 
 PAGE_OF_CHUNK = re.compile(r"#p(\d+)")            # chunk_id "onboarding_kit#p022.3" -> trang 22
 
@@ -48,39 +46,38 @@ for _s in (sys.stdin, sys.stdout, sys.stderr):
         _s.reconfigure(encoding="utf-8", errors="replace")
 
 
-def show_debug(dbg: dict, ms: dict, cfg: RuntimeConfig, mode: str, full_prompt: bool) -> None:
-    if not dbg:
-        return
-    used = {c.chunk_id for c in dbg.get("found", [])}
-    print(f"   [1] tim: {mode}, RRF K={RRF_K} dense {W_DENSE:g} : bm25 {W_SPARSE:g} · {ms['search'] / 1000:.1f}s"
+def show_debug(ans: Answer, cfg: RuntimeConfig, full_prompt: bool) -> None:
+    """In 3 bước đầu; chunk LLM ghi trong grounding (đã qua code kiểm) -> đánh ★."""
+    ms, chosen = ans.ms, set(ans.reply.sources)
+    found = ans.hits[: cfg.max_contexts]
+    used = {h.chunk_id for h in found}
+    print(f"   [1] tim: {ans.search_mode}, RRF K={RRF_K} dense {W_DENSE:g} : bm25 {W_SPARSE:g} · {ms['search'] / 1000:.1f}s"
           f" · top-{cfg.top_k}, {cfg.max_contexts} trang dau vao prompt")
-    print("       #  trang  chunk           rrf     dense      bm25   vao prompt")
-    for i, h in enumerate(dbg.get("hits", []), 1):
+    print("       #  trang  chunk           rrf     dense      bm25       LLM chon")
+    for i, h in enumerate(ans.hits, 1):
         print(f"       {i}  p{h.page_no:<4}  {h.chunk_id.split('#', 1)[1]:<14} {h.score:.4f}"
               f"  {('hang ' + str(h.rank_dense)) if h.rank_dense else '—':<9}"
               f"  {('hang ' + str(h.rank_sparse)) if h.rank_sparse else '—':<9}"
-              f"  {'✓' if h.chunk_id in used else ''}")
-    if "prompt" in dbg:
-        p = dbg["prompt"]
-        print(f"   [2] prompt: {len(p)} ky tu · {count_tokens(p)} token · log: {dbg['log']}")
-        for c in dbg.get("found", []):
-            head = c.text.split("] ", 1)[-1].replace("\n", " ⏎ ")
-            print(f"       [{c.chunk_id.split('#', 1)[1]}] {count_tokens(c.text)} tok"
-                  + (f" · {c.image_ratio:.0%} anh" if c.image_ratio else "") + f" · {head[:90]}…")
+              f"  {'★' if h.chunk_id in chosen else '' if h.chunk_id in used else '(ngoai prompt)'}")
+    if ans.prompt:
+        p = ans.prompt
+        print(f"   [2] prompt: {len(p)} ky tu · {count_tokens(p)} token · log: {ans.log_path}")
+        for h in found:
+            head = h.text_enriched.split("] ", 1)[-1].replace("\n", " ⏎ ")
+            print(f"     {'★' if h.chunk_id in chosen else ' '} [{h.chunk_id.split('#', 1)[1]}] {count_tokens(h.text_enriched)} tok"
+                  + (f" · {h.image_ratio:.0%} anh" if h.image_ratio else "") + f" · {head[:90]}…")
         if full_prompt:
             print("       ----- prompt -----")
             print("\n".join("       " + ln for ln in p.splitlines()))
             print("       ------------------")
-    if "raw" in dbg:
-        print(f"   [3] LLM tra ({ms.get('llm', 0) / 1000:.1f}s): {json.dumps(dbg['raw'], ensure_ascii=False)[:600]}")
+    if ans.raw is not None:
+        print(f"   [3] LLM tra ({ms.get('llm', 0) / 1000:.1f}s): {json.dumps(ans.raw, ensure_ascii=False)[:600]}")
 
 
 async def run(doc_id: str, questions: list[str], model: str, cfg: RuntimeConfig,
               quiet: bool, full_prompt: bool) -> None:
-    doc = enrich(ParsedDocument.load(f"src/output/parser/{doc_id}/document.json"))
-    retriever = Retriever(doc_id, cfg.top_k)
-    router = Router(doc, retriever, cfg, deck_map.build(doc), model, Path("logs/runtime") / doc_id / "llm")
-    print(f"{doc_id}: {doc.n_pages} trang | LLM {model}" + ("" if questions else " | Ctrl+C de thoat"))
+    engine = ChatEngine(doc_id, cfg, model, ROOT / "logs" / "runtime" / doc_id / "llm")
+    print(f"{doc_id}: {engine.doc.n_pages} trang | LLM {model}" + ("" if questions else " | Ctrl+C de thoat"))
 
     def ask_forever():
         while True:                                  # Enter trống -> hỏi lại; Ctrl+C / hết file -> thoát
@@ -90,15 +87,15 @@ async def run(doc_id: str, questions: list[str], model: str, cfg: RuntimeConfig,
     try:
         for q in questions or ask_forever():
             t0 = time.perf_counter()
-            reply, ms, dbg = await router.answer(q)
+            ans = await engine.answer(q)
+            reply, ms = ans.reply, ans.ms
             ms["total"] = int((time.perf_counter() - t0) * 1000)
 
             pages = sorted({int(m.group(1)) for s in reply.sources if (m := PAGE_OF_CHUNK.search(s))})
             src = [f"trang {', '.join(map(str, pages))}"] if pages else []
-            src += [s for s in reply.sources if not PAGE_OF_CHUNK.search(s)]      # vd "deck_map"
             print(f"\n>>> {q}")
             if not quiet:
-                show_debug(dbg, ms, cfg, retriever.mode, full_prompt)
+                show_debug(ans, cfg, full_prompt)
                 print(f"   [4] code kiem: {reply.action}" + (f" · {reply.note}" if reply.note else " · dat"))
             print(f"🤖 {reply.text}")
             print(f"   ↳ {reply.action}"
@@ -108,7 +105,7 @@ async def run(doc_id: str, questions: list[str], model: str, cfg: RuntimeConfig,
     except (EOFError, KeyboardInterrupt):
         print("\n(thoat)")
     finally:
-        await router.close()
+        await engine.close()
 
 
 def main() -> int:
@@ -125,10 +122,10 @@ def main() -> int:
     qs = [" ".join(args.question)] if args.question else []
     # Tên file gốc -> doc_id bằng ĐÚNG hàm run_deck.sh dùng; doc_id đưa vào thì giữ nguyên
     doc_id = slugify_doc_id(Path(args.doc).stem)
-    missing = [f for f in (f"src/output/parser/{doc_id}/document.json", f"src/output/chunker/{doc_id}/chunks.json")
-               if not Path(f).exists()]
+    missing = [f for f in (PARSER_OUTPUT / doc_id / "document.json", CHUNKER_OUTPUT / doc_id / "chunks.json")
+               if not f.exists()]
     if missing:
-        raise SystemExit(f"chua dung '{doc_id}' (thieu {', '.join(missing)}) — chay truoc:\n"
+        raise SystemExit(f"chua dung '{doc_id}' (thieu {', '.join(str(f.relative_to(ROOT)) for f in missing)}) — chay truoc:\n"
                          f'    bash scripts/run_deck.sh "data/raw/<file goc>.pdf"')
     try:
         asyncio.run(run(doc_id, qs, args.model, RuntimeConfig.load(args.config), args.quiet, args.prompt))

@@ -1,6 +1,6 @@
-"""Hoàn thiện ParsedDocument sau khi nạp `document.json`: chương · cờ. Không gọi API.
+"""Hoàn thiện ParsedDocument sau khi nạp `document.json`: dò chương, gắn cờ. Không gọi API.
 
-KB, kịch bản, runtime gọi `enrich(ParsedDocument.load(...))` — kết quả chỉ nằm trong bộ nhớ.
+Để làm gì: KB, kịch bản, runtime đều gọi `enrich(ParsedDocument.load(...))`; kết quả chỉ nằm trong bộ nhớ.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ log = logging.getLogger(__name__)
 
 
 def page_pdf(src: Path) -> Path | None:
-    """PDF để vẽ ảnh trang. `.pptx`: PDF cùng tên (`scripts/pptx2pdf.ps1`)."""
+    """File PDF dùng để vẽ ảnh trang: file `.pdf` thì là chính nó, `.pptx` thì tìm `.pdf` cùng tên."""
     if src.suffix.lower() == ".pdf":
         return src
     pdf = src.with_suffix(".pdf")
@@ -25,7 +25,7 @@ def page_pdf(src: Path) -> Path | None:
 
 
 def enrich(doc: ParsedDocument) -> ParsedDocument:
-    """Chương -> cờ -> bỏ khối rỗng. Thứ tự có nghĩa, sửa tại chỗ."""
+    """Dò chương -> gắn cờ -> bỏ khối rỗng không có cờ (sửa doc tại chỗ, trả lại doc)."""
     apply_sections(doc)
     apply_flags(doc)
     if dropped := drop_empty_blocks(doc):
@@ -35,7 +35,10 @@ def enrich(doc: ParsedDocument) -> ParsedDocument:
 
 
 def drop_empty_blocks(doc: ParsedDocument) -> Counter[str]:
-    """Bỏ block `content: null` KHÔNG có cờ -> {lý do: số block}. Không đánh lại id (chunk / kịch bản vẫn trỏ đúng)."""
+    """Bỏ các khối không có nội dung mà cũng không bị cờ -> đếm số khối bỏ theo lý do.
+
+    Cách làm: khối rỗng có cờ thì giữ lại để người duyệt xem; không đánh lại id; tính lại page_hash.
+    """
     flagged = {f.block_id for f in doc.flags if f.block_id}
     out: Counter[str] = Counter()
     for page in doc.pages:

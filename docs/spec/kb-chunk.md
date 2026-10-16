@@ -7,7 +7,7 @@
 
 ```
 python src/chunker/cli.py src/output/parser/<doc_id>/document.json   # -> src/output/chunker/<doc_id>/chunks.json
-python src/retrieval/build_index.py src/output/chunker/<doc_id>/chunks.json            # -> src/output/embedders/<doc_id>/vectors__<model>.*
+python src/embedders/cli.py src/output/chunker/<doc_id>/chunks.json            # -> src/output/embedders/<doc_id>/vectors__<model>.*
 ```
 
 ---
@@ -258,11 +258,12 @@ nhúng         text_enriched · EMBED_MODEL trong .env (text-embedding-3-small) 
 
 ## 10. Phải đo, chưa biết
 
-Hai câu chỉ có số mới trả lời được — làm xong `src/retrieval/` thì chạy ngay:
+Hai câu chỉ có số mới trả lời được — làm xong phần tìm (`src/runtime/retrieve.py`) thì chạy ngay:
 
-**Self-retrieval** (§5 S6a · gate §11 ≥ 90%): lấy nội dung trang `i` làm truy vấn, top-1
-phải ra đúng trang `i`. Đây là **vòng phản hồi đầu tiên** của cả dự án — nó đo xem parse
-có đủ tốt để tìm được không, bằng số thật.
+**Đo tìm kiếm bằng bộ câu hỏi có nhãn** (`src/evaluation/eval.py`, `data/eval/<doc_id>.queries.json`):
+trang đúng có ở top-1 / top-5 không. Đây là **vòng phản hồi đầu tiên** của cả dự án — nó đo xem
+parse có đủ tốt để tìm được không, bằng số thật. (Bản đầu dùng self-retrieval — lấy chính trang
+làm câu hỏi — nhưng nó gần như luôn 100% vì đề bài là đáp án; bỏ 2026-10-13.)
 
 Nghi ngờ cụ thể cần kiểm:
 
@@ -271,5 +272,5 @@ Nghi ngờ cụ thể cần kiểm:
   [parsed-document.md §0](./parsed-document.md)) — chunk 18 token, chắc chắn trượt
 - **7 trang phân mục** — lọc đúng chưa, hay lọc nhầm trang có nội dung
 
-Kết quả audit quyết định việc tiếp theo: cứu `p15`, hay thêm `slide_type` (sinh `message`
+Kết quả đo quyết định việc tiếp theo: cứu `p15`, hay thêm `slide_type` (sinh `message`
 ở S1 từng là một lựa chọn — S1 đã bỏ). **Đừng đoán trước khi có số.**

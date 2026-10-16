@@ -1,15 +1,12 @@
-"""Sinh kịch bản từng trang bằng LLM. Xem docs/spec/scenario.md.
+"""Sinh kịch bản từng trang bằng LLM (S4).
 
-Ba điểm dễ sai:
-
-  1. **Chỉ đưa nội dung CHÍNH TRANG ĐÓ.** Không nhồi cả deck (§10). Nguồn sự thật là các
-     khối của `ParsedPage`, mỗi khối kèm `id` để LLM trỏ `ref` vào được.
-  2. **Song song theo SECTION, tuần tự TRONG section.** 7 trang liền cùng tên "Đồ thị dạng
-     đường" — viết độc lập thì robot mở đầu y hệt bảy lần. Trang sau đọc kịch bản trang
-     trước cùng section. Đây là thứ thay cho `message` đã bỏ.
-  3. **`syllables` do code tính.** LLM chỉ viết chữ; đếm âm tiết theo kho phát âm chung
-     `data/pronunciation.json`. Kho KHÔNG vào prompt — prompt bảo chỉ dùng thuật ngữ có trên
-     chính trang.
+Để làm gì: viết lời robot nói cho mỗi trang — MỘT đoạn văn liền + danh sách khối nguồn (`refs`).
+Cách làm:
+    - Mỗi trang chỉ đưa nội dung CỦA TRANG ĐÓ vào prompt (không nhồi cả deck).
+    - Các chương chạy song song; trong một chương thì chạy tuần tự, trang sau đọc kịch bản các
+      trang trước cùng chương để không mở đầu giống nhau.
+    - LLM chỉ viết chữ; số âm tiết do code đếm theo kho phát âm.
+    - Viết xong code kiểm; có lỗi thì cho LLM sửa một lần (pass 2).
 """
 
 from __future__ import annotations
@@ -18,6 +15,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
 from collections.abc import Callable
 from pathlib import Path
 
@@ -26,7 +24,7 @@ from utils.llm import LLM
 from models.parsed_document import (ParsedDocument, ParsedImage, ParsedPage, ParsedParagraph,
                             ParsedTable)
 from scenario import validate
-from models.scenario import Grounding, Prosody, Sentence, SlideScript
+from models.scenario import SlideScript
 from utils.syllables import Pronunciation, count
 
 log = logging.getLogger(__name__)
@@ -37,36 +35,33 @@ PROMPT_PATH = PROMPTS_DIR / "s4_scenario.md"
 # đưa câu mở đầu (đủ để không mở đầu giống nhau). Không giới hạn thì trang cuối sec_01 của
 # Onboarding (23 trang) mang theo kịch bản 22 trang — nhồi cả chương vào prompt.
 PREV_FULL = 3
+SENTENCE_END = re.compile(r"(?<=[.!?…])\s+")
 
 TYPE_RULES = {
     "section_divider": (
         "Đây là TRANG CHUYỂN CHƯƠNG: trên trang chỉ có tên chương, không có nội dung.\n"
-        "- Viết 1–2 câu, TẤT CẢ là `delivery`. CẤM câu `content`.\n"
-        "- Báo hiệu chuyển sang chương mới và NÊU TÊN CHƯƠNG (lấy đúng tiêu đề trang).\n"
+        "- Viết 1–2 câu: báo hiệu chuyển sang chương mới và NÊU TÊN CHƯƠNG (lấy đúng tiêu đề trang).\n"
         "- Có thể thêm một câu hỏi tu từ gợi tò mò.\n"
-        "- CẤM giảng giải chương này là gì — trên trang không có thông tin đó."
+        "- CẤM giảng giải chương này là gì — trên trang không có thông tin đó.\n"
+        "- `refs` có thể để rỗng."
     ),
     "closing": (
         "Đây là TRANG KẾT THÚC bài thuyết trình (lời cảm ơn), KHÔNG phải chương mới.\n"
-        "- Viết 1–2 câu, TẤT CẢ là `delivery`. CẤM câu `content`.\n"
-        "- Cảm ơn người nghe, có thể mời đặt câu hỏi.\n"
+        "- Viết 1–2 câu: cảm ơn người nghe, có thể mời đặt câu hỏi.\n"
         "- CẤM tóm tắt lại nội dung — trên trang không có thông tin đó.\n"
-        "- Không cần đọc lại tiêu đề trang."
+        "- Không cần đọc lại tiêu đề trang. `refs` có thể để rỗng."
     ),
     "content": (
         "Đây là TRANG NỘI DUNG.\n"
-        "- Mở bằng một câu `delivery` dẫn dắt, rồi các câu `content`.\n"
         "- NÓI ĐỦ Ý: MỌI thông tin trên trang phải được nói ra — số liệu, đối tượng, điều kiện,\n"
         "  ngoại lệ, mốc thời gian. Người nghe phải hình dung được hết thông tin trên trang.\n"
-        "- KHÔNG có giới hạn số câu: trang ít chữ thì nói ngắn, trang nhiều chữ thì nói dài.\n"
-        "  Nhiều ý thì viết NHIỀU CÂU, không nhồi vào một câu dài.\n"
-        "- Đủ ý KHÔNG phải đọc nguyên văn: gộp các mục cùng loại vào một câu nói tự nhiên.\n"
+        "- KHÔNG giới hạn độ dài: trang ít chữ thì nói ngắn, trang nhiều chữ thì nói dài.\n"
+        "- Đủ ý KHÔNG phải đọc nguyên văn: gộp các mục cùng loại thành câu nói tự nhiên.\n"
         "- Không tả lại hình ảnh từng chi tiết."
     ),
     "exercise": (
         "Đây là TRANG BÀI TẬP: người nghe cần biết PHẢI LÀM GÌ, không cần nghe giảng.\n"
-        "- Một câu `delivery` báo đến phần bài tập, còn lại là `content`.\n"
-        "- ĐỌC LẠI yêu cầu, hạn nộp, thứ cần nộp — đúng như trên trang, không thêm bớt.\n"
+        "- Báo đến phần bài tập, rồi ĐỌC LẠI yêu cầu, hạn nộp, thứ cần nộp — đúng như trên trang.\n"
         "- CẤM giảng lại kiến thức, CẤM gợi ý cách làm — trên trang không có thông tin đó.\n"
         "- Danh sách link: CHỈ nói có mấy trang và là trang gì, KHÔNG đọc địa chỉ."
     ),
@@ -74,6 +69,7 @@ TYPE_RULES = {
 
 
 def load_prompt() -> tuple[str, str]:
+    """Đọc prompt `s4_scenario.md` -> (nội dung, hash 12 ký tự). Hash đổi = prompt đổi = viết lại."""
     t = PROMPT_PATH.read_text(encoding="utf-8")
     return t, hashlib.sha1(t.encode()).hexdigest()[:12]
 
@@ -82,25 +78,26 @@ def load_prompt() -> tuple[str, str]:
 
 
 def is_closing(doc: ParsedDocument, page: ParsedPage) -> bool:
-    """Trang "chuyển chương" nằm CUỐI deck là lời kết ("THANK YOU!"), không phải chương
-    mới — luật chuyển chương sẽ bắt robot nói "sang chương THANK YOU"."""
+    """Trang có phải lời kết không: trang chuyển chương nằm CUỐI deck ("THANK YOU!")."""
     return page.slide_type == "section_divider" and page.page_no == doc.pages[-1].page_no
 
 
 def rules_key(doc: ParsedDocument, page: ParsedPage) -> str:
+    """Chọn bộ luật cho trang: "closing" nếu là lời kết, không thì theo loại trang (slide_type)."""
     return "closing" if is_closing(doc, page) else page.slide_type
 
 
 def page_blocks(page: ParsedPage) -> list[tuple[str, str]]:
-    """-> [(id, text)] — chỉ khối CÓ nội dung, để LLM trỏ ref vào."""
+    """Các khối CÓ nội dung của trang -> [(id, chữ)], để LLM trỏ `ref` vào."""
     return [(b.id, b.content.strip())
             for b in page.blocks if b.content and b.content.strip()]
 
 
 def must_cover(b: object) -> bool:
-    """Khối mang thông tin, kịch bản PHẢI nói tới: đoạn văn, danh sách, bảng. Không tính
-    tiêu đề, khối link (không đọc địa chỉ), chú thích, ảnh (ảnh minh hoạ không cần nói), và
-    nhãn < 3 chữ ("NỘI DUNG", "CÒN LẠI")."""
+    """Khối có bắt buộc phải được nói tới không.
+
+    Cách làm: chỉ đoạn văn / danh sách / bảng có >= 3 chữ; không tính tiêu đề, khối link, chú thích, ảnh.
+    """
     if isinstance(b, ParsedParagraph) and b.role not in ("body", "list"):
         return False
     return (isinstance(b, (ParsedParagraph, ParsedTable))
@@ -108,20 +105,24 @@ def must_cover(b: object) -> bool:
 
 
 def block_info(page: ParsedPage) -> dict[str, validate.BlockInfo]:
-    """id -> chữ / có phải nói — cho bộ kiểm tra."""
+    """Thông tin các khối của trang cho bộ kiểm -> {id: (chữ, có phải nói không)}."""
     cover = {b.id for b in page.blocks if must_cover(b)}
     return {i: validate.BlockInfo(text=t, must_cover=i in cover) for i, t in page_blocks(page)}
 
 
-def check(ss: SlideScript, doc: ParsedDocument, page: ParsedPage,
-          pron: Pronunciation) -> list[validate.Issue]:
-    # trang lời kết không bị bắt nêu tiêu đề
-    title = None if is_closing(doc, page) else page.title
-    return validate.check(ss, block_info(page), pron, title)
+def check(ss: SlideScript, page: ParsedPage) -> list[validate.Issue]:
+    """Kiểm kịch bản một trang (gọi `validate.check` với các khối của trang)."""
+    return validate.check(ss, block_info(page))
 
 
 def render_prompt(template: str, doc: ParsedDocument, page: ParsedPage, stype: str,
                   previous: list[SlideScript]) -> str:
+    """Dựng prompt cho một trang từ template.
+
+    Cách làm: thay các chỗ {{...}} bằng — tên deck, số trang, tên chương, loại trang, tiêu đề trang
+    trước / sau, các khối của trang (ghi rõ khối nào là ẢNH, khối nào là LINK), kịch bản các trang
+    trước cùng chương (3 trang gần nhất đầy đủ, xa hơn chỉ câu đầu tiên), và luật riêng của loại trang.
+    """
     prev_p = doc.page(page.page_no - 1)
     next_p = doc.page(page.page_no + 1)
     sec = doc.section_of(page.page_no)
@@ -139,8 +140,8 @@ def render_prompt(template: str, doc: ParsedDocument, page: ParsedPage, stype: s
 
     if previous:
         older, recent = previous[:-PREV_FULL], previous[-PREV_FULL:]
-        lines = [f"- Trang {s.page_no} (chỉ câu mở đầu): {s.sentences[0].text}"
-                 for s in older if s.sentences]
+        lines = [f"- Trang {s.page_no} (chỉ câu mở đầu): {SENTENCE_END.split(s.text, 1)[0]}"
+                 for s in older if s.text]
         lines += [f"- Trang {s.page_no}: {s.text}" for s in recent]
         prev_txt = "\n".join(lines)
     else:
@@ -167,55 +168,36 @@ def render_prompt(template: str, doc: ParsedDocument, page: ParsedPage, stype: s
 # ------------------------------------------------------------------- một trang
 
 
-def _num(v: object, default: float, lo: float, hi: float) -> float:
-    """LLM trả "300ms", "chậm", null... -> không được làm sập cả lần chạy. Hỏng thì lấy
-    mặc định, lệch thì kẹp về khoảng hợp lý."""
-    try:
-        x = float(v)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return default
-    return min(hi, max(lo, x))
-
-
 def to_script(raw: dict, page: ParsedPage, stype: str, pron: Pronunciation,
               model: str, prompt_hash: str) -> SlideScript:
-    sents: list[Sentence] = []
-    unknown: list[str] = []
-    items = raw.get("sentences") if isinstance(raw, dict) else None
-    for s in items if isinstance(items, list) else []:
-        if not isinstance(s, dict):
-            continue
-        text = str(s.get("text") or "").strip()
-        if not text:
-            continue
-        kind = "content" if s.get("kind") == "content" else "delivery"
-        ref = str(s.get("ref")).strip() if s.get("ref") else None
-        n, unk = count(text, pron)
-        unknown += unk
-        emph = s.get("emphasis") if isinstance(s.get("emphasis"), list) else []
-        sents.append(Sentence(
-            kind=kind, text=text, syllables=n,
-            grounding=Grounding(type="kb_chunk", ref=ref) if kind == "content"
-            else Grounding(type="structure"),
-            prosody=Prosody(
-                # từ nhấn không nằm trong câu thì TTS không có chỗ nhấn -> bỏ
-                emphasis=[str(x) for x in emph if str(x).lower() in text.lower()][:3],
-                pause_before_ms=int(_num(s.get("pause_before_ms"), 0, 0, 1500)),
-                speed=_num(s.get("speed"), 1.0, 0.8, 1.2),
-            ),
-        ))
+    """Đổi JSON LLM trả về ({"text", "refs"}) thành SlideScript.
+
+    Cách làm: dồn khoảng trắng / xuống dòng trong `text` thành một dấu cách; `refs` nhận list (hoặc
+    một chuỗi lẻ), bỏ trùng; đếm âm tiết và từ lạ bằng code.
+    """
+    text = " ".join(str(raw.get("text") or "").split()) if isinstance(raw, dict) else ""
+    refs = raw.get("refs") if isinstance(raw, dict) else None
+    refs = [refs] if isinstance(refs, str) else refs if isinstance(refs, list) else []
+    refs = list(dict.fromkeys(str(r).strip().strip("[]") for r in refs if str(r).strip()))
+    n, unknown = count(text, pron)
     return SlideScript(page_no=page.page_no, page_hash=page.page_hash, slide_type=stype,
-                       section_id=page.section_id, sentences=sents,
+                       section_id=page.section_id, text=text, refs=refs, syllables=n,
                        unknown_terms=sorted(set(unknown)), model=model, prompt_hash=prompt_hash)
 
 
 def _badness(issues: list[validate.Issue]) -> tuple[int, int]:
+    """Độ tệ của một bộ lỗi -> (số lỗi đỏ, số lỗi "sửa"), để so pass 1 với pass 2."""
     return (sum(i.level == "red" for i in issues), sum(i.level == "fix" for i in issues))
 
 
 async def write_page(llm: LLM, sem: asyncio.Semaphore, template: str, prompt_hash: str,
                      doc: ParsedDocument, page: ParsedPage, previous: list[SlideScript],
                      pron: Pronunciation) -> SlideScript:
+    """Viết kịch bản một trang -> SlideScript.
+
+    Cách làm: pass 1 gọi LLM; LLM lỗi thì trả kịch bản rỗng có cờ `llm_failed`; kiểm bằng code; có lỗi
+    thì pass 2 gửi kèm danh sách lỗi để LLM sửa, giữ bản ít lỗi hơn; cuối cùng gắn cờ.
+    """
     stype = page.slide_type
     prompt = render_prompt(template, doc, page, stype, previous)
     msgs = [{"role": "user", "content": prompt}]
@@ -231,7 +213,7 @@ async def write_page(llm: LLM, sem: asyncio.Semaphore, template: str, prompt_has
                            model=llm.model, prompt_hash=prompt_hash)
 
     ss = to_script(raw, page, stype, pron, llm.model, prompt_hash)
-    issues = check(ss, doc, page, pron)
+    issues = check(ss, page)
 
     # Pass 2: CHỈ cho trang trượt, kèm danh sách lỗi cụ thể. Không thử lần 3.
     if validate.needs_fix(issues):
@@ -246,7 +228,7 @@ async def write_page(llm: LLM, sem: asyncio.Semaphore, template: str, prompt_has
             async with sem:
                 raw2 = await llm.chat(msgs2, f"{tag}_pass2")
             ss2 = to_script(raw2, page, stype, pron, llm.model, prompt_hash)
-            issues2 = check(ss2, doc, page, pron)
+            issues2 = check(ss2, page)
             # Pass 2 KHÔNG mặc nhiên tốt hơn: sửa lỗi này có thể đẻ lỗi khác, kể cả cờ đỏ.
             # Giữ bản ít lỗi hơn (cờ đỏ trước, lỗi thường sau); bằng nhau thì lấy pass 2.
             if _badness(issues2) <= _badness(issues):
@@ -259,8 +241,8 @@ async def write_page(llm: LLM, sem: asyncio.Semaphore, template: str, prompt_has
             log.warning("  p%d pass 2 that bai, giu pass 1: %s", page.page_no, e)
 
     ss.flags = validate.to_flags(issues)
-    log.info("  p%-3d %-15s %d cau %3d am tiet %4.1fs  pass%d  %s",
-             ss.page_no, rules_key(doc, page), len(ss.sentences), ss.syllables, ss.seconds,
+    log.info("  p%-3d %-15s %d ref %3d am tiet %4.1fs  pass%d  %s",
+             ss.page_no, rules_key(doc, page), len(ss.refs), ss.syllables, ss.seconds,
              ss.passes, ",".join(ss.flags) or "ok")
     return ss
 
@@ -269,7 +251,7 @@ async def write_page(llm: LLM, sem: asyncio.Semaphore, template: str, prompt_has
 
 
 def groups(doc: ParsedDocument) -> list[list[ParsedPage]]:
-    """Mỗi section một nhóm; trang chưa thuộc section nào (mở đầu) thành một nhóm riêng."""
+    """Chia các trang thành nhóm theo chương (trang trước chương đầu thành một nhóm riêng)."""
     by: dict[str, list[ParsedPage]] = {}
     for p in doc.pages:
         by.setdefault(p.section_id or "_intro", []).append(p)
@@ -278,11 +260,8 @@ def groups(doc: ParsedDocument) -> list[list[ParsedPage]]:
 
 
 def recount(ss: SlideScript, pron: Pronunciation) -> SlideScript:
-    """pronunciation đổi -> KHÔNG gọi LLM, chỉ đếm lại âm tiết."""
-    unk: list[str] = []
-    for s in ss.sentences:
-        s.syllables, u = count(s.text, pron)
-        unk += u
+    """Đếm lại âm tiết và từ lạ của kịch bản cũ theo kho phát âm hiện tại (không gọi LLM)."""
+    ss.syllables, unk = count(ss.text, pron)
     ss.unknown_terms = sorted(set(unk))
     return ss
 
@@ -292,8 +271,15 @@ async def run_deck(doc: ParsedDocument, pron: Pronunciation, *, model: str,
                    force: bool, workers: int, log_dir: Path,
                    on_page: Callable[[dict[int, SlideScript]], None] | None = None,
                    ) -> list[SlideScript]:
-    """`on_page(results)` gọi sau MỖI trang xong — để lưu dần. Chạy hỏng giữa chừng (mạng,
-    Ctrl+C) thì các trang đã trả tiền vẫn còn trên đĩa."""
+    """Viết kịch bản cả deck -> danh sách SlideScript theo thứ tự trang.
+
+    Cách làm: các chương chạy song song, trong chương chạy tuần tự. Mỗi trang:
+        - kịch bản cũ còn dùng được (cùng page_hash, prompt, model, loại trang) -> đếm lại + kiểm lại,
+          chỉ viết lại nếu có lỗi MỚI hoặc lần trước LLM lỗi;
+        - không được chọn (`only`) -> giữ chữ, đếm lại + kiểm lại;
+        - còn lại -> viết mới.
+    Viết lại một trang thì các trang sau cùng chương cũng viết lại. `on_page` gọi sau mỗi trang để lưu dần.
+    """
     template, prompt_hash = load_prompt()
     llm = LLM(model, log_dir, backoff=5.0)             # offline: kiên nhẫn, 5+10+20s
     sem = asyncio.Semaphore(workers)
@@ -308,7 +294,7 @@ async def run_deck(doc: ParsedDocument, pron: Pronunciation, *, model: str,
             ss = SlideScript(page_no=page.page_no, page_hash=page.page_hash,
                              slide_type=page.slide_type, section_id=page.section_id,
                              flags=["llm_failed"], model=llm.model, prompt_hash=prompt_hash)
-        if "llm_failed" in ss.flags and not ss.sentences and old is not None:
+        if "llm_failed" in ss.flags and not ss.text and old is not None:
             # API sập (đo được: 503 "temporarily unavailable" cả loạt) -> GIỮ bản cũ, gắn cờ.
             # Ghi đè bằng bản rỗng là mất kịch bản đã trả tiền. prompt_hash cũ giữ nguyên nên
             # lần chạy sau vẫn thấy trang này cần viết lại.
@@ -332,7 +318,7 @@ async def run_deck(doc: ParsedDocument, pron: Pronunciation, *, model: str,
                 # chạy lại (vd chỉ đổi kho phát âm) là trả tiền viết lại mọi trang còn cờ vàng.
                 prev = set(old.flags)                # chụp TRƯỚC: recount sửa `old` tại chỗ
                 ss = recount(old, pron)
-                issues = check(ss, doc, page, pron)
+                issues = check(ss, page)
                 ss.flags = validate.to_flags(issues)
                 new = {i.code for i in issues if i.level in ("red", "fix")} - prev
                 if new or "llm_failed" in prev:
@@ -343,7 +329,7 @@ async def run_deck(doc: ParsedDocument, pron: Pronunciation, *, model: str,
             elif old is not None and not want:
                 # không chọn -> giữ chữ, nhưng đếm lại + kiểm lại (rẻ) để cờ không cũ
                 ss = recount(old, pron)
-                ss.flags = validate.to_flags(check(ss, doc, page, pron))
+                ss.flags = validate.to_flags(check(ss, page))
             elif want:
                 ss = await fresh_write(page, done, old)
                 dirty = True

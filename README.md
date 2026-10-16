@@ -16,10 +16,9 @@ trên slide.
 |    | Bước            | Code                            | Làm gì                                                                                                                                                                                                   |
 | -- | ----------------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | ✅ | S0 Parse          | `src/parser/`                | docling đọc chữ + toạ độ (tắt OCR) · VLM nhìn cả trang sắp chữ thành khối · VLM chép bảng từ ảnh bảng · chương từ trang mục lục · cờ cho người duyệt |
-| ✅ | S5 KB             | `src/retrieval/`                     | 1 trang = 1 chunk (cắt khi > 500 token) · nhúng`text-embedding-3-small` qua API, cache theo nội dung · kho vector Chroma hoặc RAM · index BM25                                                    |
-| ✅ | Tìm kiếm        | `src/retrieval/search.py`            | hybrid vector + BM25, gộp bằng RRF (K=15, 1:1), trả**top-5 trang**                                                                                                                                |
-| ✅ | Đo chất lượng | `src/retrieval/{eval,audit,tune}.py` | bộ câu hỏi có nhãn · self-retrieval + quét chunk trùng · quét tham số RRF                                                                                                                       |
-| ✅ | S6a`deck_map`   | `src/retrieval/deck_map.py`          | bản đồ chương ~180 token cho prompt runtime, bằng luật                                                                                                                                              |
+| ✅ | S5 KB             | `src/chunker/` · `src/embedders/` · `src/vectordb/` · `src/sparse/` | 1 trang = 1 chunk (cắt khi > 500 token) · nhúng`text-embedding-3-small` qua API, cache theo nội dung · kho vector Chroma hoặc RAM · index BM25                                                    |
+| ✅ | Tìm kiếm        | `src/runtime/retrieve.py`            | hybrid vector + BM25, gộp bằng RRF (K=10, vector 1.5 : BM25 1), trả**top-5 trang**                                                                                                                                |
+| ✅ | Đo chất lượng | `src/evaluation/{eval,tune}.py` | bộ câu hỏi có nhãn · quét tham số RRF                                                                                                                                                            |
 | 🟡 | Hỏi đáp thử   | `scripts/try_ask.py`          | tìm → 1 lần gọi LLM → code kiểm nguồn, trong terminal                                                                                                                                               |
 | 🟡 | S4 kịch bản     | `src/scenario/`               | bước 4 của`run_deck.sh` (`--no-scenario` để bỏ), chỉ viết lại trang đổi                                                                                                                    |
 |    |                   |                                 |                                                                                                                                                                                                            |
@@ -50,9 +49,6 @@ src/output/chunker/<ten>/chunks.json
    │ ④b index: nhúng vector + nạp kho                               💰 API+  có cache
    ▼
 src/output/embedders/<ten>/vectors__<model>.npy  (+ src/output/vectordb/chroma/)
-   │ ⑤ deck_map                                                     miễn phí
-   ▼
-src/output/retrieval/<ten>/deck_map.txt
    │ ⑥ S4 kịch bản: chỉ trang đổi mới gọi LLM                       💰 API (~1–2 lần/trang)
    ▼
 src/output/scenario/<ten>/scenario.json · scenario.md
@@ -98,7 +94,7 @@ Lệnh `bash` chạy trong Git Bash; `python` là Python trong `.venv`
 (`.venv\Scripts\python.exe` trên Windows).
 
 ```bash
-# 1. Cả nhánh offline của một deck: parse -> chunk + nhúng -> deck_map -> kịch bản
+# 1. Cả nhánh offline của một deck: parse -> chunk + nhúng -> kịch bản
 bash scripts/run_deck.sh "data/raw/<file>.pdf"
 ## các tuỳ chọn khác 
 bash scripts/run_deck.sh "data/raw/<file>.pdf" --redo       # gọi lại VLM cả file (mặc định dùng cache)
@@ -111,7 +107,7 @@ python scripts/try_ask.py "data/raw/<file>.pdf"            # tên file gốc cũ
 python scripts/try_ask.py <ten> "nghỉ phép năm được mấy ngày"
 
 # 3. Chỉ tìm, xem trang nào ra và do nhánh nào kéo lên
-python src/retrieval/search.py src/output/chunker/<ten>/chunks.json "làm thêm ngày lễ hệ số bao nhiêu" --explain
+python src/runtime/retrieve.py src/output/chunker/<ten>/chunks.json "làm thêm ngày lễ hệ số bao nhiêu" --explain
 
 # Xem nội dung đã parse / chunk của một trang
 python src/parser/show.py <ten> --page 7
@@ -154,11 +150,13 @@ src/
 ├── utils/        dùng chung: config (đường dẫn, .env) · llm · vectors · tokens · syllables
 ├── parser/       S0 — file gốc -> ParsedDocument   cli.py (parse) · show.py (xem) · enrich (link · chương · cờ)
 ├── chunker/      S5 — ParsedDocument -> chunks.json
-├── embedders/    S5 — chữ -> vector: openai (EMBEDDER), cache bọc ngoài
+├── embedders/    S5 — chữ -> vector: openai (EMBEDDER), cache bọc ngoài · cli.py nhúng + nạp kho
 ├── vectordb/     S5 — kho vector: inmem | chroma (VECTOR_DB)
-├── retrieval/    tìm (hybrid + RRF, BM25 ở sparse/) · build_index · deck_map · đo (audit, eval, tune)
+├── sparse/       S5 — index từ khoá BM25 (SPARSE_INDEX), cùng bộ hàm với vectordb/
+├── evaluation/   đo tìm kiếm: eval (câu hỏi có nhãn) · tune (quét tham số RRF)
 ├── scenario/     S4 kịch bản
-├── runtime/      hỏi đáp thử bản chữ (try_ask.py dùng retrieve + router)
+├── runtime/      hỏi đáp bản chữ: retrieve.py (tìm vector + BM25 gộp RRF · tìm thử) ·
+│                 chat_engine.py (tìm -> 1 lần LLM -> kiểm nguồn) · models.py — try_ask.py gọi ChatEngine
 ├── prompts/      mọi prompt (không hardcode trong .py)
 └── output/       mọi thứ sinh ra, mỗi thư mục con trùng tên thư mục code   (gitignore)
 scripts/          run_deck.sh · try_ask.py · tune.sh · pptx2pdf.ps1 · extract_terms.py

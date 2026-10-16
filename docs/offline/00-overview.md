@@ -3,7 +3,7 @@
 > **File này là THIẾT KẾ ĐÍCH.** Cái đang chạy thật: [01-hien-trang.md](./01-hien-trang.md).
 > Hiện trạng v0 khác thiết kế ở ba điểm: **một file PDF duy nhất vừa làm deck vừa làm KB**
 > (không phải `.pptx` + `source/*.pdf` tách biệt) · lưu **file JSON trên đĩa** + kho vector
-> Chroma/RAM, chưa có Qdrant · mới code **S0, S5, S6a `deck_map`, S4** — chưa có S2
+> Chroma/RAM, chưa có Qdrant · mới code **S0, S5, S4** (S6a dùng lại index S5; `deck_map` bỏ 2026-10-13) — chưa có S2
 > `time_budget`, S6b, S7. Trạng thái từng stage ghi ở §3.3 và §4 dưới đây.
 >
 > Hệ quả của việc gộp hai nguồn: [CLAUDE.md §3.0](../../CLAUDE.md). Tóm tắt — mất bản
@@ -117,8 +117,8 @@ data/raw/<ten>.pdf   ← VỪA là deck VỪA là KB
       |
       +──────────────┬──────────────────┐
       v              v                  v
-  S2 time_budget  S6a deck_map     S4 Scenario   ← đọc TỪNG TRANG, không nhồi cả deck
-      |            + audit              |
+  S2 time_budget  S6a (index S5)   S4 Scenario   ← đọc TỪNG TRANG, không nhồi cả deck
+      |                                 |
       +──────────────┴──────────────────+
                      |                  v
                      |            S6b TTS + qa_cache
@@ -141,7 +141,7 @@ data/raw/<ten>.pdf   ← VỪA là deck VỪA là KB
 
 ```
 S0 -> S5 -+-> S2 (luật, rẻ)
-          +-> S6a deck_map + audit
+          +-> S6a (dùng lại index S5)
           +-> S4 -> S6b ----------------+-> S7
 ```
 
@@ -174,7 +174,6 @@ tài liệu, lọc bằng `doc_id`) hoặc RAM — chọn bằng `VECTOR_DB`, xe
 ① VlmPipeline      ~9s/trang (Gemma local, 8 luồng) — 1 lần/trang, đo 2026-10-08 Thời gian làm việc
 ③ document.json    vài giây
 ④ chunk + nhúng    vài giây (lô 64 chunk/lần gọi API)
-⑤ deck_map         tức thì
 S4 kịch bản        1–2 lần gọi LLM/trang, song song theo CHƯƠNG, tuần tự trong chương
 ```
 
@@ -227,7 +226,7 @@ RA   src/output/parser/<doc_id>/{docling_vlmpipeline,tables,pictures,document}.j
 
 #### S5 · KB Construction — `ParsedDocument` → `KBChunk[]` + vector  ✅ ĐÃ CÓ
 
-`src/retrieval/` · xem [kb-chunk.md](../spec/kb-chunk.md), [embedding.md](../spec/embedding.md),
+`src/chunker/` · `src/embedders/` · `src/vectordb/` · `src/sparse/` · `src/runtime/retrieve.py` · xem [kb-chunk.md](../spec/kb-chunk.md), [embedding.md](../spec/embedding.md),
 [search.md](../spec/search.md)
 
 ```
@@ -248,8 +247,8 @@ VÀO  src/output/parser/<doc_id>/document.json
   │            nhúng CẢ BỘ, kể cả phân mục — lọc là việc của lúc TRUY VẤN
   │
   └─> [index]  dense: kho vector chroma | inmem (BẢN SAO của .npy, tự đồng bộ)
-               sparse: BM25 dựng trong RAM lúc khởi động (src/retrieval/sparse/)
-               gộp bằng RRF K=15, dense 1 : sparse 1   <- đo bằng scripts/tune.sh
+               sparse: BM25 dựng trong RAM lúc khởi động (src/sparse/)
+               gộp bằng RRF K=10, dense 1.5 : sparse 1   <- đo bằng scripts/tune.sh
                KHÔNG cộng điểm: hai thang đo không so được
 RA   src/output/chunker/<doc_id>/chunks.json · src/output/embedders/<doc_id>/vectors__<model_id>.npy + src/output/vectordb/chroma/
 ```
@@ -300,22 +299,12 @@ RA   src/output/scenario/<doc_id>/scenario.json + scenario.md  ──> S6b
 
 Chưa có `time_budget` (S2) nên chưa cân giờ — độ dài đi theo nội dung trang.
 
-#### S6a · deck_map + audit — `ParsedDocument` → `deck_map.txt`  ✅ ĐÃ CÓ
+#### S6a · ~~deck_map~~ — BỎ 2026-10-13
 
-```
-VÀO  ParsedDocument (sections + slide_type)
-  │
-  ├─> deck_map.txt (~180 token: số chương + khoảng trang từng chương)  ─> prompt runtime
-  │       src/retrieval/deck_map.py — luật, không gọi model
-  │
-  └─> [audit]  src/retrieval/audit.py — ĐÃ CÓ
-               quét trùng lặp: cosine cặp >= 0.94   ─> bắt được 2 cặp thật
-               self-retrieval: gate §11 >= 90%
-               ⚠️ self-retrieval hiện gần như luôn 100% vì câu hỏi lấy TỪ CHÍNH
-                  văn bản chunk — đề bài là đáp án. Số đo thật lấy từ
-                  data/eval/queries.json (src/retrieval/eval.py)
-RA   deck_map.txt + src/output/retrieval/<doc_id>/*.json
-```
+`deck_map.txt` chỉ viết lại `doc.sections` (S0, `parser/sections.py`) thành chữ cho prompt runtime —
+bỏ cả file lẫn mục trong prompt. S6a còn lại là dùng lại index của S5.
+audit (self-retrieval + quét chunk trùng) cũng bỏ 2026-10-13 — đo tìm kiếm bằng
+`src/evaluation/eval.py` + `scripts/tune.sh`.
 
 #### S6b · Precompute — `Scenario[]` → `precomputed/`
 
@@ -353,9 +342,8 @@ VÀO  mọi artifact + flags.json + BẢN NGHE THỬ    <- CHỈ duyệt phần 
   │     1  S4 ungrounded (câu content)  <- CỜ ĐỎ, robot sẽ NÓI RA MIỆNG
   │     2  S0 image_not_described       <- mất nội dung thật của trang
   │     3  S0 empty_page                <- trang rỗng mà KHÔNG phải section_divider
-  │     4  S6a chunk trùng / self_retrieval_fail
-  │     5  S0 no_sections                  <- không dựng được chương, chỉ ghi nhận
-  │     6  S6b                          <- kỹ thuật
+  │     4  S0 no_sections                  <- không dựng được chương, chỉ ghi nhận
+  │     5  S6b                          <- kỹ thuật
   │           │
   │           ├─ accept / whitelist ─> review.json   (BỀN qua các lần build)
   │           ├─ edit               ─> chạy lại stage dưới của riêng slide đó
@@ -385,13 +373,12 @@ RA   DeckBundle verified ──> runtime     (còn cờ đỏ ─> KHÔNG đóng
 | ---------------------------------------------- | ---------------------------------------------- | ------------------------------------------ | -------------------------- | ----------------------------- |
 | [S0](./s0-ingest.md) Ingest                | `deck.pdf`                             | `ParsedDocument`                         | docling + VLM qua API      | ~2s/trang + VLM 1 lần/trang + 1 lần/bảng  ✅ |
 | [S5](./s5-kb-construction.md) KB           | `ParsedDocument`                       | `KBChunk[]` + vector + kho               | embedding qua API          | vài giây          ✅ |
-| S6a deck_map + audit                        | `ParsedDocument` / `KBChunk[]`         | `deck_map.txt` + audit                   | — (luật) / embedding       | tức thì           ✅ |
 | [S2](./s2-deck-structure.md) Structure     | `ParsedDocument`                       | `time_budget`                            | — (luật)                  | tức thì           ⬜ |
 | [S4](./s4-scenario.md) Scenario            | block từng trang + `pronunciation`     | `Scenario`                               | LLM, pass 2 cho trang trượt | 1–2 lần gọi/trang 🟡 |
 | S6b Precompute                              | `Scenario[]` + `pronunciation.json`    | `precomputed/`                           | TTS                        | ~90s              ⬜ |
 | [S7](./s7-hitl-review.md) HITL             | mọi artifact + flags + bản nghe thử    | `DeckBundle` verified                    | —                         | 10–20 phút người ⬜ |
 
-S0 → S5 → S6a chạy bằng một lệnh `bash scripts/run_deck.sh "<file>"`. Chạy lại khi không đổi
+S0 → S5 → S4 chạy bằng một lệnh `bash scripts/run_deck.sh "<file>"`. Chạy lại khi không đổi
 gì: Onboarding (51 trang) **22 giây, 104/104 vector trúng cache, 0 lần gọi API**.
 
 ---
@@ -421,8 +408,6 @@ data/
 │   ├── vectors__<model_id>.npy                                <- S5
 │   ├── structure.json                 time_budget           <- S2
 │   ├── scenario.json                  Scenario[] + pron_hash <- S4
-│   ├── deck_map.txt                   ~150 token, danh sách section  <- S6a
-│   ├── audit/self_retrieval.json      <- S6a
 │   ├── precomputed/
 │   │   ├── tts/{sentence_hash}.mp3
 │   │   ├── qa_cache.jsonl
@@ -452,7 +437,6 @@ data/
 page_hash không đổi  -> reuse Scenario, TTS, vector (cache sha1 đã lo)
 page_hash đổi        -> chunk + nhúng lại RIÊNG trang đó, chạy lại S4 cho nó
 luôn chạy lại S2     -> luật, gần như miễn phí
-luôn chạy lại S6a    -> deck_map + audit, rẻ
 ```
 
 **Ca đặc biệt — người duyệt sửa `pronunciation.json` ở S7:**
@@ -487,7 +471,7 @@ dirty += {MỌI trang sau nó trong cùng chương}    (vì đọc kịch bản 
 
 - Python 3.11+, type hints bắt buộc, Pydantic v2 cho schema.
 - Mỗi stage là một module độc lập, **chạy riêng được qua CLI**:
-  `python src/retrieval/build_index.py src/output/chunker/<ten>/chunks.json`
+  `python src/embedders/cli.py src/output/chunker/<ten>/chunks.json`
 - Gọi LLM/VLM: retry exponential backoff, log **full prompt + response** vào `logs/`.
   Không log thì không bao giờ debug được vì sao model bịa.
 - Mọi prompt nằm trong `src/prompts/*.md`. **Không hardcode prompt trong file `.py`.**
@@ -510,7 +494,6 @@ Không đạt thì không deploy. Chạy được trong CI.
 | Alignment coverage — *v1, S3 bỏ ở v0*        | ≥ 80% slide có ≥1 nguồn conf > 0.6 | S3            |
 | Ungrounded rate (**câu `content`**) | < 10%                                  | S4            |
 | Timing deviation — *chờ S2 `time_budget`*    | < 15% so với`time_budget`           | S4            |
-| **Self-retrieval top-1** ⚠️ gần như luôn 100% | **≥ 90% slide**                 | **S6a** |
 | Flag precision                               | ≥ 60%                                 | S7            |
 | P95 latency tới byte audio đầu            | < 2.5s                                 | runtime       |
 
@@ -543,8 +526,7 @@ Mọi flag từ mọi stage đổ về một file, S7 đọc file đó. Chi ti�
 | Stage | Flag tiêu biểu                                                                                                                                                                  |
 | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | S0    | `empty_page` (gồm cả trang VLM trả JSON hỏng), `image_not_described`, `table_empty`, `no_sections` |
-| S5    | chunk trùng nhau (cosine >= 0.94, `audit.py`), chunk vượt 500 token (log `--stats`)                  |
+| S5    | chunk vượt 500 token (log `--stats`)                                                                   |
 | S2    | `sections` không phủ kín / chồng nhau / đứt quãng — *chưa code*                                      |
 | S4    | **cờ đỏ:** `bad_grounding`, `empty_script`, `llm_failed` · **sửa ở pass 2:** `block_not_covered`, `number_missing` · **vàng:** `unknown_pronunciation` — luật nói tự nhiên bỏ khỏi bộ kiểm 2026-10-06 |
-| S6a   | `self_retrieval_fail` — ⚠️ hiện gần như không bao giờ bắn, xem §3.3                                |
 | S6b   | `duration_mismatch`, **`pronunciation_hash_mismatch`**, **`voice_id_mismatch`**                 |

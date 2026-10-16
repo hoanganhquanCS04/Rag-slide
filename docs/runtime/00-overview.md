@@ -360,8 +360,8 @@ Truy xuất được cái bạn **có thể không cần**. Không truy xuất �
            message · description · relations (triple) · entities
            · chart_data · tables                       <- nhiên liệu của R3
 
-[DECK_MAP]         danh sách 6 section + tên            ~150 tok
-                   <- S6a sinh. Đủ để nói "phần 3 trên 6", KHÔNG phải index
+[DECK_MAP]         BỎ 2026-10-13 — không còn danh sách chương trong prompt;
+                   câu hỏi cấu trúc phải tìm ra trang mục lục
 
 [ỨNG VIÊN ĐÃ TRUY XUẤT]   top-3 slide sau rerank        ~300 tok
                    + concept/section khớp, nếu có
@@ -484,7 +484,6 @@ Runtime **chỉ** đọc `DeckBundle` đã qua S7 duyệt:
 
 ```
 slide_index (Qdrant)   -> R2 TRUY XUẤT, R4 QA_DECK    <- collection, KHÔNG phải file text
-deck_map.txt           -> inline trong prompt, ~150 tok
 manifest.json          -> audio + duration + prosody, R5/R6
 slide_repr_lite[]      -> inline: bảng chỉ trỏ cho R3, nguồn cho R4 QA_CURRENT
 structure              -> sections, dependencies — R4/R6 (concept_map đã vào index)

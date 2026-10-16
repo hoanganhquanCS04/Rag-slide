@@ -10,7 +10,7 @@
 > Input của S5 ở v0 là `ParsedDocument` ([spec](../spec/parsed-document.md)), không
 > phải `source/*.pdf` riêng.
 >
-> Cái đang chạy (`src/retrieval/`): chunk theo TRANG ([kb-chunk.md](../spec/kb-chunk.md)) · nhúng
+> Cái đang chạy (`src/chunker/` · `src/embedders/` · `src/runtime/retrieve.py`): chunk theo TRANG ([kb-chunk.md](../spec/kb-chunk.md)) · nhúng
 > qua API ([embedding.md](../spec/embedding.md)) · hybrid dense + BM25 gộp RRF
 > ([search.md](../spec/search.md)). **Không có** bước enrich bằng LLM (§4) và phân loại
 > `content_type` theo ý (§5): tiền tố `[chương · tiêu đề · trang N/M]` dựng bằng luật,

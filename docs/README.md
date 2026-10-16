@@ -19,13 +19,12 @@
 ## Đã code đến đâu
 
 ```
-✅ S0  file raw → ParsedDocument   src/parsing/          docling + VLM bố cục trang + chép bảng
-✅ S5  chunk + vector + kho        src/kb/               1536 chiều · cache · chroma | inmem
-✅     tìm hybrid + đo             src/kb/{search,eval,tune,audit}.py
-✅ S6a deck_map                    src/kb/deck_map.py
+✅ S0  file raw → ParsedDocument   src/parser/           docling + VLM bố cục trang + chép bảng
+✅ S5  chunk + vector + kho        src/chunker/ · src/embedders/ · src/vectordb/ · src/sparse/   1536 chiều · cache · chroma | inmem · BM25
+✅     tìm hybrid + đo             src/runtime/retrieve.py · src/evaluation/{eval,tune}.py
    ─── bốn dòng trên + S4: MỘT lệnh  bash scripts/run_deck.sh "<file>"
 🟡 S4  kịch bản                    src/scenario/         bước 4 của run_deck.sh, nhịp chưa đạt gate
-🟡     runtime bản chữ             src/runtime/          hỏi đáp + thuyết trình thử trong terminal
+🟡     runtime bản chữ             src/runtime/          chỉ hỏi đáp trong terminal (scripts/try_ask.py)
 🚫 S1, S3                          BỎ — xem bảng dưới
 ⬜ S2 time_budget · S6b TTS · S7 duyệt · R5 giọng nói · R7 ngắt lời
 ```
@@ -53,7 +52,6 @@ Muốn biết thiết kế đích: đọc [`offline/00-overview.md`](./offline/0
 | — | [00-overview](./offline/00-overview.md) | Bốn nguyên tắc · kiến trúc v0 **một file một index** · sơ đồ từng stage · incremental |
 | ✅ | [S0 Ingest](./offline/s0-ingest.md) | PDF qua docling + VLM nhìn cả trang sắp bố cục, chép bảng · `sections` và `slide_type` bằng **luật** |
 | ✅ | [S5 KB Construction](./offline/s5-kb-construction.md) | Chunk theo trang + embed qua API + hybrid dense/BM25 gộp RRF |
-| ✅ | S6a deck_map | Bản đồ chương ~180 token cho prompt runtime — luật, không gọi model |
 | ⬜ | [S2 Deck Structure](./offline/s2-deck-structure.md) | Chỉ còn `time_budget` — `sections` đã có từ S0 |
 | 🟡 | [S4 Scenario](./offline/s4-scenario.md) | Kịch bản nói · `content` vs `delivery` · 7 đòn bẩy tự nhiên — đã code, bước 4 của `run_deck.sh` |
 | ⬜ | S6b Precompute | TTS theo câu, một giọng duy nhất, qa_cache, bản nghe thử |

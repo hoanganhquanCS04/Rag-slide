@@ -1,24 +1,10 @@
-"""Kho vector — cất vector của chunk, tìm theo vector.
+"""Lớp cha của kho vector: cất vector của chunk và tìm chunk gần nhất theo vector.
 
-Khung lấy từ minhbtrc/chatbot-template (MIT, src/base/components/vector_databases):
-một lớp cha chung + hai biến thể THAY THẾ nhau + factory chọn theo config. Code phía trên
-chỉ gọi lớp cha — đổi kho là sửa `VECTOR_DB` trong .env, không sửa code.
-
-    inmem    RAM, tắt là mất — mỗi lần khởi động nạp lại từ .npy. Không cần cài gì.
-    chroma   ghi đĩa, nhiều tài liệu chung một collection, lọc theo metadata.
-
-Khác bản gốc — CỐ Ý, đừng sửa lại cho giống:
-
-    bản gốc                                   ở đây
-    kho tự gọi embedding khi thêm             nhận vector ĐÃ nhúng (.npy, có cache) — không gọi API lần 2
-    collection tên "default"                  kb__<model_id> — trỏ index cũ bằng model mới là rác im lặng (§10)
-    tìm trả về chữ (page_content)             trả (chunk_id, cosine) — R2 cần page_no, RRF cần hạng
-    lọc: inmem nhận HÀM, chroma nhận DICT     cả hai nhận CÙNG một dict phẳng
-         (lệch nhau -> lọc ở inmem hỏng)
-    chỉ dense                                 vẫn chỉ dense — BM25 ở retrieval/sparse/, RRF ở search.py
-
-Kho chỉ là BẢN SAO để tìm. Nguồn vẫn là `chunks.json` + `.npy` (§9 resume được từ bất kỳ
-stage nào): xoá cả thư mục chroma thì lần chạy sau `sync` tự dựng lại, không tốn API.
+Để làm gì: code phía trên chỉ gọi lớp cha; đổi kho là sửa `VECTOR_DB` trong .env, không sửa code.
+    inmem    trong RAM, tắt là mất — mỗi lần chạy nạp lại từ file .npy
+    chroma   ghi đĩa, mọi deck chung một collection, lọc theo metadata
+Cách làm: kho nhận vector ĐÃ nhúng (không tự gọi API); tên collection có tên model; chỉ làm nhánh
+vector (BM25 ở `sparse/`, cùng bộ tên hàm). Kho chỉ là bản sao — xoá đi thì `sync` dựng lại từ .npy.
 """
 
 from __future__ import annotations
@@ -36,54 +22,52 @@ from models.kb_chunk import ChunkSet, KBChunk
 
 
 def collection_name(model_id: str) -> str:
-    """'kb__text-embedding-3-small'. Chroma chỉ nhận [a-zA-Z0-9._-]."""
+    """Tên collection theo model: "kb__text-embedding-3-small" (chỉ giữ ký tự Chroma nhận)."""
     return "kb__" + re.sub(r"[^a-z0-9._-]+", "-", model_slug(model_id))
 
 
 def chunk_metadata(c: KBChunk, model_id: str) -> dict[str, Any]:
-    """Metadata kho vector cất cạnh mỗi vector = trường lọc + hai trường để `sync` đối chiếu.
-
-    `text_key` = vân tay 'vector này nhúng từ đúng chữ này, bằng đúng model này'.
-    """
+    """Metadata cất cạnh mỗi vector: các trường lọc + page_hash + hash chữ (để `sync` đối chiếu)."""
     return {**filter_metadata(c), "page_hash": c.page_hash,
             "text_key": text_key(c.text_enriched, model_id)}
 
 
 class VectorStore(ABC):
+    """Khung của kho vector. `persistent` = kho có ghi đĩa không (inmem thì không)."""
     kind: ClassVar[str]
     persistent: ClassVar[bool]       # False = tắt là mất, phải nạp lại mỗi lần chạy
 
     def __init__(self, model_id: str):
+        """Nhớ tên model và đặt tên collection."""
         self.model_id = model_id
         self.name = collection_name(model_id)
 
     @abstractmethod
-    def upsert(self, chunks: list[KBChunk], vectors: np.ndarray) -> None:
-        """Thêm / ghi đè theo chunk_id. `vectors[i]` là vector của `chunks[i]`, đã chuẩn hoá L2."""
+    def index_documents(self, chunks: list[KBChunk], vectors: np.ndarray) -> None:
+        """Thêm hoặc ghi đè vector theo chunk_id; `vectors[i]` là vector của `chunks[i]` (lớp con tự viết)."""
 
     @abstractmethod
-    def delete(self, where: Where) -> None: ...
+    def retrieve_context(self, query_vector: np.ndarray, k: int, where: Where | None = None) -> list[Hit]:
+        """Tìm k chunk gần `query_vector` nhất trong số khớp `where` -> [(chunk_id, cosine)] giảm dần (lớp con tự viết)."""
 
     @abstractmethod
-    def query(self, vector: np.ndarray, k: int, where: Where | None = None) -> list[Hit]:
-        """k chunk gần nhất trong số khớp `where`, xếp giảm dần theo cosine."""
+    def delete_document(self, doc_id: str) -> None:
+        """Xoá mọi vector của một deck (lớp con tự viết)."""
 
     @abstractmethod
     def metadata(self, doc_id: str) -> dict[str, dict[str, Any]]:
-        """{chunk_id: metadata} đang nằm trong kho của tài liệu này."""
+        """Metadata của mọi vector đang có trong kho của một deck -> {chunk_id: metadata} (lớp con tự viết)."""
 
     def sync(self, cs: ChunkSet, vectors_path: str | Path) -> int:
-        """Đưa kho về ĐÚNG bộ chunk này. Đã khớp -> không làm gì, trả 0.
+        """Đưa kho về đúng bộ chunk hiện tại -> số vector đã nạp lại (khớp sẵn thì 0).
 
-        So cả metadata chứ không chỉ `page_hash`: đổi luật chunk (tiền tố, cắt) thì chữ đổi mà
-        trang không đổi; đổi luật `slide_type` thì `is_searchable` đổi mà chữ không đổi.
-        Lệch là thay CẢ tài liệu — vài trăm vector, vài chục ms. Phần đắt (gọi API nhúng) thì
-        cache của embedders/ đã lo.
+        Cách làm: so metadata trong kho với metadata mong muốn; lệch thì xoá hết vector của deck và nạp
+        lại từ file .npy (không gọi API).
         """
         want = {c.chunk_id: chunk_metadata(c, self.model_id) for c in cs.chunks}
         if self.metadata(cs.doc_id) == want:
             return 0
         vectors = load_vectors(cs, vectors_path, self.model_id)
-        self.delete({"doc_id": cs.doc_id})
-        self.upsert(cs.chunks, vectors)
+        self.delete_document(cs.doc_id)
+        self.index_documents(cs.chunks, vectors)
         return len(cs.chunks)

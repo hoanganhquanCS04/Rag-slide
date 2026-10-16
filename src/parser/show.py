@@ -1,9 +1,9 @@
-"""Xem `src/output/parser/<doc_id>/document.json` đã enrich (chương / cờ).
+"""Xem `document.json` đã enrich (chương / cờ) trên màn hình.
 
     python src/parser/show.py onboarding_kit                  # tổng quan + chương + cờ
-    python src/parser/show.py onboarding_kit --page 7 --full  # một trang, không cắt chữ
+    python src/parser/show.py onboarding_kit --page 7 --full  # từng khối của trang 7, không cắt chữ
 
-CHỈ để xem. Parse (tạo document.json) đi MỘT đường: `python src/parser/cli.py <file>`.
+CHỈ để xem. Parse (tạo document.json) đi đường `python src/parser/cli.py <file>`.
 """
 
 from __future__ import annotations
@@ -31,11 +31,13 @@ log = logging.getLogger("parser.show")
 
 
 def _cut(s: str, full: bool, n: int = 72) -> str:
+    """Rút gọn chữ để in một dòng: xuống dòng thành "⏎", dài quá thì cắt (trừ khi `full`)."""
     s = s.replace("\n", " ⏎ ")
     return s if full else (s[:n] + ("…" if len(s) > n else ""))
 
 
 def show_pages(doc: ParsedDocument, pages: list[int], full: bool) -> None:
+    """In từng trang được chọn: tiêu đề, chương, hash, loại trang, mọi khối và các cờ của trang."""
     for pg in pages:
         page = doc.page(pg)
         if page is None:
@@ -62,6 +64,7 @@ def show_pages(doc: ParsedDocument, pages: list[int], full: bool) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Đọc tham số, nạp + enrich document.json; có `--page` thì in các trang đó, không thì in tổng quan."""
     ap = argparse.ArgumentParser(prog="parser.show", description=__doc__.splitlines()[0])
     ap.add_argument("doc", help="doc_id (vd onboarding_kit) hoac duong dan .json")
     ap.add_argument("--page", nargs="+", type=int, default=None, help="11 | 9 11 | {9..15}")

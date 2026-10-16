@@ -1,8 +1,10 @@
-"""Kiểu dữ liệu của runtime v0 — bản chạy bằng CHỮ, hỏi đáp ở CUỐI MỖI TRANG.
+"""Các kiểu dữ liệu dùng khi hỏi đáp.
 
-Chưa có giọng nói, chưa ngắt lời giữa trang: robot "nói" hết trang (in từng câu kịch bản),
-rồi mở phiên hỏi đáp. Đủ để làm đúng phần khó — hiểu câu hỏi, tìm, trả lời có nguồn,
-điều hướng có cổng tin cậy — trước khi lắp TTS và R7.
+    RuntimeConfig  cấu hình (đọc từ config/runtime.json)
+    Reply          câu robot sẽ nói
+    Answer         kết quả đầy đủ của một câu hỏi: Reply + thông tin để xem lại
+
+Hiện chỉ có hỏi đáp. Chưa có: chuyển slide, tự thuyết trình, giọng nói.
 """
 
 from __future__ import annotations
@@ -13,54 +15,45 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from models.kb_chunk import SearchHit
+
 
 class RuntimeConfig(BaseModel):
-    """Đọc từ config/runtime.json — ngưỡng để trong config, không hardcode (§6)."""
+    """Cấu hình hỏi đáp, đọc từ file config/runtime.json."""
 
-    calibrated: bool = False            # biên RRF chưa fit trên bộ eval -> chỉ là phanh tạm
-    gate_min_margin: float = 0.002      # rrf(top1) - rrf(top2) dưới mức này -> hỏi lại
-    top_k: int = 5
-    max_contexts: int = 5               # số trang tìm được đưa vào prompt = cả top-k
-    max_answer_sentences: int = 4
-    llm_timeout_s: float = 30.0
-    llm_retry: int = 1                  # khán giả đang chờ: lỗi là escalate, không đợi
-    llm_extra: dict[str, Any] = Field(default_factory=dict)
-    json_mode: bool = True              # false: không gửi response_format (cổng không chạy JSON mode cho model)
+    top_k: int = 5                      # tìm lấy mấy trang
+    max_contexts: int = 5               # đưa mấy trang vào prompt cho LLM đọc
+    max_answer_sentences: int = 4       # câu trả lời dài tối đa mấy câu
+    llm_timeout_s: float = 30.0         # chờ LLM tối đa bao nhiêu giây
+    llm_retry: int = 1                  # LLM lỗi thì thử lại mấy lần (người nghe đang chờ, nên ít thôi)
+    llm_extra: dict[str, Any] = Field(default_factory=dict)   # tham số thêm gửi kèm cho LLM
+    json_mode: bool = True              # có bắt LLM trả JSON không (một số model không hỗ trợ -> để false)
 
     @classmethod
     def load(cls, path: str | Path) -> RuntimeConfig:
+        """Đọc file cấu hình. Các khoá bắt đầu bằng "_" là ghi chú, bỏ qua."""
         raw = json.loads(Path(path).read_text(encoding="utf-8"))
         return cls.model_validate({k: v for k, v in raw.items() if not k.startswith("_")})
 
 
-class Context(BaseModel):
-    """Một đoạn đưa vào prompt. LLM chỉ được trả lời bằng những đoạn này — `grounding` của
-    câu trả lời phải trỏ vào `chunk_id` có trong danh sách, code kiểm lại."""
-
-    chunk_id: str
-    page_no: int
-    text: str
-    image_ratio: float = 0.0            # bao nhiêu phần là mô tả ảnh do VLM viết — có thể sai
-
-
 class Reply(BaseModel):
-    """Robot đáp lại một câu hỏi."""
+    """Câu robot sẽ nói, sau khi code đã kiểm."""
 
-    action: Literal["goto", "answer", "ask_back", "meta", "escalate"]
-    text: str = ""                      # câu robot nói ra
-    page: int | None = None             # goto: trang nhảy tới
-    command: Literal["repeat", "stop"] | None = None     # meta
-    sources: list[str] = Field(default_factory=list)     # answer: chunk_id đã dùng
-    candidates: list[int] = Field(default_factory=list)  # ask_back / escalate: trang gợi ý
-    via: Literal["fastpath", "llm", "fallback"] = "llm"  # để đo: ai quyết định
-    note: str = ""                      # lý do nội bộ, KHÔNG nói ra (vd lỗi API)
+    action: Literal["answer", "escalate"]       # answer = trả lời · escalate = từ chối, để người thật trả lời
+    text: str = ""                              # câu robot nói ra
+    sources: list[str] = Field(default_factory=list)     # trả lời: lấy từ đoạn nào (mã đoạn)
+    candidates: list[int] = Field(default_factory=list)  # từ chối: gợi ý các trang liên quan
+    via: Literal["llm", "fallback"] = "llm"     # llm = LLM quyết · fallback = LLM lỗi, code tự trả lời
+    note: str = ""                              # ghi chú nội bộ để xem lại, robot KHÔNG nói ra
 
 
-class Turn(BaseModel):
-    """Một lượt hỏi đáp — ghi ra logs/runtime/ để đo và làm bộ eval."""
+class Answer(BaseModel):
+    """Kết quả đầy đủ của một câu hỏi: câu robot nói + mọi thứ để xem lại vì sao nó nói vậy."""
 
-    at_slide: int                       # chụp lúc NHẬN câu hỏi (§6), không phải lúc xử lý
-    question: str
-    reply: Reply
-    search_mode: str = ""               # hybrid | sparse (lùi về khi API nhúng lỗi)
-    ms: dict[str, int] = Field(default_factory=dict)
+    reply: Reply                                # câu robot nói
+    ms: dict[str, int] = Field(default_factory=dict)     # mất bao lâu (mili giây): search · llm · total
+    search_mode: Literal["hybrid", "sparse"] = "hybrid"  # sparse = API nhúng lỗi, câu này chỉ tìm bằng BM25
+    hits: list[SearchHit] = Field(default_factory=list)  # các trang tìm được (vài trang đầu được đưa vào prompt)
+    prompt: str = ""                            # prompt đã gửi cho LLM
+    raw: dict[str, Any] | None = None           # LLM trả về gì (None = gọi LLM bị lỗi)
+    log_path: Path | None = None                # file ghi lại prompt và câu LLM trả về

@@ -1,4 +1,4 @@
-"""Chọn kho theo `VECTOR_DB` trong .env (bản gốc: `create_vector_database`)."""
+"""Chọn kho vector theo `VECTOR_DB` trong .env (inmem hoặc chroma)."""
 
 from __future__ import annotations
 
@@ -16,7 +16,11 @@ STORES = {
 
 
 def create_store(kind: str | None = None, *, model_id: str = MODEL_ID) -> VectorStore:
-    """`kind` bỏ trống -> đọc VECTOR_DB (mặc định inmem: không cần cài thêm gì)."""
+    """Tạo kho vector theo tên -> object kho (bỏ trống thì đọc VECTOR_DB, mặc định inmem).
+
+    Cách làm: tra tên trong `STORES` ("module:Class"), chỉ import module khi được chọn
+    (chạy inmem thì máy không cần cài chromadb).
+    """
     kind = (kind or os.environ.get("VECTOR_DB") or "inmem").lower()
     if kind not in STORES:
         raise SystemExit(f"VECTOR_DB='{kind}' khong hop le — chon {' | '.join(STORES)}")

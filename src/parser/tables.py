@@ -1,15 +1,8 @@
-"""②b Chép bảng: layout ① (ParsedDocument) + PDF -> tables.json; `apply_tables` thay ô bảng vào doc.
+"""Bước ②b — chép lại từng bảng bằng VLM trên ảnh cắt nét cao -> `tables.json`.
 
-MỖI BẢNG một request (Prompt C, `src/prompts/s0_vlm_table_prompt.md`): ảnh CẮT đúng vùng bảng (bbox Table
-của layout ① + lề), vẽ lại từ PDF ở độ phân giải cao (~2000px bề ngang bảng) -> Gemma chỉ chép bảng
-đó thành JSON {"columns", "rows"}: số cột = hàng tiêu đề, nhãn nhiều cấp ghép "lớn - con", ô gộp lặp chữ.
-
-Vì sao tách khỏi bước ①: ở ① Gemma đọc CẢ trang một lượt, ảnh co theo VLM_SOFT_TOKENS -> đường kẻ
-mảnh của bảng dày không đủ rõ để đếm cột (Onboarding p21 qua 3 vòng sửa prompt: 3 / 7 / 5 cột, đúng 4).
-
-Cache THEO BẢNG trong tables.json: khoá = sha(page.cache_hash() + block_id + sha prompt + model). Bảng gọi lỗi
-hoặc JSON hỏng ghi `error` -> ③ giữ bảng của ①, lần chạy sau tự gọi lại. Prompt + phản hồi ở
-`logs/vlm_tables/<doc_id>/` (ảnh không ghi vào log).
+Để làm gì: ở bước ① VLM nhìn cả trang ở độ phân giải thấp, hay đếm sai cột của bảng.
+Cách làm: cắt đúng vùng bảng (thêm lề), vẽ lại ~2000px bề ngang, nhờ VLM chép thành JSON
+{"columns", "rows"}. Cache theo từng bảng; bảng lỗi thì giữ bản của bước ①.
 """
 
 from __future__ import annotations
@@ -44,7 +37,7 @@ _BAD_ESCAPE = re.compile(r'\\(?!["\\/bfnrtu])')
 
 
 def _crop_png(pdf: Any, page_no: int, box: tuple[float, float, float, float]) -> str:
-    """Vùng bảng (+ lề) vẽ lại từ PDF sao cho bề ngang bảng ~TARGET_WIDTH_PX -> data URL PNG."""
+    """Cắt vùng bảng (thêm lề) từ PDF, vẽ sao cho bề ngang bảng ~2000px -> ảnh PNG dạng data URL."""
     page = pdf[page_no - 1]
     w_pt, _ = page.get_size()
     l, t, r, b = (max(box[0] - MARGIN, 0.0), max(box[1] - MARGIN, 0.0),
@@ -59,14 +52,16 @@ def _crop_png(pdf: Any, page_no: int, box: tuple[float, float, float, float]) ->
 
 
 def _cell(v: Any) -> str:
-    """Chữ một ô: gộp khoảng trắng TRONG dòng, giữ `\n` (slide xuống dòng thật: "- ...", "=> ...")."""
+    """Chữ của một ô: dồn khoảng trắng trong từng dòng, giữ dấu xuống dòng."""
     return "\n".join(t for line in str(v).split("\n") if (t := norm_text(line)))
 
 
 def parse_table(content: str) -> list[list[str]]:
-    """Phản hồi -> lưới ô: hàng đầu = `columns`, sau đó `rows`; mỗi hàng đệm / cắt đúng số cột.
-    Prompt C trả JSON {"columns", "rows"} (ô gộp đã lặp chữ, nhãn nhiều cấp đã ghép "lớn - con").
-    Gemma lỡ trả HTML thì đọc bằng `_parse_table_html` của docling. Hỏng / < 2 hàng -> ValueError."""
+    """Đọc phản hồi của VLM thành lưới ô: hàng đầu = `columns`, sau đó là `rows`.
+
+    Cách làm: đọc JSON (sửa escape lỗi nếu cần), mỗi hàng đệm / cắt cho đúng số cột; VLM lỡ trả
+    HTML thì đọc HTML; đọc không được hoặc < 2 hàng thì báo lỗi.
+    """
     body = FENCE.sub("", content).strip()
     data: Any = None
     for text in (body, _BAD_ESCAPE.sub(r"\\\\", body)):
@@ -92,11 +87,13 @@ def parse_table(content: str) -> list[list[str]]:
 
 
 def _key(page_hash: str, block_id: str, prompt_sha: str, model: str) -> str:
+    """Khoá cache của một bảng: hash(nội dung trang + id bảng + prompt + model)."""
     return hashlib.sha256(f"{page_hash}|{block_id}|{prompt_sha}|{model}".encode()).hexdigest()[:16]
 
 
 async def _ask(llm: LLM, sem: asyncio.Semaphore, prompt: str, block_id: str,
                data_url: str) -> dict[str, Any]:
+    """Gửi ảnh một bảng cho VLM -> {"cells", "shape"}, lỗi thì {"error"}."""
     messages = [{"role": "user", "content": [
         {"type": "image_url", "image_url": {"url": data_url}},
         {"type": "text", "text": prompt}]}]
@@ -112,6 +109,11 @@ async def _ask(llm: LLM, sem: asyncio.Semaphore, prompt: str, block_id: str,
 
 async def _run(layout: ParsedDocument, pdf_path: Path, out_json: Path, model: str, redo: bool,
                pages: set[int] | None) -> dict:
+    """Chép lại mọi bảng (hoặc chỉ bảng ở `pages`) rồi ghi `tables.json`.
+
+    Cách làm: bảng có trong cache và khoá không đổi thì dùng lại; còn lại cắt ảnh trước (pypdfium2
+    không chạy song song được), rồi gọi VLM song song.
+    """
     import pypdfium2 as pdfium
 
     prompt = TABLE_PROMPT.read_text(encoding="utf-8")
@@ -167,13 +169,15 @@ async def _run(layout: ParsedDocument, pdf_path: Path, out_json: Path, model: st
 
 def run_tables(layout: ParsedDocument, pdf_path: Path, out_json: Path, model: str, *,
                redo: bool = False, pages: set[int] | None = None) -> dict:
-    """Bước ②b: chép lại mọi bảng trong `layout` (hoặc chỉ bảng ở `pages`) -> `out_json` (tables.json)."""
+    """Bước ②b: chép lại các bảng của doc -> nội dung `tables.json` (gọi `_run`)."""
     return asyncio.run(_run(layout, pdf_path, out_json, model, redo, pages))
 
 
 def apply_tables(doc: ParsedDocument, tables_json: Path) -> Counter[str]:
-    """Thay ô bảng của ① bằng lưới ②b theo `block_id` (id layout ① = id document.json).
-    Bảng ②b lỗi / không có -> giữ nguyên bảng ①."""
+    """Thay ô của các bảng trong doc bằng kết quả ②b, theo id bảng.
+
+    Cách làm: dựng lại ParsedTable mới (để `content` tính lại); bảng ②b lỗi thì giữ bảng của bước ①.
+    """
     data = json.loads(tables_json.read_text(encoding="utf-8")).get("tables", {})
     out: Counter[str] = Counter()
     for page in doc.pages:

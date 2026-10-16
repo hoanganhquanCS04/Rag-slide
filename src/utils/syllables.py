@@ -1,15 +1,8 @@
-"""Đếm âm tiết theo kho phát âm CHUNG `data/pronunciation.json`. Xem docs/spec/pronunciation.md.
+"""Đếm âm tiết của câu kịch bản theo kho phát âm chung `data/pronunciation.json`.
 
-CODE đếm, không để LLM tự khai: LLM đếm âm tiết tiếng Việt sai có hệ thống, và nó không
-biết `savefig` đọc thành "sếp phích" là 2 âm tiết.
-
-    "Gọi savefig kèm tên file"
-      Gọi(1) savefig->"sếp phích"(2) kèm(1) tên(1) file->"phai"(1)
-
-Từ lạ không có trong kho -> đếm ước lượng VÀ báo `unknown_pronunciation`. Không được
-lặng lẽ đếm bừa — đó là cách timing lệch mà không ai thấy. S4 chạy TRƯỚC khi kho có từ
-đó là bình thường: `scripts/extract_terms.py` gom từ lạ trong kịch bản vào kho, người
-chốt cách đọc, chạy lại S4 thì chỉ đếm lại (không gọi LLM).
+Để làm gì: tính thời lượng nói (âm tiết / 200 mỗi phút) và tìm từ lạ chưa có cách đọc.
+Cách làm: tách từ; số đếm theo cách đọc tiếng Việt; từ có trong kho đếm theo cách đọc trong kho;
+từ tiếng Anh / viết tắt chưa có trong kho thì đếm ước lượng và báo là từ lạ; còn lại 1 âm tiết.
 """
 
 from __future__ import annotations
@@ -50,45 +43,50 @@ LETTER_VI = {
 
 
 def spell(word: str) -> str:
-    """CBNV -> 'xê bê en vê', T7 -> 'tê bảy'."""
+    """Đánh vần từng chữ cái theo tiếng Việt: "CBNV" -> "xê bê en vê"."""
     return " ".join(LETTER_VI.get(c.lower(), c) for c in word if c.isalnum())
 
 
 def _base(tok: str) -> str:
-    """Bỏ dấu: THỜI -> thoi, CBLĐ -> cbld."""
+    """Bỏ dấu và viết thường: "THỜI" -> "thoi"."""
     t = unicodedata.normalize("NFD", tok.lower()).replace("đ", "d")
     return "".join(c for c in t if not unicodedata.combining(c))
 
 
 def _has_mark(tok: str) -> bool:
+    """Từ có chữ mang dấu tiếng Việt không."""
     return any(c in VN for c in tok.lower())
 
 
 def _vi_shape(tok: str) -> bool:
+    """Từ (đã bỏ dấu) có đúng dạng một âm tiết tiếng Việt không: phụ âm đầu + nguyên âm + phụ âm cuối."""
     return bool(_VI_PLAIN.match(_base(tok)))
 
 
 def is_abbrev(tok: str) -> bool:
-    """Toàn chữ hoa = viết tắt, KỂ CẢ khi có chữ Việt: CBLĐ, HĐLĐ, VNĐ (bản cũ thấy "Đ" là
-    tưởng tiếng Việt, đếm 1 âm tiết). Trừ chữ Việt viết hoa: có dấu + đúng dạng âm tiết
-    (THỜI, LƯƠNG). Chữ hoa KHÔNG dấu dạng âm tiết (GIAN, IT) thì không phân biệt được một
-    mình — `words()` gỡ bằng ngữ cảnh."""
+    """Từ có phải viết tắt không.
+
+    Cách làm: từ 2 chữ trở lên, viết hoa hết (CBLĐ, HĐLĐ), trừ chữ Việt viết hoa có dấu (THỜI, LƯƠNG).
+    """
     return len(tok) >= 2 and tok.isupper() and not (_has_mark(tok) and _vi_shape(tok))
 
 
 def _is_vietnamese(tok: str) -> bool:
+    """Từ có phải tiếng Việt không: có dấu, hoặc đúng dạng âm tiết tiếng Việt."""
     return _has_mark(tok) or bool(_VI_PLAIN.match(tok.lower()))
 
 
 def is_foreign(tok: str) -> bool:
-    """Từ tiếng Anh hoặc viết tắt — thứ phải có cách đọc trong kho."""
+    """Từ có cần cách đọc trong kho không: viết tắt hoặc từ tiếng Anh (không tính số)."""
     return not _NUMBER.fullmatch(tok) and (is_abbrev(tok) or not _is_vietnamese(tok))
 
 
 def words(text: str) -> list[str]:
-    """Tách từ (giữ nguyên `plt.savefig`). Dải chữ HOA mà có chữ mang dấu — "THỜI GIAN LÀM
-    VIỆC" chép từ tiêu đề — là tiếng Việt viết hoa: hạ về chữ thường, để GIAN không bị
-    đánh vần "giê i a en". Viết tắt thật trong dải (HĐLĐ) giữ nguyên."""
+    """Tách câu thành các từ, giữ nguyên dạng "plt.savefig".
+
+    Cách làm: một dãy chữ HOA liền nhau có chữ mang dấu (vd tiêu đề "THỜI GIAN LÀM VIỆC") là tiếng
+    Việt viết hoa -> hạ về chữ thường để không bị coi là viết tắt.
+    """
     ms = list(_TOKEN.finditer(text))
     out = [m.group() for m in ms]
     i = 0
@@ -106,8 +104,11 @@ def words(text: str) -> list[str]:
 
 
 def _read_group(g: int, padded: bool) -> int:
-    """Số âm tiết của nhóm 1–999: 25 = hai mươi lăm (3), 105 = một trăm linh năm (4).
-    `padded`: có nhóm lớn hơn đứng trước -> 25 đọc "không trăm hai mươi lăm" (+2)."""
+    """Số âm tiết khi đọc một nhóm 1–999: 25 = "hai mươi lăm" (3).
+
+    Cách làm: cộng phần "trăm", "mươi"/"mười"/"linh", và chữ số hàng đơn vị; `padded` = có nhóm lớn
+    hơn đứng trước nên phải đọc cả "không trăm".
+    """
     h, r = divmod(g, 100)
     t, u = divmod(r, 10)
     s = 2 if h else (2 if padded and r else 0)       # "hai trăm" / "không trăm"
@@ -121,7 +122,11 @@ def _read_group(g: int, padded: bool) -> int:
 
 
 def _read_int(n: int) -> int:
-    """230000 = hai trăm ba mươi nghìn (5), 2025 = hai nghìn không trăm hai mươi lăm (7)."""
+    """Số âm tiết khi đọc một số nguyên: 230000 = "hai trăm ba mươi nghìn" (5).
+
+    Cách làm: chia thành các nhóm tỷ / triệu / nghìn / đơn vị, đọc từng nhóm, cộng thêm chữ "tỷ",
+    "triệu", "nghìn".
+    """
     if n == 0:
         return 1
     s, higher = 0, False
@@ -134,8 +139,11 @@ def _read_int(n: int) -> int:
 
 
 def _number_syllables(tok: str) -> int:
-    """Đọc số kiểu Việt. Nhóm sau dấu phân cách đều 3 chữ số = hàng nghìn ("230.000",
-    "4.400.000"); còn lại là số thập phân ("1.5", "2,7" = hai phẩy bảy)."""
+    """Số âm tiết khi đọc một số có dấu phân cách.
+
+    Cách làm: "230.000" (các nhóm sau dấu đều 3 chữ số) là hàng nghìn; "1.5", "2,7" là số thập phân
+    đọc "một phẩy năm".
+    """
     parts = re.split(r"[.,]", tok)
     if len(parts) > 1 and all(len(p) == 3 for p in parts[1:]):
         return _read_int(int("".join(parts)))
@@ -145,15 +153,14 @@ def _number_syllables(tok: str) -> int:
 
 
 def _guess(tok: str) -> int:
-    """Từ lạ: viết tắt đếm theo cách đánh vần, từ Anh đếm theo cụm nguyên âm."""
+    """Đếm ước lượng âm tiết của từ lạ: viết tắt đếm theo cách đánh vần, từ Anh đếm theo cụm nguyên âm."""
     if is_abbrev(tok):
         return len(spell(tok).split())
     return max(1, len(re.findall(r"[aeiouy]+", tok.lower())))
 
 
 def syllables_of(say: str) -> int:
-    """Số âm tiết của một cách đọc — TÍNH, không đọc từ file: lưu trong file là mở cửa
-    cho sửa `say` mà quên sửa số."""
+    """Số âm tiết của một cách đọc (chuỗi `say` trong kho)."""
     n = 0
     for tok in words(say):
         if _NUMBER.fullmatch(tok):
@@ -166,7 +173,12 @@ def syllables_of(say: str) -> int:
 
 
 class Pronunciation:
+    """Kho phát âm: từ -> cách đọc -> số âm tiết.
+
+    Cách làm: viết tắt khớp đúng hoa thường ("MAY" không bắt "may"), từ thường không phân biệt hoa thường.
+    """
     def __init__(self, terms: dict[str, dict]):
+        """Dựng kho từ dict trong file: lưu cách đọc và số âm tiết của từng từ."""
         self.say = {k: str(v.get("say") or k) for k, v in terms.items()}
         self.syllables = {k: syllables_of(s) for k, s in self.say.items()}
         # Viết tắt khớp ĐÚNG hoa-thường: "MAY" trong kho không được bắt "may" tiếng Việt.
@@ -176,13 +188,17 @@ class Pronunciation:
 
     @classmethod
     def load(cls, path: str | Path = STORE) -> "Pronunciation":
+        """Đọc kho từ file; chưa có file thì trả kho rỗng."""
         p = Path(path)
         if not p.exists():                  # S4 chạy trước khi có kho: mọi từ Anh là từ lạ
             return cls({})
         return cls(json.loads(p.read_text(encoding="utf-8")).get("terms", {}))
 
     def lookup(self, word: str) -> str | None:
-        """-> key trong kho, hoặc None."""
+        """Tìm từ trong kho -> khoá trong kho, không có thì None.
+
+        Cách làm: "plt.savefig" thử cả "plt.savefig" lẫn "savefig".
+        """
         cands = [word, word.split(".")[-1]] if "." in word else [word]   # plt.savefig -> savefig
         for w in cands:
             if w in self._exact:
@@ -192,21 +208,26 @@ class Pronunciation:
         return None
 
     def terms_in(self, text: str) -> list[str]:
-        """Thuật ngữ trong câu: từ Anh / viết tắt, hoặc từ có trong kho (`sin` trông như
-        tiếng Việt nhưng kho biết nó là thuật ngữ). `plt.savefig` tách thành plt, savefig."""
+        """Các thuật ngữ trong câu: từ tiếng Anh, viết tắt, hoặc từ có trong kho."""
         return [p for w in words(text) for p in w.split(".")
                 if is_foreign(p) or self.lookup(p)]
 
     def hash_for(self, texts: Iterable[str]) -> str:
-        """Hash CHỈ các mục mà kịch bản thật sự nói. Kho dùng chung nhiều deck — sửa một từ
-        deck này không nói thì kịch bản deck này KHÔNG bị coi là lệch."""
+        """Hash của các mục trong kho mà các câu này thật sự dùng.
+
+        Để làm gì: sửa một từ mà kịch bản deck này không nói thì kịch bản deck này không bị coi là lệch.
+        """
         used = {k: self.say[k] for t in texts for w in words(t) if (k := self.lookup(w))}
         return hashlib.sha1(json.dumps(used, ensure_ascii=False, sort_keys=True).encode()
                             ).hexdigest()[:16]
 
 
 def count(text: str, pron: Pronunciation) -> tuple[int, list[str]]:
-    """-> (số âm tiết, các từ tiếng Anh / viết tắt KHÔNG có trong kho)."""
+    """Đếm âm tiết của một câu -> (số âm tiết, danh sách từ lạ chưa có trong kho).
+
+    Cách làm: số đọc theo kiểu Việt; từ có trong kho lấy số âm tiết trong kho; từ tiếng Anh / viết
+    tắt chưa có thì đếm ước lượng và cho vào danh sách từ lạ; còn lại tính 1 âm tiết.
+    """
     n = 0
     unknown: list[str] = []
     for tok in words(text):

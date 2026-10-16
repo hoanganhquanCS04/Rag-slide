@@ -1,6 +1,6 @@
 # Search — từ câu hỏi ra số trang
 
-**Vào:** `src/output/chunker/*/chunks.json` + `src/output/embedders/*/vectors__<model>.npy` · **Ra:** `SearchHit[]` · **Code:** `src/retrieval/search.py` + `src/retrieval/sparse/` (BM25) + `src/retrieval/audit.py`
+**Vào:** `src/output/chunker/*/chunks.json` + `src/output/embedders/*/vectors__<model>.npy` · **Ra:** `SearchHit[]` · **Code:** `src/runtime/retrieve.py` + `src/sparse/` (BM25) · đo: `src/evaluation/{eval,tune}.py`
 
 ---
 
@@ -8,7 +8,7 @@
 
 Đang có 52 chunk và 52 vector nằm trong file. **Chưa có gì dùng chúng.**
 
-`search.py` là tầng biến đống số đó thành thứ trả lời được:
+`runtime/retrieve.py` là tầng biến đống số đó thành thứ trả lời được:
 
 ```
 "làm sao lưu biểu đồ ra file ảnh"   →   [p11, p10, p13]
@@ -104,7 +104,7 @@ bỏ chữ quá ngắn (1 ký tự)      trừ chữ số
    được mờ mờ, BM25 thì bằng không. Đã đo: gõ không dấu, cả 4 câu thử đều trượt.
    → Nếu kênh hỏi là form web (kế hoạch v1) thì phải tính tới chuyện người gõ không dấu.
    Cách xử: index **hai bản** — có dấu và bỏ dấu — chưa làm ở v0, ghi lại ở §9.
-3. **Chunk 0 điểm KHÔNG được xếp hạng** (đã sửa, `src/retrieval/sparse/variants/rankbm25.py`). Bản đầu lấy
+3. **Chunk 0 điểm KHÔNG được xếp hạng** (đã sửa, `src/sparse/variants/rankbm25.py`). Bản đầu lấy
    top-50 bất kể điểm: câu hỏi toàn từ hiếm thì gần hết pool là chunk 0 điểm, hoà nhau nên
    giữ thứ tự file — p1 hạng 2, p2 hạng 3… — và trang đầu deck ăn điểm RRF không vì lý do
    gì. Đo trên onboarding_kit: `VGRFOC`, `VGRDBIZ`, `kscv` trước ra **p1 (trang bìa) top-1**,
@@ -134,7 +134,7 @@ Vứt điểm đi, chỉ hỏi *"mày xếp nó thứ mấy"*:
 ```
 RRF(chunk) = Σ  1 / (K + hạng của chunk trong bảng đó)
            mọi bảng
-K = 15      (đo — xem dưới; paper gốc dùng 60)
+K = 10      (đo — xem dưới; paper gốc dùng 60)
 ```
 
 Số thật từ câu `"savefig"` ở §2:
@@ -161,7 +161,10 @@ không đoán. Đo trên Onboarding 200 câu (2026-10-01): K = 60 phẳng quá �
 thấy (dense hạng 1, BM25 không lọt pool) thua trang hạng 8–10 ở cả hai nhánh; K = 10,
 dense × 2 lên top-5 từ 187 → 191 nhưng top-1 149 → 147.
 
-**Mặc định trong code: K = 15, dense 1 : sparse 1** (đổi 2026-10-02, `search.py`). Đo trên
+**Mặc định trong code: K = 10, dense 1.5 : sparse 1** (đổi 2026-10-14, `runtime/retrieve.py`). Đo trên
+Onboarding 200 câu (chunk theo trang): top-1/3/5 = 153/186/194, so với 153/186/192 của K = 15 1:1.
+
+Bản trước — K = 15, dense 1 : sparse 1 (2026-10-02). Đo trên
 Onboarding 200 câu, chunk cắt theo đề mục + bảng đọc từ ảnh: top-1/3/5 = 157/188/195, so với
 157/188/192 ở K = 60. Lưới 15 K × 13 tỉ lệ; kiểm chéo chia đôi bộ câu hỏi (chọn trên 100 câu, chấm
 trên 100 câu còn lại) cũng hay chọn K = 15 1:1. Đổi cách chunk / đổi deck thì tune lại.
@@ -169,13 +172,14 @@ trên 100 câu còn lại) cũng hay chọn K = 15 1:1. Đổi cách chunk / đ�
 #### Tune — `scripts/tune.sh`
 
 ```bash
-bash scripts/tune.sh src/output/chunker/<ten>/chunks.json                  # -> src/output/retrieval/<ten>/chunks_tune.md + .json
-bash scripts/tune.sh src/output/chunker/<ten>/chunks_thu.json --k 5,10,20 --wd 1,1.5,2     # -> audit/chunks_thu_tune.*
+bash scripts/tune.sh src/output/chunker/<ten>/chunks.json                  # -> src/output/evaluation/<ten>/chunks_tune.md + .json
+bash scripts/tune.sh src/output/chunker/<ten>/chunks_thu.json --k 5,10,20 --wd 1,1.5,2     # -> src/output/evaluation/<ten>/chunks_thu_tune.*
 ```
 
-- Pool 50 của mỗi nhánh lấy MỘT lần mỗi câu (`Searcher.ranks`), gộp offline bằng ĐÚNG hàm
+- Pool 50 của mỗi nhánh lấy MỘT lần mỗi câu (`branch_ranks` trong tune.py, hỏi thẳng `retrieve_context`
+  của kho vector và kho BM25), gộp offline bằng ĐÚNG hàm
   `rrf_fuse` mà `search` dùng — cả lưới ~30 cấu hình chạy vài giây.
-- Ra `<thư mục chunks>/audit/<tên chunks>_tune.md` + `.json` — đặt theo tên file vào, chạy lại
+- Ra `src/output/evaluation/<doc_id>/<tên chunks>_tune.md` + `.json` — đặt theo tên file vào, chạy lại
   thì ghi đè báo cáo của chính file đó: top-1/3/5, MRR, token 5 trang đầu, **cứu / hỏng** so với
   cấu hình code đang dùng, bảng theo `type` câu hỏi, câu trượt top-5 của cấu hình tốt nhất.
 - Đổi cách chunk -> chỉ đổi file đầu vào; bộ chunk chưa nhúng thì tự nhúng (có cache).
@@ -284,7 +288,7 @@ Dựng bảng BM25 mất ~10ms cho 52 chunk, làm **một lần lúc khởi đ�
 ## 8. Chạy
 
 ```bash
-python src/retrieval/search.py src/output/chunker/3_datavisualization/chunks.json "làm sao lưu biểu đồ ra file ảnh"
+python src/runtime/retrieve.py src/output/chunker/3_datavisualization/chunks.json "làm sao lưu biểu đồ ra file ảnh"
 ```
 
 | cờ | nghĩa |
@@ -327,7 +331,12 @@ mà S1 đã bỏ (CLAUDE.md §5). Một vector cho mỗi chunk, không có vecto
 
 ## 10. Đã đo — và gate self-retrieval hiện KHÔNG đo được gì
 
-`src/retrieval/audit.py` chạy hai bài. Kết quả lần đầu:
+> **`audit.py` đã BỎ 2026-10-13** (cùng gate self-retrieval §11 và quét trùng). Mục này giữ lại
+> làm lịch sử: lý do bỏ nằm ngay bên dưới. Lỗi trùng `p024.b02` đã sửa ở tầng chunk (không còn
+> tách chunk phụ cho mô tả ảnh), và chunk cùng trang thì `search` gộp làm một kết quả. Đo tìm
+> kiếm bằng bộ câu hỏi có nhãn (`eval.py`) + `scripts/tune.sh`.
+
+`audit.py` (đã xoá) chạy hai bài. Kết quả lần đầu:
 
 ### Self-retrieval — 100%, và đó là tin xấu
 
@@ -371,31 +380,17 @@ top-k, và người duyệt ở S7 phải đọc hai lần cùng một thứ.
 Ngưỡng chốt **0.94**: 0.95 hụt mất `p034` (0.9498), 0.93 bắt oan `p027`/`p028` (0.9337).
 Khe rất hẹp, và đây mới là deck **duy nhất** đo được — deck thứ hai vào là phải xem lại.
 
-### Chạy
+### Bộ câu hỏi có nhãn — `src/evaluation/eval.py`
+
+`eval.py` chạy câu hỏi **người viết** (không lấy từ chính văn bản), ở
+`data/eval/<doc_id>.queries.json` (không có thì `data/eval/queries.json`):
 
 ```bash
-python src/retrieval/audit.py src/output/chunker/3_datavisualization/chunks.json -o src/output/retrieval/3_datavisualization/self_retrieval.json
-python src/retrieval/audit.py src/output/chunker/3_datavisualization/chunks.json --query-from title --show-fail
+python src/evaluation/eval.py src/output/chunker/3_datavisualization/chunks.json -o src/output/evaluation/3_datavisualization/eval.json
+python src/evaluation/eval.py src/output/chunker/3_datavisualization/chunks.json --by nguoi
 ```
 
-Thoát mã 1 khi top-1 dưới gate, để CI bắt được.
-
-### Bộ câu hỏi có nhãn — `src/retrieval/eval.py`
-
-`audit.py` tự sinh câu hỏi từ văn bản. `eval.py` chạy câu hỏi **người viết**, ở
-`data/eval/queries.json`:
-
-```bash
-python src/retrieval/eval.py src/output/chunker/3_datavisualization/chunks.json -o src/output/retrieval/3_datavisualization/eval.json
-python src/retrieval/eval.py src/output/chunker/3_datavisualization/chunks.json --by nguoi
-```
-
-Hai bài **bổ sung** nhau, không thay được nhau:
-
-```
-audit  nhãn KHÔNG AI BỊA ĐƯỢC (chunk tự tìm chính nó)  ·  nhưng đề bài là đáp án
-eval   câu hỏi SÁT THỰC TẾ                              ·  nhưng nhãn do người gán, dễ thiên vị
-```
+Câu hỏi sát thực tế, nhưng nhãn do người gán nên dễ thiên vị.
 
 Mỗi câu khai `by: "ai" | "nguoi"`. 100% câu do AI viết thì `eval.py` in cảnh báo — số
 đó là AI tự ra đề rồi tự chấm, không kết luận được gì.
@@ -436,11 +431,10 @@ chứng đo được rằng R3b **bắt buộc phải có**, không phải tính
 ### File sinh ra
 
 ```
-src/output/retrieval/3_datavisualization/self_retrieval.json    duplicates[] + top-1/top-3 từng kiểu + caveat
-src/output/retrieval/3_datavisualization/eval.json              kết quả từng câu hỏi, từng kiểu
+src/output/evaluation/3_datavisualization/eval.json              kết quả từng câu hỏi, từng kiểu
 ```
 
-`search.py` **không ghi file** — nó là hàm chạy lúc runtime, trả `SearchHit[]` trong bộ
+`runtime/retrieve.py` **không ghi file** — nó là hàm chạy lúc runtime, trả `SearchHit[]` trong bộ
 nhớ cho R4 dùng ngay, không phải stage offline sinh artifact.
 
 Nghi ngờ cần soi riêng: 7 trang p9–p15 cùng tiêu đề *"Đồ thị dạng đường"*. Tiền tố

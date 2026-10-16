@@ -1,4 +1,4 @@
-"""S4 — sinh kịch bản robot nói cho từng trang (§9: chạy riêng được qua CLI).
+"""Lệnh viết kịch bản (S4) cho từng trang.
 
     python src/scenario/cli.py src/output/parser/<doc_id>/document.json                  # cả deck
     python src/scenario/cli.py src/output/parser/<doc_id>/document.json --page 9 11 20   # vài trang
@@ -6,15 +6,9 @@
     python src/scenario/cli.py src/output/parser/<doc_id>/document.json --show           # xem, không gọi API
     python src/scenario/cli.py src/output/parser/<doc_id>/document.json --md             # chỉ ghi lại .md
 
-Mỗi lần lưu scenario.json là ghi luôn scenario.md (bản đọc cả deck) bên cạnh.
-
-Chạy lại là INCREMENTAL: trang có page_hash + prompt + model không đổi thì giữ nguyên,
-không tốn tiền. Đổi kho phát âm data/pronunciation.json thì chỉ đếm lại âm tiết, không gọi LLM.
-Lưu dần sau MỖI trang: dừng giữa chừng thì trang đã viết vẫn còn, chạy lại là đi tiếp.
-Chạy xong -> scripts/extract_terms.py gom từ chưa có cách đọc vào kho -> người chốt -> chạy lại.
-
-Mã thoát: 0 xong · 3 xong nhưng có trang CỜ ĐỎ (file vẫn ghi đủ) · 1 hỏng thật — giống parse,
-`run_deck.sh` gặp 3 thì chạy tiếp.
+Ra: `src/output/scenario/<doc_id>/scenario.json` + `scenario.md` (bản đọc).
+Cách làm: chạy lại chỉ viết trang đã đổi (page_hash / prompt / model); lưu sau MỖI trang nên dừng
+giữa chừng không mất trang đã viết. Mã thoát: 0 xong · 3 xong nhưng có trang cờ đỏ · 1 lỗi.
 """
 
 from __future__ import annotations
@@ -29,7 +23,7 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from utils.config import ROOT, SCENARIO_OUTPUT
+from utils.config import ROOT, SCENARIO_OUTPUT, console_setup
 from utils.llm import DEFAULT_MODEL
 from parser.enrich import enrich
 from models.parsed_document import ParsedDocument
@@ -41,20 +35,20 @@ log = logging.getLogger("scenario")
 
 
 def show(sc: Scenario, pages: set[int] | None) -> None:
+    """In kịch bản ra màn hình: mỗi trang một dòng tóm tắt, rồi đoạn văn và các khối nguồn."""
     for ss in sc.slides:
         if pages and ss.page_no not in pages:
             continue
         log.info("")
-        log.info("--- trang %d · %s · %d câu · %d âm tiết · ~%.0fs · pass%d  %s",
-                 ss.page_no, ss.slide_type, len(ss.sentences), ss.syllables, ss.seconds,
+        log.info("--- trang %d · %s · %d âm tiết · ~%.0fs · pass%d  %s",
+                 ss.page_no, ss.slide_type, ss.syllables, ss.seconds,
                  ss.passes, ("CỜ: " + ",".join(ss.flags)) if ss.flags else "")
-        for s in ss.sentences:
-            ref = f"  → {s.grounding.ref}" if s.kind == "content" and s.grounding else ""
-            log.info("    [%-8s %2d] %s%s", s.kind, s.syllables, s.text, ref)
+        log.info("    %s", ss.text)
+        log.info("    → refs: %s", ", ".join(ss.refs) or "(không có)")
 
 
 def to_markdown(sc: Scenario, doc: ParsedDocument, pages: set[int] | None) -> str:
-    """Kịch bản dạng đọc được bằng mắt — mở Preview trong VSCode, đọc như bản thoại."""
+    """Dựng `scenario.md`: kịch bản dạng đọc bằng mắt, mỗi trang một đoạn văn kèm khối nguồn."""
     out = [f"# Kịch bản · {sc.doc_id}", "",
            f"model `{sc.model}` · pronunciation `{sc.pronunciation_hash}` · "
            f"tổng ~{sc.seconds / 60:.1f} phút", ""]
@@ -64,29 +58,21 @@ def to_markdown(sc: Scenario, doc: ParsedDocument, pages: set[int] | None) -> st
         p = doc.page(ss.page_no)
         title = (p.title if p else None) or "(không có tiêu đề)"
         out += [f"## Trang {ss.page_no} · {title}", "",
-                f"`{ss.slide_type}` · {len(ss.sentences)} câu · {ss.syllables} âm tiết · "
-                f"~{ss.seconds:.0f}s · pass {ss.passes}"
-                + (f" · 🚩 **{', '.join(ss.flags)}**" if ss.flags else ""), ""]
-        for s in ss.sentences:
-            if s.kind == "delivery":
-                out.append(f"> *{s.text}*  ")
-                out.append(f"> <sub>delivery · {s.syllables} ât</sub>")
-            else:
-                ref = s.grounding.ref if s.grounding and s.grounding.ref else "🚩 KHÔNG GROUNDING"
-                out.append(f"{s.text}  ")
-                out.append(f"<sub>content · {s.syllables} ât · → `{ref}`</sub>")
-            out.append("")
+                f"`{ss.slide_type}` · {ss.syllables} âm tiết · ~{ss.seconds:.0f}s · pass {ss.passes}"
+                + (f" · 🚩 **{', '.join(ss.flags)}**" if ss.flags else ""), "",
+                ss.text or "*(chưa có)*", "",
+                f"<sub>nguồn: {', '.join(f'`{r}`' for r in ss.refs) or '🚩 KHÔNG CÓ'}</sub>", ""]
         if ss.unknown_terms:
             out += [f"*Từ chưa có cách đọc:* {', '.join(ss.unknown_terms)}", ""]
     return "\n".join(out)
 
 
 def report(sc: Scenario) -> None:
-    S = [s for ss in sc.slides for s in ss.sentences]
-    content = [s for s in S if s.kind == "content"]
-    ungrounded = [s for s in content if not (s.grounding and s.grounding.ref)]
-    tot = sum(s.syllables for s in S) or 1
-    deliv = sum(s.syllables for s in S if s.kind == "delivery")
+    """In thống kê kịch bản: tổng thời lượng, trang nội dung không có nguồn, trang chạy pass 2,
+    trang cờ đỏ, từ chưa có cách đọc."""
+    tot = sum(ss.syllables for ss in sc.slides)
+    content = [ss for ss in sc.slides if ss.slide_type in ("content", "exercise")]
+    no_ref = [ss.page_no for ss in content if not ss.refs]
     red = [ss.page_no for ss in sc.slides if ss.red_flags]
     p2 = [ss.page_no for ss in sc.slides if ss.passes == 2]
     unk = sorted({t for ss in sc.slides for t in ss.unknown_terms})
@@ -94,15 +80,18 @@ def report(sc: Scenario) -> None:
     log.info("")
     log.info("=== %s · %d trang · model %s", sc.doc_id, len(sc.slides), sc.model)
     log.info("    tổng thời lượng       %.1f phút  (%d âm tiết ÷ 200/phút)", sc.seconds / 60, tot)
-    log.info("    ungrounded (content)  %d/%d = %.1f%%   gate < 10%%",
-             len(ungrounded), len(content), len(ungrounded) / max(len(content), 1) * 100)
-    log.info("    tỉ lệ delivery        %.1f%%", deliv / tot * 100)
+    log.info("    trang không có nguồn  %d/%d %s", len(no_ref), len(content), no_ref or "")
     log.info("    phải chạy pass 2      %d trang %s", len(p2), p2 or "")
     log.info("    CỜ ĐỎ                 %d trang %s", len(red), red or "")
     log.info("    từ chưa có cách đọc   %s", unk or "không")
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Đọc tham số, nạp + enrich document.json và kịch bản cũ (nếu có), rồi làm theo chế độ.
+
+    Cách làm: `--md` chỉ ghi lại .md; `--show` chỉ in; `--dry-run` chỉ in prompt; còn lại thì viết
+    kịch bản (lưu dần sau mỗi trang), in kết quả, trả mã 3 nếu có trang cờ đỏ.
+    """
     ap = argparse.ArgumentParser(prog="scenario")
     ap.add_argument("parsed", help="src/output/parser/<doc_id>/document.json")
     ap.add_argument("--pron", default=str(STORE), help="kho phát âm chung, mặc định data/pronunciation.json")
@@ -118,11 +107,8 @@ def main(argv: list[str] | None = None) -> int:
                          "dùng sau khi sửa tay scenario.json")
     args = ap.parse_args(argv)
 
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    console_setup()
     logging.getLogger("httpx").setLevel(logging.WARNING)
-    for s in (sys.stdout, sys.stderr):
-        if hasattr(s, "reconfigure"):
-            s.reconfigure(encoding="utf-8", errors="replace")
 
     doc = enrich(ParsedDocument.load(args.parsed))
     out = Path(args.out) if args.out else SCENARIO_OUTPUT / doc.doc_id / "scenario.json"

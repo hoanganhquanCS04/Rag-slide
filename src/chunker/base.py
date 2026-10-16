@@ -1,12 +1,9 @@
-"""Lớp cha của mọi chunker: ParsedDocument -> ChunkSet.
+"""Lớp cha của chunker: ParsedDocument -> ChunkSet (nội dung `chunks.json`).
 
-Biến thể chỉ cần viết `chunk_page`. Tiền tố, dựng KBChunk, gom cả tài liệu và ghi file dùng
-chung ở đây. Luật chung (chi tiết ở docs/spec/kb-chunk.md):
-
-    tiền tố   [<chương> · <tiêu đề trang> · trang N/M]   <- KHÔNG gọi LLM, thiếu phần nào bỏ phần đó
-    đánh dấu  trang phân mục -> section_divider, lọc lúc tìm (KHÔNG xoá)
-
-Đầu vào chỉ là `document.json` đã `enrich()`: `blocks[].content` là chữ, `id` để truy ngược. Header/footer lặp S0 đã bỏ, ảnh không có mô tả thì `content` rỗng -> tự rơi.
+Để làm gì: phần dùng chung cho mọi chunker — gắn tiền tố, dựng KBChunk, gom cả deck, ghi file.
+Chunker cụ thể chỉ phải viết `chunk_page`.
+Cách làm: đầu vào là document.json đã `enrich()`; trang chuyển chương được đánh dấu
+`section_divider` để lọc lúc tìm (không xoá).
 """
 
 from __future__ import annotations
@@ -26,19 +23,24 @@ MAX_TOKENS = 500
 
 
 class BaseChunker(ABC):
-    """ParsedDocument -> ChunkSet. Ghi ra `out_dir/chunks.json`."""
+    """Khung chạy chunk: cắt từng trang -> gom thành ChunkSet -> ghi `out_dir/chunks.json`."""
 
     kind: ClassVar[str]
 
     def __init__(self, out_dir: Path, max_tokens: int = MAX_TOKENS):
+        """Nhớ thư mục output và số token tối đa mỗi chunk."""
         self.out_dir = out_dir
         self.max_tokens = max_tokens
 
     @abstractmethod
     def chunk_page(self, doc: ParsedDocument, page: ParsedPage) -> list[KBChunk]:
-        """Một trang -> các chunk của nó, đúng thứ tự đọc."""
+        """Một trang -> các chunk của trang đó, đúng thứ tự đọc (lớp con tự viết)."""
 
     def run(self, doc: ParsedDocument) -> ChunkSet:
+        """Cắt cả deck -> ChunkSet.
+
+        Cách làm: gọi `chunk_page` cho từng trang, gom lại, in thống kê (số chunk, số trang bị cắt...).
+        """
         chunks = [c for page in doc.pages for c in self.chunk_page(doc, page)]
         cs = ChunkSet(doc_id=doc.doc_id, max_tokens=self.max_tokens, tokenizer=TOKENIZER_ID,
                       chunks=chunks)
@@ -49,7 +51,7 @@ class BaseChunker(ABC):
         return cs
 
     def save(self, cs: ChunkSet) -> Path:
-        """-> out_dir/chunks.json."""
+        """Ghi ChunkSet ra `out_dir/chunks.json` -> đường dẫn file."""
         path = self.out_dir / "chunks.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(cs.model_dump_json(indent=2), encoding="utf-8")
@@ -59,9 +61,10 @@ class BaseChunker(ABC):
     # ------------------------------------------------------------------ dùng chung cho biến thể
 
     def prefix(self, doc: ParsedDocument, page: ParsedPage) -> str:
-        """ 
-        tạo dòng đầu gắn vào mỗi chunk trước khi đem đi nhúng vector. 
-        Dòng đó cho biết mẩu chữ thuộc chương nào, trang nào.
+        """Tạo dòng đầu gắn vào mỗi chunk trước khi nhúng: "[<chương> · <tiêu đề trang> · trang N/M] ".
+
+        Để làm gì: mảnh sau của một trang dài vẫn biết mình thuộc chương nào, trang nào, nói về gì.
+        Cách làm: lấy tên chương + tiêu đề trang, bỏ phần trống và phần trùng nhau, thêm "trang N/M".
         """
         sec = doc.section_of(page.page_no)
         heads = [h for h in dict.fromkeys([sec.title if sec else None, page.title]) if h]
@@ -69,6 +72,11 @@ class BaseChunker(ABC):
 
     def make_chunk(self, doc: ParsedDocument, page: ParsedPage, key: str, text: str,
                    blocks: list[Block], prefix: str) -> KBChunk:
+        """Dựng một KBChunk từ phần chữ đã cắt của trang.
+
+        Cách làm: `text_enriched` = tiền tố + chữ (thứ đem nhúng); điền trang, chương, loại trang, các
+        khối gốc, số token, số khối là ảnh.
+        """
         sec = doc.section_of(page.page_no)
         enriched = prefix + text
         return KBChunk(

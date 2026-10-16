@@ -1,7 +1,4 @@
 {
-  "_note": "calibrated=false: cổng tin cậy dùng biên RRF (không có reranker — bỏ 2026-10-01), ngưỡng CHƯA fit trên bộ eval có nhãn (CLAUDE.md §6). Có bộ 50 câu người viết thì fit lại.",
-  "calibrated": false,
-  "gate_min_margin": 0.002,
   "top_k": 5,
   "max_contexts": 5,
   "max_answer_sentences": 4,

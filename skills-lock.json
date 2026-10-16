@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "build-graph": {
+      "source": "tirth8205/code-review-graph",
+      "sourceType": "github",
+      "skillPath": "skills/build-graph/SKILL.md",
+      "computedHash": "4ba8537c6bc29cd9162185c1f7974fbfaac29bcc1ea06bce2cc38e80c5f6139b"
+    }
+  }
+}

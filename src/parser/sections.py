@@ -1,16 +1,8 @@
-"""Dò chương (section) từ TRANG MỤC LỤC. Không tìm thấy mục lục khớp -> [] (KHÔNG đoán).
+"""Dò chương từ TRANG MỤC LỤC. Không tìm thấy mục lục khớp -> 0 chương, không đoán.
 
-Vì sao cần: docling dựng cây heading PHẲNG — mọi `section_header` đều `level=1`. Tức là
-KHÔNG có phân cấp nào để dựa vào.
-
-Luật: deck thường có mục lục ở trang 2. Đọc tên chương ở đó, dò tiêu đề các trang phía sau —
-trang ĐẦU TIÊN có tiêu đề khớp một mục là trang bắt đầu chương, kéo tới trước trang bắt đầu
-chương kế tiếp. Trang mở chương có thể chỉ có tên hoặc có cả nội dung — không quan trọng,
-chỉ cần tiêu đề khớp. Đo:
-
-    Onboarding Kit      mục lục p2, 5/5 mục -> p3 · p14 · p37 · p42 · p47
-    Thời gian làm việc  mục lục p2, 5/5 mục -> p3 · p4 · p6 · p9 · p12  (không có trang phân
-                        chương riêng — trang mở chương chính là trang nội dung)
+Để làm gì: biết mỗi trang thuộc chương nào (dùng cho tiền tố chunk, câu chuyển chương).
+Cách làm: đọc tên các mục trên trang mục lục; trang ĐẦU TIÊN phía sau có tiêu đề khớp một mục là
+trang mở chương; chương kéo dài tới trước trang mở chương kế tiếp.
 """
 
 from __future__ import annotations
@@ -27,7 +19,7 @@ TOC_MAX_PAGE = 5             # mục lục nằm ở đầu deck; tìm xa hơn l
 
 
 def _strip(s: str) -> str:
-    """Bỏ số thứ tự đầu dòng ("01 ", "4. ") + dấu cách docling chèn trước dấu câu."""
+    """Bỏ số thứ tự đầu dòng ("01 ", "4. ") và dấu cách thừa trước dấu câu."""
     s = re.sub(r"\s+([,.;:)!?])", r"\1", s)
     return " ".join(re.sub(r"^\W*\d+\s*[.):\-]?\s+", "", s.strip()).split())
 
@@ -36,11 +28,10 @@ _NUMBERED = re.compile(r"^\W*\d+\s*[.):\-]?(\s|$)")
 
 
 def _toc_items(lines: list[str]) -> list[str]:
-    """Dòng của MỘT khối -> các mục: dòng mở bằng số thứ tự mở mục mới, dòng khác nối vào mục đang dở.
+    """Tách các dòng của một khối thành các mục mục lục.
 
-    Hai kiểu deck: Onboarding p2 cả mục lục một khối, mỗi mục một dòng ("1. …\\n2. Nhân sự");
-    Thời gian làm việc p2 mỗi mục một ô, tên NGẮT DÒNG trong ô ("03\\nLÀM THÊM\\nGIỜ"). Tách theo
-    từng dòng thì gãy kiểu sau, gộp cả khối thì gãy kiểu trước.
+    Cách làm: dòng bắt đầu bằng số thứ tự mở mục mới; dòng không có số nối vào mục đang dở
+    (tên mục bị ngắt dòng: "03" / "LÀM THÊM" / "GIỜ" -> một mục).
     """
     items: list[list[str]] = []
     for ln in lines:
@@ -52,18 +43,16 @@ def _toc_items(lines: list[str]) -> list[str]:
 
 
 def _key(s: str) -> str:
-    """Khoá so tên mục với tiêu đề — không phân biệt hoa thường, BỎ mọi dấu cách: docling dính
-    chữ ở trang mục lục (Thời gian làm việc p2 "CHẤMCÔNG", text layer là "CHẤM CÔNG") ->
-    không khớp tiêu đề p4 "02. CHẤM CÔNG", mất chương."""
+    """Khoá để so tên mục với tiêu đề trang: bỏ số thứ tự, viết thường, bỏ hết dấu cách."""
     return re.sub(r"\s+", "", _strip(s).lower())
 
 
 def detect_sections(doc: ParsedDocument) -> tuple[list[SectionSpan], list[str]]:
-    """-> (sections, các dòng giải thích để log).
+    """Tìm trang mục lục trong 5 trang đầu và dựng danh sách chương -> (chương, dòng log).
 
-    Trang mục lục = trang đầu deck mà >= 60% dòng của nó tìm được trang mở chương phía sau,
-    theo đúng thứ tự — không dựa vào chữ "Nội dung", chính các trang sau xác nhận đó là mục lục.
-    Khớp: tiêu đề == tên mục, hoặc tiêu đề CHỨA tên mục ("CHẾ ĐỘ LƯƠNG THƯỞNG" ∋ "LƯƠNG THƯỞNG").
+    Cách làm: với mỗi trang trong 5 trang đầu, lấy các mục (cần >= 3 mục); tìm trang mở chương cho
+    từng mục (tiêu đề bằng hoặc chứa tên mục, đúng thứ tự); >= 2 mục và >= 60% mục tìm được thì đó là
+    mục lục; không trang nào đạt -> 0 chương.
     """
     titled = [(p.page_no, _key(p.title)) for p in doc.pages if p.title]
     for toc in doc.pages[:TOC_MAX_PAGE]:
@@ -104,7 +93,7 @@ def detect_sections(doc: ParsedDocument) -> tuple[list[SectionSpan], list[str]]:
 
 
 def apply_sections(doc: ParsedDocument) -> ParsedDocument:
-    """Dò section, gán vào doc.sections và page.section_id. Sửa tại chỗ."""
+    """Dò chương rồi gán vào `doc.sections` và `section_id` của từng trang (sửa tại chỗ)."""
     sections, notes = detect_sections(doc)
     for n in notes:
         log.info("  %s", n)

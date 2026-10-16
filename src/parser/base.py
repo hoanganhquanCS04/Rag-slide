@@ -1,7 +1,6 @@
-"""Lớp cha của mọi parser: file gốc -> ParsedDocument đã xét bảng + ảnh.
+"""Lớp cha của parser: file gốc -> ParsedDocument đã chép lại bảng và xét ảnh.
 
-Biến thể chỉ cần viết `parse_layout` (bước ①). Chép bảng (②b) và xét ảnh (②) chỉ cần
-ParsedDocument + PDF nên dùng chung ở đây.
+Để làm gì: phần dùng chung cho mọi parser; parser cụ thể chỉ phải viết bước ① (`parse_layout`).
 """
 
 from __future__ import annotations
@@ -19,21 +18,29 @@ log = logging.getLogger(__name__)
 
 
 class BaseParser(ABC):
-    """File gốc -> ParsedDocument. Mọi cache nằm trong `out_dir`."""
+    """Khung chạy S0: ① bố cục -> ②b chép bảng -> ② xét ảnh -> ghi `document.json`.
+
+    Cách làm: mọi file cache nằm trong `out_dir` (thư mục output của deck).
+    """
 
     kind: ClassVar[str]
 
     def __init__(self, model: str, out_dir: Path):
+        """Nhớ tên model VLM và thư mục output của deck."""
         self.model = model
         self.out_dir = out_dir
 
     @abstractmethod
     def parse_layout(self, src: Path, pdf: Path, *, redo: bool = False) -> ParsedDocument:
-        """① Bố cục + chữ + bảng. Có cache thì không gọi API, trừ `redo`."""
+        """Bước ①: đọc bố cục + chữ + bảng của từng trang -> ParsedDocument (lớp con tự viết)."""
 
     def post_processing(self, doc: ParsedDocument, pdf: Path, *, redo: bool = False,
                         table_pages: set[int] | None = None) -> ParsedDocument:
-        """②b chép lại bảng (chỉ ở `table_pages` nếu có), ② xét ảnh -> áp vào `doc`."""
+        """Bước ②b + ②: chép lại bảng, xét ảnh, rồi gắn kết quả vào doc.
+
+        Cách làm: gọi VLM (có cache) ghi ra `tables.json`, `pictures.json`, sau đó áp hai file đó vào doc;
+        `table_pages` = chỉ chép lại bảng ở các trang này.
+        """
         tables_json = self.out_dir / "tables.json"
         pictures_json = self.out_dir / "pictures.json"
         # Chọn trang = ÉP chép lại bảng ở đó (trang khác giữ cache) — không cần --redo, mà --redo
@@ -47,12 +54,12 @@ class BaseParser(ABC):
 
     def run(self, src: Path, pdf: Path, *, redo: bool = False,
             table_pages: set[int] | None = None) -> ParsedDocument:
-        """① rồi ②. `src` cho doc_id / nguồn, `pdf` để vẽ trang."""
+        """Chạy đủ S0 cho một file: bước ① rồi ②b + ② -> ParsedDocument."""
         doc = self.parse_layout(src, pdf, redo=redo)
         return self.post_processing(doc, pdf, redo=redo, table_pages=table_pages)
 
     def save(self, doc: ParsedDocument) -> Path:
-        """-> out_dir/document.json."""
+        """Ghi doc ra `out_dir/document.json` -> đường dẫn file."""
         path = self.out_dir / "document.json"
         path.write_text(doc.to_json(), encoding="utf-8")
         log.info("ghi -> %s (%d KB)", path, path.stat().st_size // 1024)

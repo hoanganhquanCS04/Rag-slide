@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 # Quét K + trọng số dense/sparse của RRF trên MỘT bộ chunk -> HAI file đặt theo tên file vào:
-#   src/output/retrieval/<doc_id>/<tên chunks>_tune.md + <tên chunks>_tune.json
+#   src/output/evaluation/<doc_id>/<tên chunks>_tune.md + <tên chunks>_tune.json
 #   + <tên chunks>_misses.json (câu trượt top-5 của cấu hình tốt nhất, dạng file câu hỏi)
 #
 #   bash scripts/tune.sh src/output/chunker/onboarding_kit/chunks.json
-#        -> src/output/retrieval/onboarding_kit/chunks_tune.md + chunks_tune.json
+#        -> src/output/evaluation/onboarding_kit/chunks_tune.md + chunks_tune.json
 #   bash scripts/tune.sh src/output/chunker/onboarding_kit/chunks_thu.json --k 5,10,20 --wd 1,1.5,2
-#        -> src/output/retrieval/onboarding_kit/chunks_thu_tune.md + .json
+#        -> src/output/evaluation/onboarding_kit/chunks_thu_tune.md + .json
 #
 # Đổi cách chunk -> chỉ đổi file vào. Bộ chunk chưa nhúng thì tự nhúng (có cache).
 # Một file vào = một bộ báo cáo: chạy lại thì ghi đè báo cáo của chính file đó.
 # Câu hỏi: data/eval/<doc_id>.queries.json (đổi bằng --queries). Tham số sau file chunk chuyển cho
-# src/retrieval/tune.py (xem --help). Thoát mã 1 khi kho vector trả pool lệch -> bảng không tin được, chạy lại.
+# src/evaluation/tune.py (xem --help). Thoát mã 1 khi kho vector trả pool lệch -> bảng không tin được, chạy lại.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -26,4 +26,6 @@ elif [ -x .venv/bin/python ];         then PY=.venv/bin/python
 else                                       PY=python
 fi
 
-PYTHONIOENCODING=utf-8 "$PY" src/retrieval/tune.py "$@"
+export PYTHONIOENCODING=utf-8
+
+"$PY" src/evaluation/tune.py "$@"

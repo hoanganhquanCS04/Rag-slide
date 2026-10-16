@@ -31,11 +31,7 @@ src/output/parser/<ten>/document.json            ★ ParsedDocument — NGUỒN 
         │   src/output/embedders/<ten>/vectors__<model>.{npy,json}
         │   src/output/vectordb/chroma/                        kho vector — BẢN SAO từ .npy
         │      │
-        │      └─ eval.py / tune.sh ──► src/output/retrieval/<ten>/   đo chất lượng tìm
-        │
-        ├──⑤ deck_map ───────────────────────────── miễn phí, luật
-        │      ▼
-        │   src/output/retrieval/<ten>/deck_map.txt              ~180 token: danh sách chương → prompt runtime
+        │      └─ eval.py / tune.sh ──► src/output/evaluation/<ten>/   đo chất lượng tìm
         │
         └──⑥ S4 kịch bản ──────────────────────────── 💰 LLM, chỉ trang đổi
                đọc: block của trang + kịch bản trang trước cùng chương
@@ -68,7 +64,6 @@ bash scripts/run_deck.sh "data/raw/<file>.pdf" --eval     # + đo bộ câu hỏ
 | ① VlmPipeline | 1 lần gọi/trang (~9s/trang Gemma local); có `docling_vlmpipeline.json` → 0 | đổi file gốc, `VLM_MODEL`, prompt — ép bằng `--redo` (cả file) |
 | ③ dựng document.json | vài giây, miễn phí | luôn dựng lại |
 | ④ chunk + nhúng + nạp kho | vài giây; chữ không đổi → 0 lần gọi API | sau ③, đổi luật chunk, đổi `EMBED_MODEL` |
-| ⑤ deck_map | tức thì | luôn dựng lại |
 | S4 kịch bản | ~1–2 lần gọi LLM mỗi trang | trang có `page_hash` / prompt / model đổi |
 
 ---
@@ -114,7 +109,7 @@ Mọi chữ do VLM đọc từ ảnh trang — có thể sai. `id` = `p<trang>.b
 ### ④ `KBChunk` + vector — để TÌM
 
 Chi tiết: [spec/kb-chunk.md](../spec/kb-chunk.md) · [spec/embedding.md](../spec/embedding.md) ·
-[spec/search.md](../spec/search.md) · code: `src/chunker/` (chunk) · `src/retrieval/` (nhúng, tìm)
+[spec/search.md](../spec/search.md) · code: `src/chunker/` (chunk) · `src/embedders/` (nhúng) · `src/runtime/retrieve.py` + `src/sparse/` (tìm) · `src/evaluation/` (đo)
 
 ```
 1 trang = 1 chunk        (mô tả ảnh nằm trong chunk trang, không có vector ảnh phụ)
@@ -152,11 +147,11 @@ Tên model nằm trong tên file vector: đổi model mà quên nhúng lại th�
 chạy. Kho chỉ lo nhánh vector và là BẢN SAO của `.npy` — lệch với `chunks.json` thì tự nạp
 lại, xoá đi thì tự dựng lại, không gọi API.
 
-**Tìm** (`src/retrieval/search.py`) = hai nhánh, gộp bằng RRF:
+**Tìm** (`src/runtime/retrieve.py`) = hai nhánh, gộp bằng RRF:
 
 ```
 câu hỏi ─┬─ dense: nhúng câu hỏi (API) → kho vector → top 50 ─┐
-         └─ sparse: BM25 (src/retrieval/sparse/, dựng trong RAM) → top 50 ┴─ RRF K=15, dense 1 : sparse 1
+         └─ sparse: BM25 (src/sparse/, dựng trong RAM) → top 50 ┴─ RRF K=10, dense 1.5 : sparse 1
                                                                     → gộp theo trang (điểm max)
                                                                     → top-5
 ```
@@ -165,18 +160,11 @@ Hằng số RRF đo bằng `scripts/tune.sh`, không đoán. Hỏi nội dung th
 hỏi điều hướng ("quay lại phần…") thì **không lọc** — trang mở chương là đáp án đúng.
 API nhúng lỗi lúc chạy → tự lùi về chỉ BM25.
 
-### ⑤ `deck_map.txt` — bản đồ bộ slide
+### ~~⑤ `deck_map.txt`~~ — BỎ 2026-10-13
 
-```
-Bộ slide thoi_gian_lam_viec_chinh_sach_nhan_su · 17 trang · 5 chương
-- trang 1–2: Mở đầu (trước chương 1, không phải chương)
-- trang 3: Chương 1: THỜI GIAN LÀM VIỆC
-- trang 4–5: Chương 2: CHẤM CÔNG
-...
-```
-
-TRẠNG THÁI gọn đưa thẳng vào prompt runtime — LLM biết bộ slide có những phần nào mà không
-phải nhồi cả deck. Dựng bằng luật từ `sections` + `slide_type`, không gọi model.
+Chỉ viết lại `doc.sections` thành chữ cho prompt runtime. Chương vẫn dò ở S0 (`parser/sections.py`)
+và có trong bộ nhớ sau `enrich()`; prompt runtime không còn danh sách chương — câu hỏi cấu trúc phải
+tìm ra trang mục lục (xem CLAUDE.md §5 S6a).
 
 ### S4 `Scenario` — robot NÓI gì
 
@@ -272,7 +260,7 @@ câu người thật viết (giọng nói, có dấu, văn nói đủ chữ).
 
 | | Việc | Ghi chú |
 |---|---|---|
-| ⬜ S4 Onboarding | kịch bản 51 trang | `src/runtime/cli.py` (thuyết trình thử) cần `scenario.json` |
+| ⬜ S4 Onboarding | kịch bản 51 trang | chưa có lệnh thuyết trình thử — `src/runtime/` v0 chỉ hỏi đáp (`scripts/try_ask.py`) |
 | 🚫 luật nói tự nhiên | nhịp, tỉ lệ delivery, văn viết… | BỎ khỏi bộ kiểm S4 (2026-10-06) — chỉ còn hướng dẫn trong prompt, xem [spec/scenario.md §11](../spec/scenario.md) |
 | ⬜ S2 | `time_budget` theo chương | luật, không gọi model. S4 hiện không có trần độ dài trang — đi theo nội dung |
 | ⬜ `slide_type` đủ loại | `title` · `agenda` | đã có `section_divider` · `exercise` · `content` |

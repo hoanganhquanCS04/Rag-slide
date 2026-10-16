@@ -40,13 +40,13 @@ Tên file có dấu cách thì bọc trong ngoặc kép.
 Đặt file vào `data/raw/` (`.pdf`, hoặc `.pptx` kèm bản `.pdf` CÙNG TÊN để có ảnh trang —
 xuất bằng `scripts\pptx2pdf.ps1`).
 
-**Hai lệnh là đủ.** Lệnh 1 làm hết phần offline: parse → chunk + nhúng → `deck_map` → kịch
+**Hai lệnh là đủ.** Lệnh 1 làm hết phần offline: parse → chunk + nhúng → kịch
 bản (S4). Bước nào có cache thì không tốn API — chạy lại thoải mái:
 
 ```bash
-bash scripts/run_deck.sh "data/raw/<file>.pdf"               # -> document.json, chunks.json + vector + kho, deck_map.txt
+bash scripts/run_deck.sh "data/raw/<file>.pdf"               # -> document.json, chunks.json + vector + kho, scenario.json
 bash scripts/run_deck.sh "data/raw/<file>.pdf" --redo        # gọi lại VLM cả file (mặc định dùng cache)
-bash scripts/run_deck.sh "data/raw/<file>.pdf" --eval        # thêm bước đo bộ câu hỏi có nhãn -> audit/eval.json
+bash scripts/run_deck.sh "data/raw/<file>.pdf" --eval        # thêm bước đo bộ câu hỏi có nhãn -> src/output/evaluation/<ten>/eval.json
 ```
 
 Lệnh 2 — hỏi đáp, hỏi bao nhiêu câu cũng được, **Ctrl+C** để thoát. Mỗi câu in log từng bước
@@ -68,10 +68,7 @@ Từng bước riêng lẻ (chính là những gì `run_deck.sh` gọi):
 .venv\Scripts\python.exe src\chunker\cli.py src\output\parser\<ten>\document.json
 
 # ④b nhúng vector + nạp kho -> src\output\embedders\<ten>\vectors__<model>.{npy,json} + src\output\vectordb\chroma\  [tốn API]
-.venv\Scripts\python.exe src\retrieval\build_index.py src\output\chunker\<ten>\chunks.json
-
-# ⑤ bản đồ bộ slide cho prompt runtime -> src\output\retrieval\<ten>\deck_map.txt
-.venv\Scripts\python.exe src\retrieval\deck_map.py src\output\parser\<ten>\document.json
+.venv\Scripts\python.exe src\embedders\cli.py src\output\chunker\<ten>\chunks.json
 ```
 
 Bên trong `parser\cli.py`:
@@ -104,7 +101,7 @@ Ghi chú:
 
 ### Kịch bản (S4) — bước 4 của `run_deck.sh`
 
-`run_deck.sh` gọi lệnh đầu tiên dưới đây sau `deck_map` (`--no-scenario` để bỏ). Tốn ~1–2 lần gọi
+`run_deck.sh` gọi lệnh đầu tiên dưới đây sau bước index (`--no-scenario` để bỏ). Tốn ~1–2 lần gọi
 LLM mỗi trang ĐỔI — trang không đổi thì giữ nguyên. Chạy riêng khi chỉ muốn làm kịch bản:
 
 ```powershell
@@ -191,7 +188,7 @@ Xem cả deck bằng mắt: mở thẳng `src\output\parser\<ten>\document.json`
 ## C. Thử tìm kiếm
 
 ```powershell
-.venv\Scripts\python.exe src\retrieval\search.py src\output\chunker\<ten>\chunks.json "làm thêm ngày lễ hệ số bao nhiêu" -k 3 --explain
+.venv\Scripts\python.exe src\search\cli.py src\output\chunker\<ten>\chunks.json "làm thêm ngày lễ hệ số bao nhiêu" -k 3 --explain
 ```
 
 ```
@@ -213,7 +210,7 @@ nap 18 chunk | kho chroma | tu khoa rank_bm25 | model text-embedding-3-small    
 nap 18 chunk | kho chroma (nap lai 18 vector) | tu khoa rank_bm25 | model text-embedding-3-small  <- vừa tự nạp lại từ .npy
 ```
 
-`nap lai` lặp lại MỌI lần chạy = `chunks.json` bị đổi mà chưa chạy ④b `src\retrieval\build_index.py`.
+`nap lai` lặp lại MỌI lần chạy = `chunks.json` bị đổi mà chưa chạy ④b `src\embedders\cli.py`.
 
 Hỏi đáp trọn vòng (tìm → LLM → code kiểm nguồn): `scripts\try_ask.py`, xem mục A.
 
@@ -223,14 +220,11 @@ Hỏi đáp trọn vòng (tìm → LLM → code kiểm nguồn): `scripts\try_as
 
 ```powershell
 # bộ câu hỏi có nhãn — số đo THẬT. Chạy cả dense / sparse / hybrid
-.venv\Scripts\python.exe src\retrieval\eval.py src\output\chunker\<ten>\chunks.json
+.venv\Scripts\python.exe src\evaluation\eval.py src\output\chunker\<ten>\chunks.json
 # chỉ BM25 — không gọi API, chạy được khi không có mạng / khoá
-.venv\Scripts\python.exe src\retrieval\eval.py src\output\chunker\<ten>\chunks.json --mode sparse
-# thử cấu hình gộp khác (mặc định = hằng số của search.py: K=15, dense 1 : sparse 1)
-.venv\Scripts\python.exe src\retrieval\eval.py src\output\chunker\<ten>\chunks.json --rrf-k 7 --wd 1.25
-
-# self-retrieval — gần như luôn 100%, chỉ chứng minh không có 2 chunk trùng nhau
-.venv\Scripts\python.exe src\retrieval\audit.py src\output\chunker\<ten>\chunks.json --mode hybrid
+.venv\Scripts\python.exe src\evaluation\eval.py src\output\chunker\<ten>\chunks.json --mode sparse
+# thử cấu hình gộp khác (mặc định = hằng số của runtime/retrieve.py: K=10, dense 1.5 : sparse 1)
+.venv\Scripts\python.exe src\evaluation\eval.py src\output\chunker\<ten>\chunks.json --rrf-k 7 --wd 1.25
 ```
 
 ```bash
@@ -242,12 +236,12 @@ bash scripts/tune.sh src/output/chunker/<ten>/chunks.json --k 5,10,20 --wd 1,1.5
 - `eval.py`, `tune.sh`, `run_deck.sh --eval` không truyền `--queries` thì cùng lấy
   `data\eval\<ten>.queries.json` (không có thì bộ chung `queries.json` của `3_datavisualization`).
   Dòng `===` đầu log in tên file câu hỏi đang dùng.
-- `tune.sh` ra ba file, đặt theo tên file vào, trong `<thư mục chunks>\audit\`:
+- `tune.sh` ra ba file, đặt theo tên file vào, trong `src\output\evaluation\<ten>\`:
   `<tên chunks>_tune.md` (người đọc) · `_tune.json` (máy đọc) · `_misses.json` (câu trượt
   top-5 của cấu hình tốt nhất, cùng dạng file câu hỏi — đưa thẳng vào `--queries` được).
 - `tune.sh` lấy câu hỏi ở `data\eval\<ten>.queries.json` (không có thì `queries.json`, đổi bằng
   `--queries`). Đổi cách chunk thì chỉ đổi file vào — bộ chunk chưa nhúng thì tự nhúng.
-  Chỉ ĐO, không đổi mặc định của `search.py`. Thoát mã 1 khi kho vector trả pool lệch — chạy
+  Chỉ ĐO, không đổi mặc định của `runtime/retrieve.py`. Thoát mã 1 khi kho vector trả pool lệch — chạy
   lại. Chi tiết: `docs\spec\search.md` §4.
 - Toàn bộ câu eval hiện do AI viết rồi tự chấm — số thiên vị, log in `CANH BAO`.
 

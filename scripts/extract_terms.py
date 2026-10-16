@@ -30,6 +30,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from models.scenario import Scenario
+from utils.config import console_setup
 from utils.syllables import STORE, Pronunciation, count, is_abbrev, spell
 
 log = logging.getLogger("terms")
@@ -56,10 +57,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--store", default=str(STORE), help="mặc định data/pronunciation.json")
     args = ap.parse_args(argv)
 
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
-    for s in (sys.stdout, sys.stderr):
-        if hasattr(s, "reconfigure"):
-            s.reconfigure(encoding="utf-8", errors="replace")
+    console_setup()
 
     store = Path(args.store)
     terms: dict[str, dict] = (json.loads(store.read_text(encoding="utf-8")).get("terms", {})
@@ -71,8 +69,7 @@ def main(argv: list[str] | None = None) -> int:
     for path in args.scenarios:
         sc = Scenario.model_validate(json.loads(Path(path).read_text(encoding="utf-8")))
         for ss in sc.slides:
-            for s in ss.sentences:
-                seen.update(w.split(".")[-1] for w in count(s.text, pron)[1])  # plt.savefig -> savefig
+            seen.update(w.split(".")[-1] for w in count(ss.text, pron)[1])  # plt.savefig -> savefig
 
     added: list[str] = []
     have = {k.lower() if not is_abbrev(k) else k for k in terms}

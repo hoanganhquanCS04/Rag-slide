@@ -1,20 +1,10 @@
-"""Schema của ParsedDocument — MỘT định dạng, vừa để người đọc vừa để pipeline chạy.
+"""Kiểu dữ liệu của kết quả parse (S0): một deck gồm các trang, mỗi trang gồm các khối.
 
-    ParsedDocument --*--> ParsedPage --*--> Block
-                                              |-- ParsedParagraph   (chữ)
-                                              |-- ParsedTable       (bảng)
-                                              `-- ParsedImage       (ảnh)
+    ParsedDocument -> ParsedPage -> Block (ParsedParagraph = chữ · ParsedTable = bảng · ParsedImage = ảnh)
 
-Mỗi block trả lời ba câu, loại nào cũng vậy:
-
-    page_no      trang nào        số trang chứa block
-    content      nói gì           chữ · mô tả VLM · markdown bảng
-    polygon      nằm đâu          4 góc, [0,1], gốc TRÊN-TRÁI
-
-Mọi chữ do VLM đọc từ ảnh trang (CÓ THỂ SAI). Id khối `pNNN.bNN` = trang NNN, khối thứ NN theo thứ tự đọc.
-
-Ghi ra JSON: trường rỗng (None / [] / {}) KHÔNG ghi — trừ `content`, để nhìn là thấy
-block nào không có nội dung. Nạp lại thì trường vắng lấy giá trị mặc định.
+Để làm gì: một định dạng duy nhất, vừa để người mở ra đọc vừa để các bước sau chạy.
+Cách làm: ghi ra JSON gọn — trường rỗng không ghi (trừ `content`), nạp lại thì lấy giá trị mặc định.
+Mọi chữ do VLM đọc từ ảnh trang nên CÓ THỂ SAI. Id khối `pNNN.bNN` = trang NNN, khối thứ NN.
 """
 
 from __future__ import annotations
@@ -45,17 +35,22 @@ DIVIDER_CX_RANGE = (0.35, 0.65)
 # CHỈ tiêu đề mở đầu bằng "Bài tập" — dò "yêu cầu" trong cả trang là bắt nhầm deck nhân sự
 # (Onboarding p26 "Chấm công: Quản lý yêu cầu của CBNV")
 EXERCISE_TITLE = re.compile(r"^\s*bài tập", re.I)
+LABEL_CHARS = 48         # ParsedPage.label: cắt dòng chữ đầu khi trang không có tiêu đề
 
 Point = tuple[float, float]
 Box = tuple[float, float, float, float]   # (trái, trên, phải, dưới), [0,1], gốc trên-trái
 
 
 def norm_text(s: str | None) -> str:
+    """Dồn mọi khoảng trắng liền nhau thành một dấu cách và bỏ khoảng trắng hai đầu."""
     return re.sub(r"\s+", " ", s or "").strip()
 
 
 def slugify_doc_id(stem: str) -> str:
-    """Tên file gốc -> doc_id sạch: "3_DataVisualization (1)" -> "3_datavisualization"."""
+    """Đổi tên file gốc thành doc_id sạch: "3_DataVisualization (1)" -> "3_datavisualization".
+
+    Cách làm: bỏ đuôi " (1)" của file tải trùng -> bỏ dấu tiếng Việt -> ký tự lạ thành "_" -> viết thường.
+    """
     stem = re.sub(r"\s*\(\d+\)\s*$", "", stem)         # bỏ "(1)" của bản tải trùng
     # bỏ dấu TRƯỚC khi lọc ký tự: không thì "Thời gian" -> "th_i_gian"
     stem = unicodedata.normalize("NFD", stem.replace("đ", "d").replace("Đ", "D"))
@@ -65,7 +60,10 @@ def slugify_doc_id(stem: str) -> str:
 
 
 class _Base(BaseModel):
-    """Ghi JSON gọn: bỏ trường rỗng, bỏ trường suy ra được (`_DERIVED`), xếp theo `_ORDER`."""
+    """Lớp cha của mọi model ở đây: ghi JSON gọn.
+
+    Cách làm: bỏ trường rỗng (trừ `_KEEP_EMPTY`), bỏ trường tính lại được (`_DERIVED`), xếp khoá theo `_ORDER`.
+    """
 
     _KEEP_EMPTY: ClassVar[set[str]] = set()
     _DERIVED: ClassVar[set[str]] = set()        # tính lại lúc nạp -> không ghi ra file
@@ -73,6 +71,7 @@ class _Base(BaseModel):
 
     @model_serializer(mode="wrap")
     def _compact(self, handler: Any) -> dict[str, Any]:
+        """Lọc và sắp xếp các khoá trước khi ghi JSON (theo luật của `_Base`)."""
         data = handler(self)
         data = {k: v for k, v in data.items()
                 if k not in self._DERIVED and (k in self._KEEP_EMPTY or v not in (None, [], {}))}
@@ -83,12 +82,10 @@ class _Base(BaseModel):
 # --------------------------------------------------------------------------- Block
 
 class Block(_Base):
-    """Lớp cha của mọi mẩu nội dung trên trang.
+    """Lớp cha của mọi khối trên trang: id, trang, nội dung, vị trí.
 
-    `page_no` LƯU trong block: lấy block ra khỏi trang (vd gom ảnh cần duyệt cả deck) vẫn biết
-    nó ở trang nào. Thứ tự đọc là thứ tự trong `page.blocks` (và số NN trong id `pNNN.bNN`).
-    Muốn biết chương: `doc.section_of(block.page_no)`.
-    Header/footer lặp của docling bị bỏ ở parser — không phải nội dung, chương lấy từ mục lục.
+    Để làm gì: chữ, bảng, ảnh đều có chung 4 trường này để các bước sau xử lý như nhau.
+    Cách làm: thứ tự đọc là thứ tự trong `page.blocks`; chương của khối thì hỏi `doc.section_of(block.page_no)`.
     """
 
     _KEEP_EMPTY: ClassVar[set[str]] = {"content"}
@@ -105,49 +102,45 @@ class Block(_Base):
     @field_validator("polygon")
     @classmethod
     def _check_polygon(cls, v: list[Point]) -> list[Point]:
-        """4 góc theo chiều kim đồng hồ từ trên-trái, làm tròn 3 chữ số (~1/1000 trang)."""
+        """Kiểm polygon đủ 4 góc, kẹp toạ độ vào [0, 1] và làm tròn 3 chữ số."""
         if len(v) != 4:
             raise ValueError(f"polygon phai co 4 goc, nhan {len(v)}")
         return [(round(min(max(x, 0.0), 1.0), 3), round(min(max(y, 0.0), 1.0), 3)) for x, y in v]
 
     @property
     def box(self) -> tuple[float, float, float, float]:
-        """-> (trái, trên, phải, dưới)."""
+        """Hộp bao của khối -> (trái, trên, phải, dưới)."""
         xs = [x for x, _ in self.polygon]
         ys = [y for _, y in self.polygon]
         return min(xs), min(ys), max(xs), max(ys)
 
     @property
     def center(self) -> Point:
+        """Tâm của khối -> (x, y)."""
         l, t, r, b = self.box
         return (l + r) / 2, (t + b) / 2
 
     @property
     def area(self) -> float:
-        """Chiếm bao nhiêu phần diện tích trang. Ngưỡng gọi VLM dựa vào đây."""
+        """Khối chiếm bao nhiêu phần diện tích trang (0 đến 1)."""
         l, t, r, b = self.box
         return max(0.0, r - l) * max(0.0, b - t)
 
 
 def polygon_from_box(l: float, t: float, r: float, b: float) -> list[Point]:
+    """Đổi hộp (trái, trên, phải, dưới) thành 4 góc theo chiều kim đồng hồ."""
     return [(l, t), (r, t), (r, b), (l, b)]
 
 
 class ParsedParagraph(Block):
-    """Mọi thứ là CHỮ: tiêu đề, đoạn văn, bó gạch đầu dòng, danh sách link.
+    """Khối chữ: tiêu đề, đoạn văn, danh sách gạch đầu dòng, danh sách link.
 
-    `kind` = mẩu này LÀ GÌ (vẫn là chữ). `role` = robot ĐỐI XỬ với nó thế nào:
-
+    Cách làm: `role` cho biết robot đối xử với nó thế nào —
         body      đoạn văn thường
-        title     tiêu đề trang
-        list      bó gạch đầu dòng, một block, các dòng ngăn bằng xuống dòng
-                  -> S4 diễn đạt lại, không đọc bullet nguyên văn (§5 S4)
-        links     >= nửa số dòng là URL in ra chữ -> KHÔNG đọc URL thành tiếng. Luật, tự gán.
+        title     tiêu đề
+        list      gạch đầu dòng (kịch bản diễn đạt lại, không đọc từng dòng)
+        links     >= nửa số dòng là URL -> robot KHÔNG đọc địa chỉ (tự gán, chỉ đổi từ body / list)
         caption   chú thích
-
-    Chỉ body/list mới đổi sang `links`. Nửa số dòng chứ không phải "có link là đổi": p18/p19
-    Onboarding là list quy định > 1000 chữ, link chỉ 1 dòng — đổi là robot bỏ qua nội dung.
-    Title có link vẫn là title (tên trang lấy từ title).
     """
 
     kind: Literal["paragraph"] = "paragraph"
@@ -157,7 +150,10 @@ class ParsedParagraph(Block):
 
     @model_validator(mode="after")
     def _links(self) -> ParsedParagraph:
-        """Suy `role="links"` + tách `urls` từ chữ. Chạy cả lúc nạp lại -> không lệch được."""
+        """Tự gán `role = "links"` khi >= nửa số dòng là URL, và tách các URL ra `urls`.
+
+        Cách làm: chạy mỗi lần tạo hoặc nạp lại khối, nên không bao giờ lệch với chữ.
+        """
         found = [ln for ln in self.lines if URL_LINE.fullmatch(ln)]
         if self.role in ("body", "list") and found and 2 * len(found) >= len(self.lines):
             self.role = "links"
@@ -166,10 +162,12 @@ class ParsedParagraph(Block):
 
     @property
     def lines(self) -> list[str]:
+        """Các dòng chữ của khối (bỏ dòng trống)."""
         return [ln.strip() for ln in self.content.split("\n") if ln.strip()]
 
 
 def table_markdown(cells: list[list[str]]) -> str | None:
+    """Đổi lưới ô của bảng thành markdown `| a | b |`; bảng rỗng thì None."""
     if not cells:
         return None
 
@@ -180,11 +178,10 @@ def table_markdown(cells: list[list[str]]) -> str | None:
 
 
 def fill_down(cells: list[list[str]]) -> list[list[str]]:
-    """Ô đầu hàng trống mà hàng vẫn có chữ -> chép từ hàng trên xuống.
+    """Chép tên ô gộp dọc xuống các hàng trống bên dưới.
 
-    Ô gộp dọc (Onboarding p22 "Các trường hợp lỗi công" phủ 4 hàng) chỉ ghi ở hàng đầu, 3 hàng
-    dưới trống — cắt chunk theo hàng là mảnh sau không biết mình thuộc nhóm nào. Chỉ cột đầu, chỉ
-    hàng thân (hàng 0 là header). Đo 2 deck: 5 hàng ở p21–23, đều đúng là ô gộp.
+    Để làm gì: cắt chunk theo hàng thì hàng nào cũng biết nó thuộc nhóm nào.
+    Cách làm: chỉ xét cột đầu, bỏ qua hàng tiêu đề; ô đầu trống mà hàng còn chữ -> lấy ô hàng trên.
     """
     out = [list(r) for r in cells]
     for i in range(2, len(out)):
@@ -194,12 +191,9 @@ def fill_down(cells: list[list[str]]) -> list[list[str]]:
 
 
 class ParsedTable(Block):
-    """Bảng. `cells` là bản gốc, hàng đầu là header; `content` là markdown SINH từ `cells`.
+    """Khối bảng: `cells` là lưới ô (hàng đầu là tiêu đề), `content` là markdown sinh từ `cells`.
 
-    Cả chữ trong ô lẫn lưới hàng/cột đều do VLM đọc — lưới CÓ THỂ SAI (số đặt nhầm hàng).
-
-    `content` tính lại mỗi lần NẠP và KHÔNG ghi ra file (trùng với `cells`). Sửa `cells` trong bộ
-    nhớ thì phải dựng lại object. Nạp vào là chép tên ô gộp dọc xuống hàng trống (`fill_down`).
+    Cách làm: `content` tính lại mỗi lần nạp và không ghi ra file; sửa `cells` thì phải dựng lại object.
     """
 
     _DERIVED: ClassVar[set[str]] = {"content"}
@@ -210,21 +204,21 @@ class ParsedTable(Block):
 
     @model_validator(mode="after")
     def _markdown(self) -> ParsedTable:
+        """Chép ô gộp xuống (`fill_down`) rồi sinh `content` dạng markdown từ `cells`."""
         self.cells = fill_down(self.cells)
         self.content = table_markdown(self.cells)
         return self
 
 
 class ParsedImage(Block):
-    """Ảnh. `content` = mô tả của VLM.
+    """Khối ảnh: `content` = mô tả ảnh do VLM viết.
 
-    `content: null` thì `why_empty` nói VÌ SAO — *chưa gọi* hay *gọi mà không có* xử lý
-    khác hẳn nhau:
-
-        decorative             logo, hoạ tiết — VLM xem rồi, không có nội dung. Hợp lệ.
-        area_below_threshold   ảnh nhỏ quá, không gọi VLM. Hợp lệ.
-        not_described          ảnh ĐỦ TO mà không có mô tả -> mất nội dung thật, CẦN XEM.
-        api_error              gọi VLM mà lỗi -> chạy lại là có thể được, CẦN XEM.
+    Cách làm: ảnh không có mô tả thì `why_empty` nói vì sao —
+        decorative             ảnh trang trí, không cần mô tả
+        area_below_threshold   ảnh quá nhỏ, không gọi VLM
+        not_described          ảnh đủ to mà không có mô tả -> cần người xem
+        api_error              gọi VLM bị lỗi -> chạy lại
+    `picture_type` + `reason` là kết quả VLM phân loại ảnh ở bước ②.
     """
 
     kind: Literal["image"] = "image"
@@ -236,6 +230,7 @@ class ParsedImage(Block):
 
     @property
     def needs_review(self) -> bool:
+        """Ảnh có cần người xem không (not_described hoặc api_error)."""
         return self.why_empty in ("not_described", "api_error")
 
 
@@ -249,6 +244,7 @@ AnyBlock = Annotated[
 
 
 class ParsedPage(_Base):
+    """Một trang: số trang, tiêu đề, chương, hash nội dung và danh sách khối theo thứ tự đọc."""
     _ORDER: ClassVar[tuple[str, ...]] = (
         "page_no", "title", "section_id", "page_hash", "blocks",
     )
@@ -261,24 +257,27 @@ class ParsedPage(_Base):
 
     @property
     def images(self) -> list[ParsedImage]:
+        """Các khối ảnh của trang."""
         return [b for b in self.blocks if isinstance(b, ParsedImage)]
 
     @property
     def tables(self) -> list[ParsedTable]:
+        """Các khối bảng của trang."""
         return [b for b in self.blocks if isinstance(b, ParsedTable)]
 
     @property
     def paragraphs(self) -> list[ParsedParagraph]:
+        """Các khối chữ của trang."""
         return [b for b in self.blocks if isinstance(b, ParsedParagraph)]
 
     @property
     def slide_type(self) -> Literal["section_divider", "exercise", "content"]:
-        """Luật trên chính trang này — tính lại mỗi lần nạp, KHÔNG ghi ra JSON (deck mới gần như
-        toàn `content`, ghi ra chỉ là nhiễu). Kịch bản, KB, cờ vẫn đọc qua property này.
+        """Loại trang, tính bằng luật (không gọi model, không ghi ra file).
 
-        section_divider  đúng 1 mẩu chữ, là tiêu đề, nằm GIỮA trang -> S4 chỉ nói câu chuyển
-        exercise         tiêu đề mở đầu bằng "Bài tập" -> robot ĐỌC yêu cầu, không giảng
-        content          còn lại
+        Cách làm:
+            section_divider  đúng 1 khối chữ, là tiêu đề, nằm giữa trang, không có ảnh / bảng có nội dung
+            exercise         tiêu đề bắt đầu bằng "Bài tập"
+            content          còn lại
         """
         paras = self.paragraphs
         # Trang có ảnh được mô tả / bảng có chữ thì KHÔNG phải trang phân mục, dù chỉ 1 tiêu đề:
@@ -294,23 +293,34 @@ class ParsedPage(_Base):
         return "content"
 
     @property
+    def label(self) -> str:
+        """Tên ngắn của trang: tiêu đề; không có thì dòng chữ đầu tiên (cắt 48 ký tự)."""
+        if self.title:
+            return self.title
+        first = next((b.content for b in self.paragraphs if b.content), "") or \
+            next((b.content for b in self.blocks if b.content), "")
+        first = first.split("\n")[0].strip()
+        return first[:LABEL_CHARS] + ("…" if len(first) > LABEL_CHARS else "") or "(không có chữ)"
+
+    @property
     def is_text_starved(self) -> bool:
-        """<=1 mẩu chữ -> trang sống chết nhờ mô tả ảnh."""
+        """Trang có <= 1 khối chữ không (trang sống nhờ mô tả ảnh)."""
         return len(self.paragraphs) <= 1
 
     def compute_hash(self) -> str:
-        """Hash nội dung + vị trí. Đổi chữ HOẶC đổi bố cục đều ra hash mới."""
+        """Hash nội dung + vị trí mọi khối của trang.
+
+        Để làm gì: hash đổi thì các bước sau biết trang đã đổi (vd kịch bản phải viết lại trang đó).
+        """
         h = hashlib.sha256()
         for b in self.blocks:
             h.update(f"{b.kind}|{b.polygon}|{b.content or ''}".encode("utf-8"))
         return h.hexdigest()[:16]
 
     def cache_hash(self) -> str:
-        """Khoá cache của ②b / ② — như `compute_hash` nhưng DỒN khoảng trắng trong chữ đoạn.
+        """Giống `compute_hash` nhưng dồn khoảng trắng trong chữ trước khi hash.
 
-        Hai bước đó nhìn ẢNH trang, xuống dòng trong chữ không đổi kết quả. Parser từng dồn mọi
-        `\\n` thành dấu cách; giữ lại xuống dòng mà dùng `compute_hash` thì mất sạch cache, gọi lại
-        VLM cả deck. Chữ đã dồn sẵn -> trùng đúng `compute_hash` cũ.
+        Để làm gì: làm khoá cache cho bước ②b / ② — xuống dòng trong chữ đổi thì không phải gọi lại VLM.
         """
         h = hashlib.sha256()
         for b in self.blocks:
@@ -325,7 +335,7 @@ class ParsedPage(_Base):
 
 
 class SectionSpan(_Base):
-    """Một chương. SUY RA chứ không parse ra — nên phải khai `source` + `confidence`."""
+    """Một chương: id, tên, trang đầu – trang cuối, nguồn (dò từ mục lục) và độ tin cậy."""
 
     id: str
     title: str
@@ -335,18 +345,21 @@ class SectionSpan(_Base):
 
     @property
     def start_page(self) -> int:
+        """Trang đầu của chương."""
         return self.pages[0]
 
     @property
     def end_page(self) -> int:
+        """Trang cuối của chương."""
         return self.pages[1]
 
     def contains(self, page_no: int) -> bool:
+        """Trang `page_no` có thuộc chương này không."""
         return self.start_page <= page_no <= self.end_page
 
 
 class Flag(_Base):
-    """Chỗ cần người xem. §10 cấm bắt duyệt cả deck — chỉ duyệt phần bị flag."""
+    """Một chỗ cần người xem: loại cờ, mức độ, trang, khối và mô tả ngắn."""
 
     kind: Literal[
         "empty_page",
@@ -361,15 +374,13 @@ class Flag(_Base):
 
 
 class SourceInfo(_Base):
+    """File gốc: đường dẫn + hash."""
     path: str
     sha256: str = ""
 
 
 class ParserInfo(_Base):
-    """Parse bằng gì — để biết dữ liệu trong file đến từ đâu.
-
-    `vlm_model` là model đọc trang (parser/variants/docling.py) — mọi khối `vlm` đến từ nó.
-    """
+    """Parse bằng gì: phiên bản docling, model VLM, ngưỡng diện tích ảnh."""
 
     docling_version: str = ""
     vlm_model: str | None = None
@@ -377,6 +388,10 @@ class ParserInfo(_Base):
 
 
 class ParsedDocument(_Base):
+    """Cả deck: doc_id, file gốc, thông tin parser, chương, cờ và các trang.
+
+    Cách làm: `document.json` chỉ chứa các trang; chương và cờ do `parser.enrich` tính lúc nạp.
+    """
     _ORDER: ClassVar[tuple[str, ...]] = ("doc_id", "source", "parser", "sections", "flags", "pages")
 
     doc_id: str
@@ -390,27 +405,35 @@ class ParsedDocument(_Base):
 
     @property
     def n_pages(self) -> int:
+        """Số trang."""
         return len(self.pages)
 
     @property
     def n_images(self) -> int:
+        """Tổng số khối ảnh."""
         return sum(len(p.images) for p in self.pages)
 
     @property
     def n_described_images(self) -> int:
+        """Số khối ảnh có mô tả."""
         return sum(1 for p in self.pages for im in p.images if im.content)
 
     def page(self, page_no: int) -> ParsedPage | None:
+        """Lấy trang theo số trang; không có thì None."""
         return next((p for p in self.pages if p.page_no == page_no), None)
 
     def section_of(self, page_no: int) -> SectionSpan | None:
+        """Chương chứa trang `page_no`; không thuộc chương nào thì None."""
         return next((s for s in self.sections if s.contains(page_no)), None)
 
     # -------- đọc / ghi
 
     @classmethod
     def load(cls, path: str | Path) -> ParsedDocument:
-        """Nạp file đã parse. File định dạng cũ -> báo MỘT câu, không đổ 100 lỗi validate."""
+        """Nạp `document.json` thành ParsedDocument.
+
+        Cách làm: file định dạng cũ, nạp không được -> báo một câu và bảo parse lại.
+        """
         try:
             return cls.model_validate_json(Path(path).read_text(encoding="utf-8"))
         except ValidationError as e:
@@ -420,12 +443,12 @@ class ParsedDocument(_Base):
             ) from None
 
     def to_json(self) -> str:
-        """indent=2, nhưng mảng ngắn (polygon, hàng bảng, footer) gập về một dòng."""
+        """Ghi ra chuỗi JSON thụt lề 2, mảng ngắn gập về một dòng cho dễ đọc."""
         return _fmt(self.model_dump(mode="json")) + "\n"
 
 
 def _fmt(v: Any, ind: int = 0) -> str:
-    """Mảng không chứa object và dài <= 100 ký tự -> một dòng; còn lại xuống dòng như indent=2."""
+    """Định dạng JSON đẹp: mảng ngắn (<= 100 ký tự, không chứa object) viết một dòng, còn lại xuống dòng."""
     pad = "  " * ind
     if isinstance(v, dict) and v:
         items = [f"{pad}  {json.dumps(k, ensure_ascii=False)}: {_fmt(x, ind + 1)}"

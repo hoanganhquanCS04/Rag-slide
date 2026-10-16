@@ -120,7 +120,7 @@ Những thứ **không truy vấn được bằng ngôn ngữ**, chỉ tra theo 
 |---|---|---|
 | "cái này khác gì fine-tuning?" | `dependencies[16].requires = [4,7]` | nạp thêm `SlideRepr[4]`, `SlideRepr[7]` làm nền |
 | "còn bao lâu nữa?" | `time_budget` + `elapsed_sec` | *"Ta đang ở phần 3/6, còn khoảng 18 phút"* |
-| "đang ở phần nào rồi?" | `deck_map` + `section_id` | *"Phần Kiến trúc, trang 7 trên 20"* |
+| "đang ở phần nào rồi?" | `doc.sections` + `section_id` (S0, trong bộ nhớ) | *"Phần Kiến trúc, trang 7 trên 20"* |
 
 **Tốn 0ms** — tra khoá, không phải truy vấn ngữ nghĩa. `dependencies` chỉ mục theo
 `slide_id` nên nó nằm inline trong bundle, không cần index.

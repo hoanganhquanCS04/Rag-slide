@@ -1,20 +1,13 @@
-"""② Xét ảnh: layout ① (ParsedDocument) + PDF -> pictures.json; `apply_pictures` gắn vào doc.
+"""Bước ② — xét từng ảnh bằng VLM: ảnh loại gì, có nội dung gì -> `pictures.json`.
 
-MỖI TRANG CÓ ẢNH một request (Prompt B, `src/prompts/s0_vlm_picture_prompt.md`): ảnh CẢ trang có KHUNG ĐỎ
-đánh số [1], [2]… quanh từng ảnh + danh sách `[k] [x1, y1, x2, y2]` (thang 0–1000, cùng thang Prompt A).
-VLM trả mỗi ảnh một mục {id, picture_type, reason, text}:
-
-    TRANG_TRI   -> BỎ khỏi document.json (apply_pictures), chỉ còn trong pictures.json
-    SO_DO       -> content = 2–4 câu mô tả
-    ANH_CO_CHU  -> content = chữ chép trong ảnh
-    MINH_HOA    -> content = 1 câu: màn hình / ảnh minh hoạ bước nào
-
-Thấy CẢ trang (không cắt rời từng ảnh) để xét được logo, icon cạnh chữ, ô số thứ tự — ảnh cắt rời
-từng tả ảnh Tết thành Trung Thu (CLAUDE.md §5 S0).
-
-Cache THEO TRANG trong pictures.json: khoá = sha(page.cache_hash() của layout + sha prompt + model). Không đổi
--> không gọi lại (trừ `redo`). Trang gọi lỗi ghi `error`, lần chạy sau tự gọi lại. Prompt + phản hồi
-ở `logs/vlm_pictures/<doc_id>/` (src/utils/llm.py, ảnh không ghi vào log).
+Để làm gì: bỏ ảnh trang trí, ghi nội dung cho ảnh có ích.
+Cách làm: mỗi trang có ảnh là một request — ảnh cả trang có KHUNG ĐỎ đánh số quanh từng ảnh,
+VLM trả mỗi ảnh một loại:
+    TRANG_TRI   bỏ khỏi document.json
+    SO_DO       2–4 câu mô tả
+    ANH_CO_CHU  chép chữ trong ảnh
+    MINH_HOA    1 câu: ảnh minh hoạ cho bước nào
+Cache theo trang; trang lỗi thì lần chạy sau tự gọi lại.
 """
 
 from __future__ import annotations
@@ -49,11 +42,12 @@ _BAD_ESCAPE = re.compile(r'\\(?!["\\/bfnrtu])')
 
 
 def _box1000(im: ParsedImage) -> list[int]:
+    """Hộp của ảnh theo thang 0–1000 (cùng thang với prompt)."""
     return [round(v * 1000) for v in im.box]
 
 
 def _page_image(pdf: Any, page_no: int, images: list[ParsedImage]) -> str:
-    """Ảnh cả trang, mỗi ảnh cần xét khoanh KHUNG ĐỎ + nhãn [k] -> data URL PNG."""
+    """Vẽ cả trang, khoanh khung đỏ + nhãn [k] quanh từng ảnh cần xét -> ảnh PNG dạng data URL."""
     from PIL import ImageDraw, ImageFont
 
     img = pdf[page_no - 1].render(scale=RENDER_SCALE).to_pil().convert("RGB")
@@ -75,8 +69,11 @@ def _page_image(pdf: Any, page_no: int, images: list[ParsedImage]) -> str:
 
 
 def _parse(content: str, n: int) -> dict[int, dict[str, Any]]:
-    """Phản hồi -> {id: mục}. Mảng / object bọc mảng / một object lẻ (trang 1 ảnh); vá escape nếu
-    hỏng; bị cụt (hết max_tokens) thì `load_json_array` cứu phần đầu."""
+    """Đọc phản hồi của VLM -> {số thứ tự ảnh: {loại, lý do, chữ}}.
+
+    Cách làm: chấp nhận mảng, object bọc mảng, hoặc một object lẻ; sửa escape lỗi; bỏ mục có số
+    thứ tự hoặc loại không hợp lệ.
+    """
     body = FENCE.sub("", content).strip()
     data: Any = None
     for text in (body, _BAD_ESCAPE.sub(r"\\\\", body)):
@@ -108,11 +105,13 @@ def _parse(content: str, n: int) -> dict[int, dict[str, Any]]:
 
 
 def _key(page_hash: str, prompt_sha: str, model: str) -> str:
+    """Khoá cache của một trang: hash(nội dung trang + prompt + model)."""
     return hashlib.sha256(f"{page_hash}|{prompt_sha}|{model}".encode()).hexdigest()[:16]
 
 
 async def _ask(llm: LLM, sem: asyncio.Semaphore, prompt: str, page_no: int,
                images: list[ParsedImage], data_url: str) -> dict[str, Any]:
+    """Gửi ảnh một trang cho VLM -> {"items": [kết quả từng ảnh]}, lỗi thì {"error"}."""
     listing = "\n".join(f"[{k}] {_box1000(im)}" for k, im in enumerate(images, 1))
     text = prompt.replace("{{pictures}}", listing)
     messages = [{"role": "user", "content": [
@@ -132,6 +131,11 @@ async def _ask(llm: LLM, sem: asyncio.Semaphore, prompt: str, page_no: int,
 
 
 async def _run(layout: ParsedDocument, pdf_path: Path, out_json: Path, model: str, redo: bool) -> dict:
+    """Xét ảnh mọi trang có ảnh rồi ghi `pictures.json`.
+
+    Cách làm: trang có trong cache và khoá không đổi thì dùng lại; còn lại vẽ ảnh trước (pypdfium2
+    không chạy song song được), rồi gọi VLM song song.
+    """
     import pypdfium2 as pdfium
 
     prompt = PICTURE_PROMPT.read_text(encoding="utf-8")
@@ -191,17 +195,15 @@ async def _run(layout: ParsedDocument, pdf_path: Path, out_json: Path, model: st
 
 def run_pictures(layout: ParsedDocument, pdf_path: Path, out_json: Path, model: str, *,
                  redo: bool = False) -> dict:
-    """Bước ②: xét mọi ảnh trong `layout` -> `out_json` (pictures.json)."""
+    """Bước ②: xét mọi ảnh của doc -> nội dung `pictures.json` (gọi `_run`)."""
     return asyncio.run(_run(layout, pdf_path, out_json, model, redo))
 
 
 def apply_pictures(doc: ParsedDocument, pictures_json: Path) -> Counter[str]:
-    """Gắn kết quả bước ② vào ảnh của `doc` theo `block_id` (id layout ① = id document.json).
+    """Gắn kết quả bước ② vào các khối ảnh của doc, theo id ảnh.
 
-    TRANG_TRI -> BỎ khỏi `page.blocks` (không ghi vào document.json; phân loại + lý do vẫn ở pictures.json
-    cho người duyệt). Id khối còn lại KHÔNG đánh lại — chunk / kịch bản vẫn trỏ đúng. SO_DO / ANH_CO_CHU / MINH_HOA có
-    chữ -> content; loại mang thông tin mà text rỗng -> not_described (cờ cho người duyệt). Ảnh không có
-    kết quả giữ nguyên.
+    Cách làm: TRANG_TRI thì bỏ khối; loại khác có chữ thì ghi vào `content`; có loại mà không có chữ
+    thì đánh dấu `not_described`; không đánh lại id; tính lại page_hash.
     """
     data = json.loads(pictures_json.read_text(encoding="utf-8"))
     by_id = {it["block_id"]: it for p in data.get("pages", {}).values() for it in p.get("items", [])}

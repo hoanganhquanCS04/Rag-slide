@@ -1,12 +1,6 @@
-"""Gọi LLM qua API chat/completions — dùng chung cho S4 (offline) và runtime.
+"""Gọi LLM qua API chat/completions, dùng chung cho kịch bản (S4), runtime và các bước VLM.
 
-JSON mode, retry luỹ thừa, log full prompt + response vào `logs/` (CLAUDE.md §9).
-Offline và runtime khác nhau ở ĐỘ KIÊN NHẪN, không ở cách gọi:
-
-    S4 (offline)   retry=4, backoff=5s     — không vội, lỗi thì đợi 5+10+20s rồi thử lại
-                                             (đo được: 503 "temporarily unavailable" cả loạt,
-                                              đợi 1+2+4s là hết lượt trước khi cổng hồi)
-    runtime        retry=1, timeout ngắn   — khán giả đang chờ, lỗi thì escalate ngay
+Để làm gì: một chỗ lo việc gửi request, thử lại khi lỗi, và ghi log prompt + phản hồi vào `logs/`.
 """
 
 from __future__ import annotations
@@ -27,7 +21,7 @@ DEFAULT_MODEL = os.environ.get("LLM_MODEL", "gpt-5-mini")     # sửa trong .env
 
 
 def _loggable(messages: list[dict]) -> list[dict]:
-    """Bản để GHI LOG: ảnh base64 (vài MB mỗi trang) thay bằng một dòng mô tả — log giữ prompt + response."""
+    """Bản sao của tin nhắn để ghi log: thay ảnh base64 (rất dài) bằng một dòng mô tả."""
     out = []
     for m in messages:
         c = m.get("content")
@@ -39,7 +33,7 @@ def _loggable(messages: list[dict]) -> list[dict]:
 
 
 def _unfence(s: str) -> str:
-    """Gemini qua cổng OpenAI vẫn bọc JSON trong ```json ... ``` dù đã bật JSON mode."""
+    """Bỏ khung ```json ... ``` mà một số model bọc quanh JSON."""
     s = s.strip()
     if s.startswith("```"):
         s = s.split("\n", 1)[1] if "\n" in s else ""
@@ -48,9 +42,19 @@ def _unfence(s: str) -> str:
 
 
 class LLM:
+    """Client gọi LLM: một object dùng cho nhiều lần gọi.
+
+    Cách làm: chọn server (LLM_BASE_URL nếu có, không thì OPENAI_BASE_URL) và khoá API lúc tạo;
+    `chat()` gửi request, `close()` đóng kết nối.
+    """
     def __init__(self, model: str, log_dir: Path, *, retry: int = 4, timeout: float = 180.0,
                  backoff: float = 1.0, extra: dict[str, Any] | None = None,
                  base_url: str | None = None, api_key: str | None = None):
+        """Chọn server + khoá API, tạo kết nối HTTP, tạo thư mục log.
+
+        Cách làm: có server riêng thì KHÔNG gửi OPENAI_API_KEY sang đó; `retry`, `backoff` quyết định
+        thử lại mấy lần và đợi bao lâu.
+        """
         import httpx
 
         if base_url is None:              # LLM chữ (S4, runtime) đi cổng riêng nếu .env khai
@@ -78,8 +82,11 @@ class LLM:
         self.json_mode = True                      # cổng không có kênh JSON mode -> tắt, nhớ cho cả phiên
 
     async def chat(self, messages: list[dict], tag: str, *, raw: bool = False) -> Any:
-        """-> JSON đã đọc. `raw=True`: trả NGUYÊN VĂN phản hồi (vẫn log) — người gọi tự đọc, vd VLM
-        trả MẢNG JSON mà JSON mode ép thành object (parser/pictures.py)."""
+        """Gửi tin nhắn cho LLM -> JSON đã đọc (hoặc chữ nguyên văn nếu `raw=True`).
+
+        Cách làm: gửi request; 200 thì ghi log rồi trả kết quả; server không hỗ trợ JSON mode thì tắt
+        JSON mode và gửi lại ngay; lỗi khác thì đợi (5s, 10s, 20s...) rồi thử lại; hết lượt thì báo lỗi.
+        """
         payload = {"model": self.model, "messages": messages, **self.extra}
         if self.json_mode:
             payload["response_format"] = {"type": "json_object"}
@@ -136,4 +143,5 @@ class LLM:
         raise RuntimeError(last)
 
     async def close(self) -> None:
+        """Đóng kết nối HTTP."""
         await self.client.aclose()

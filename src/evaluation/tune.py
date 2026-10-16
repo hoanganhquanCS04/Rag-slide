@@ -1,28 +1,12 @@
-"""Quét tham số gộp RRF (K, trọng số dense / sparse) trên MỘT bộ chunk -> bảng top-1/3/5.
+"""Thử nhiều cấu hình gộp RRF (K, trọng số dense / sparse) trên một bộ chunk -> bảng so sánh.
 
-Đổi cách chunk thì chỉ đổi file đầu vào, chạy lại, so hai báo cáo — không chạy lẻ từng script.
+    bash scripts/tune.sh src/output/chunker/<ten>/chunks.json
+    python src/evaluation/tune.py src/output/chunker/<ten>/chunks.json --k 5,10,20 --wd 1,2 --ws 1
 
-    bash scripts/tune.sh src/output/chunker/<ten>/chunks.json        # -> src/output/retrieval/<ten>/chunks_tune.md + .json
-    python src/retrieval/tune.py src/output/chunker/<ten>/chunks.json --queries data/eval/<ten>.queries.json
-    python src/retrieval/tune.py src/output/chunker/<ten>/chunks.json --k 5,10,20 --wd 1,2 --ws 1
-
-Ra HAI file đặt theo tên file vào: `src/output/retrieval/<doc_id>/<tên chunks>_tune.md` (người đọc) +
-`.json` cùng tên (máy đọc, để so giữa các bộ chunk). Một file vào = một bộ báo cáo: chạy lại thì
-ghi đè báo cáo của chính file đó; bộ chunk khác tên thì báo cáo khác tên.
-
-Cách làm: pool 50 của mỗi nhánh lấy MỘT lần mỗi câu (`Searcher.ranks`, đúng thứ search chạy),
-rồi gộp offline bằng `rrf_fuse` cho mọi tổ hợp — cả lưới chỉ vài giây, không gọi API thêm.
-Gộp theo trang = điểm chunk cao nhất, giống `_group_by_page`.
-
-Kho vector theo `VECTOR_DB` trong .env. Chroma từng trả pool lệch thỉnh thoảng (đo 2026-10-01:
-~3/14 lượt, nặng nhất ngay sau khi dựng lại S5) -> báo cáo tự so pool dense của kho với cosine
-tính tay từ .npy; lệch là bảng lượt đó không tin được, chạy lại.
-
-Bộ chunk thử cùng `doc_id` với bộ thật thì `store.sync` THAY dữ liệu của doc đó trong kho dùng
-chung; lần sau chạy với bộ thật nó tự nạp lại (sync so metadata). Đừng tune lúc runtime đang chạy.
-
-Chỉ TỈ LỆ dense:sparse có nghĩa (nhân cả hai cùng một số thì thứ hạng không đổi) nên mặc định
-giữ sparse = 1, quét dense. Đây là công cụ ĐO — không đổi mặc định của search.py.
+Ra: `src/output/evaluation/<doc_id>/<tên chunks>_tune.md` (người đọc) + `.json` (máy đọc)
++ `<tên chunks>_misses.json` (các câu trượt).
+Cách làm: mỗi câu hỏi lấy kết quả từng nhánh MỘT lần, rồi gộp lại cho mọi cấu hình mà không gọi
+API thêm. Đây là công cụ ĐO — không tự đổi mặc định của runtime/retrieve.py.
 """
 
 from __future__ import annotations
@@ -38,16 +22,16 @@ from typing import Any
 
 import numpy as np
 
-if __package__ in (None, ""):  # chạy thẳng file: THAY src/retrieval/ bằng src/
+if __package__ in (None, ""):  # chạy thẳng file: THAY src/evaluation/ bằng src/
     sys.path[0] = str(Path(__file__).resolve().parents[1])
 
-from retrieval.build_index import embed_chunkset
-from utils.config import MODEL_ID, RETRIEVAL_OUTPUT
+from embedders.base import embed_chunkset
+from utils.config import EVALUATION_OUTPUT, MODEL_ID, console_setup
 from embedders.factory import create_embedder
 from utils.vectors import load_vectors, vectors_file
-from retrieval.eval import default_queries
+from evaluation.eval import default_queries, first_hit
 from models.kb_chunk import ChunkSet
-from retrieval.search import POOL, RRF_K, TOP_K, W_DENSE, W_SPARSE, Searcher, rrf_fuse
+from runtime.retrieve import POOL, RRF_K, TOP_K, W_DENSE, W_SPARSE, Retriever, rrf_fuse
 
 log = logging.getLogger(__name__)
 
@@ -55,20 +39,21 @@ DEFAULT_K = "1,5,10,20,40,60"
 DEFAULT_WD = "0.5,1,1.5,2,3"
 DEFAULT_WS = "1"
 
-Pool = tuple[dict[int, int], dict[int, int], set[int]]     # hạng dense, hạng sparse, trang đúng
+Pool = tuple[dict[str, int], dict[str, int], set[int]]     # hạng dense, hạng sparse (theo mã đoạn), trang đúng
 
 
 def _floats(s: str) -> list[float]:
+    """Đọc chuỗi "1,2,3" thành danh sách số."""
     return [float(x) for x in s.split(",") if x.strip()]
 
 
 def _num(x: float) -> str:
+    """In số gọn: 1.0 -> "1"."""
     return f"{x:g}"
 
 
 def ensure_vectors(cs: ChunkSet, model_id: str) -> None:
-    """Bộ chunk mới chưa nhúng (hoặc nhúng lệch) -> nhúng luôn. Cache theo nội dung: chữ không
-    đổi thì không gọi API — đổi file chunk là chạy được ngay, không phải nhớ chạy src/retrieval/build_index.py."""
+    """Bộ chunk chưa nhúng (hoặc vector lệch chữ) thì nhúng luôn (có cache nên chữ cũ không tốn API)."""
     try:
         load_vectors(cs, vectors_file(cs.doc_id, model_id), model_id)
     except SystemExit as e:
@@ -76,42 +61,51 @@ def ensure_vectors(cs: ChunkSet, model_id: str) -> None:
         embed_chunkset(cs, create_embedder(model_id=model_id))
 
 
-def page_order(fused: dict[int, float], page_of: list[int]) -> list[int]:
-    """Điểm chunk -> danh sách trang, mỗi trang lấy chunk mạnh nhất (như `_group_by_page`)."""
+def branch_ranks(rt: Retriever, query: str) -> tuple[dict[str, int], dict[str, int]]:
+    """Chạy riêng từng cách tìm cho một câu hỏi -> (hạng ở cách tìm vector, hạng ở cách tìm BM25), CHƯA gộp.
+
+    Mỗi câu chỉ chạy một lần (gọi API nhúng một lần), rồi thử mọi cấu hình gộp trên kết quả này.
+    Hỏi thẳng hai kho của Retriever, cùng số kết quả (POOL) và cùng bộ lọc như lúc chạy thật.
+    """
+    where = rt.where(True)
+    qv = rt.embedder.embed([query])[0]
+    dense = {cid: r for r, (cid, _) in enumerate(rt.store.retrieve_context(qv, POOL, where), 1)}
+    sparse = {cid: r for r, (cid, _) in enumerate(rt.sparse.retrieve_context(query, POOL, where), 1)}
+    return dense, sparse
+
+
+def page_order(fused: dict[str, float], page_of: dict[str, int]) -> list[int]:
+    """Điểm từng chunk -> danh sách trang theo thứ tự, mỗi trang lấy chunk mạnh nhất."""
     return list(dict.fromkeys(page_of[i] for i, _ in sorted(fused.items(), key=lambda kv: -kv[1])))
 
 
-def first_hit(pages: list[int], want: set[int]) -> int | None:
-    return next((r for r, p in enumerate(pages, 1) if p in want), None)
-
-
-def chroma_check(se: Searcher, queries: list[dict[str, Any]]) -> int:
-    """Số câu mà pool dense của kho KHÁC cosine tính tay từ .npy (cùng bộ lọc). inmem luôn 0."""
-    mat = np.load(se.vectors_path)
+def chroma_check(rt: Retriever, queries: list[dict[str, Any]]) -> int:
+    """Đếm số câu mà kết quả nhánh vector của kho KHÁC kết quả tính tay từ .npy (để phát hiện kho trả sai)."""
+    mat = np.load(rt.vectors_path)
     mat = mat / np.linalg.norm(mat, axis=1, keepdims=True)
-    ok = np.array([c.is_searchable for c in se.chunks])
-    ids = [c.chunk_id for c in se.chunks]
-    where = se.where(True)
+    ok = np.array([c.is_searchable for c in rt.chunks])
+    ids = [c.chunk_id for c in rt.chunks]
+    where = rt.where(True)
     bad = 0
     for spec in queries:
-        qv = np.asarray(se.embedder.embed([spec["q"]])[0], dtype=np.float64)
+        qv = np.asarray(rt.embedder.embed([spec["q"]])[0], dtype=np.float64)
         sims = mat @ (qv / np.linalg.norm(qv))
         exact = [ids[j] for j in np.argsort(-sims, kind="stable") if ok[j]][:POOL]
-        bad += exact != [cid for cid, _ in se.store.query(qv, POOL, where)]
+        bad += exact != [cid for cid, _ in rt.store.retrieve_context(qv, POOL, where)]
     return bad
 
 
-def page_chunks(fused: dict[int, float], page_of: list[int]) -> list[int]:
-    """Điểm chunk -> chunk mạnh nhất của mỗi trang, theo thứ tự trang (để đếm token ngữ cảnh)."""
-    best: dict[int, int] = {}
+def page_chunks(fused: dict[str, float], page_of: dict[str, int]) -> list[str]:
+    """Điểm từng chunk -> chunk mạnh nhất của mỗi trang, theo thứ tự trang (để đếm token ngữ cảnh)."""
+    best: dict[int, str] = {}
     for i, _ in sorted(fused.items(), key=lambda kv: -kv[1]):
         best.setdefault(page_of[i], i)
     return list(best.values())
 
 
-def score(pools: list[Pool], page_of: list[int], tokens: list[int],
+def score(pools: list[Pool], page_of: dict[str, int], tokens: dict[str, int],
           k: int, wd: float, ws: float) -> dict[str, Any]:
-    """Một cấu hình -> top-1/3/5, MRR, token 5 trang đầu, hạng từng câu."""
+    """Chấm một cấu hình -> top-1/3/5, MRR, số token ngữ cảnh trung bình, hạng từng câu."""
     ranks: list[int | None] = []
     ctx: list[int] = []
     for rd, rs, want in pools:
@@ -127,10 +121,15 @@ def score(pools: list[Pool], page_of: list[int], tokens: list[int],
     }
 
 
-def build_configs(pools: list[Pool], page_of: list[int], tokens: list[int], ks: list[float],
+def build_configs(pools: list[Pool], page_of: dict[str, int], tokens: dict[str, int], ks: list[float],
                   wds: list[float], wss: list[float]) -> list[dict[str, Any]]:
+    """Chấm mọi cấu hình trong lưới (kèm cấu hình đang dùng, chỉ dense, chỉ sparse) rồi sắp xếp.
+
+    Cách làm: so với cấu hình đang dùng để biết mỗi cấu hình cứu được / làm hỏng câu nào; sắp theo
+    top-5, rồi top-1, top-3, MRR.
+    """
     grid = {(int(k), wd, ws) for k in ks for wd in wds for ws in wss}
-    grid.add((RRF_K, W_DENSE, W_SPARSE))                          # cấu hình search.py đang dùng
+    grid.add((RRF_K, W_DENSE, W_SPARSE))                          # cấu hình retrieve.py đang dùng
     out = [score(pools, page_of, tokens, k, wd, ws) | {"label": f"K={k} dense={_num(wd)} sparse={_num(ws)}"}
            for k, wd, ws in sorted(grid)]
     out += [score(pools, page_of, tokens, RRF_K, 1, 0) | {"label": "chỉ dense", "k": None},
@@ -147,7 +146,7 @@ def build_configs(pools: list[Pool], page_of: list[int], tokens: list[int], ks: 
 
 
 def by_type(cfg: dict[str, Any], queries: list[dict[str, Any]]) -> dict[str, list[int]]:
-    """type -> [số câu, top-1, top-5]."""
+    """Đếm theo loại câu hỏi -> {loại: [số câu, đúng top-1, đúng top-5]}."""
     out: dict[str, list[int]] = defaultdict(lambda: [0, 0, 0])
     for spec, r in zip(queries, cfg["ranks"]):
         row = out[spec.get("type") or "?"]
@@ -160,6 +159,7 @@ def by_type(cfg: dict[str, Any], queries: list[dict[str, Any]]) -> dict[str, lis
 def write_md(path: Path, meta: dict[str, Any], configs: list[dict[str, Any]],
              best: dict[str, Any], base: dict[str, Any], misses: list[dict[str, Any]],
              types: dict[str, dict[str, list[int]]]) -> None:
+    """Ghi báo cáo markdown: bảng các cấu hình, theo loại câu, so tốt nhất với đang dùng, các câu trượt."""
     n = meta["n_queries"]
 
     def pct(x: int) -> str:
@@ -173,7 +173,7 @@ def write_md(path: Path, meta: dict[str, Any], configs: list[dict[str, Any]],
          f"- Kiểm kho: {meta['store_check']}",
          f"- Chạy lúc {meta['time']} ({meta['sec']}s)", "",
          f"Sắp theo top-{meta['top_k']}, hoà thì top-1, top-3, MRR. **cứu / hỏng** = câu top-{meta['top_k']} "
-         "đúng thêm / sai thêm so với cấu hình search.py đang dùng.", "",
+         "đúng thêm / sai thêm so với cấu hình retrieve.py đang dùng.", "",
          "**token 5 kq** = tổng token chunk mạnh nhất của 5 trang đầu, trung bình — độ dài ngữ cảnh "
          "LLM phải đọc.", "",
          "| # | K | dense | sparse | top-1 | top-3 | top-5 | MRR | token 5 kq | cứu | hỏng | ghi chú |",
@@ -211,7 +211,7 @@ def write_md(path: Path, meta: dict[str, Any], configs: list[dict[str, Any]],
 
 
 def page_titles(chunks: list[Any]) -> dict[int, str]:
-    """Trang -> tiêu đề, đọc từ tiền tố '[chương · tiêu đề · trang N/M] ' của chunk."""
+    """Trang -> tiêu đề, đọc từ tiền tố "[chương · tiêu đề · trang N/M]" của chunk."""
     out: dict[int, str] = {}
     for c in chunks:
         head = c.text_enriched[: len(c.text_enriched) - len(c.text_raw)].strip().strip("[]")
@@ -223,8 +223,7 @@ def page_titles(chunks: list[Any]) -> dict[int, str]:
 
 def write_misses(path: Path, meta: dict[str, Any], best: dict[str, Any], misses: list[dict[str, Any]],
                  queries: list[dict[str, Any]], titles: dict[int, str]) -> None:
-    """Câu trượt top-5 của cấu hình tốt nhất — CÙNG DẠNG file câu hỏi (q, page…) nên đưa thẳng vào
-    `--queries` được để chạy lại riêng các câu này."""
+    """Ghi các câu trượt top-5 của cấu hình tốt nhất, cùng dạng file câu hỏi (dùng lại được với `--queries`)."""
     rows = []
     for m in misses:
         spec = queries[m["id"] - 1]
@@ -241,17 +240,14 @@ def write_misses(path: Path, meta: dict[str, Any], best: dict[str, Any], misses:
 
 
 def out_paths(chunks: Path, doc_id: str) -> tuple[Path, Path]:
-    """-> (file .md, file .json) đặt theo tên file vào: src/output/retrieval/<doc_id>/<tên chunks>_tune.*
-
-    MỘT file vào = MỘT bộ báo cáo: chạy lại thì ghi đè báo cáo của chính file đó; bộ chunk
-    khác tên ra báo cáo khác tên, không đè nhau. Đuôi `_tune` để khỏi lẫn với file chunk thật.
-    """
-    base = RETRIEVAL_OUTPUT / doc_id / f"{chunks.stem}_tune"
+    """Đường dẫn hai file báo cáo (.md, .json) theo tên file chunk vào, trong `src/output/evaluation/<doc_id>/`."""
+    base = EVALUATION_OUTPUT / doc_id / f"{chunks.stem}_tune"
     base.parent.mkdir(parents=True, exist_ok=True)
     return base.with_name(base.name + ".md"), base.with_name(base.name + ".json")
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Đọc tham số, lấy kết quả từng nhánh cho mọi câu, chấm mọi cấu hình, kiểm kho, ghi báo cáo."""
     ap = argparse.ArgumentParser(prog="tune", description="quet K + trong so dense/sparse cua RRF")
     ap.add_argument("chunks", help="src/output/chunker/<ten>/chunks.json (hoac bo chunk thu bat ky)")
     ap.add_argument("--queries", default=None, help="mac dinh data/eval/<doc_id>.queries.json")
@@ -261,10 +257,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--model", default=MODEL_ID)
     args = ap.parse_args(argv)
 
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
-    for s in (sys.stdout, sys.stderr):
-        if hasattr(s, "reconfigure"):
-            s.reconfigure(encoding="utf-8", errors="replace")
+    console_setup()
 
     t0 = time.perf_counter()
     cp = Path(args.chunks)
@@ -274,24 +267,24 @@ def main(argv: list[str] | None = None) -> int:
     log.info("%s: %d chunk | %s: %d cau", cp, len(cs.chunks), qpath.name, len(queries))
 
     ensure_vectors(cs, args.model)
-    se = Searcher(cp, model_id=args.model)
+    rt = Retriever(cp, model_id=args.model)
     for name in ("embedders", "httpx"):                 # 200 dòng "cache: dung lai 1/1" -> tắt
         logging.getLogger(name).setLevel(logging.WARNING)
 
-    page_of = [c.page_no for c in se.chunks]
+    page_of = {c.chunk_id: c.page_no for c in rt.chunks}
     pools: list[Pool] = []
     for spec in queries:
-        rd, rs, _, _ = se.ranks(spec["q"])
+        rd, rs = branch_ranks(rt, spec["q"])
         pools.append((rd, rs, set(spec["page"] if isinstance(spec["page"], list) else [spec["page"]])))
 
-    bad = chroma_check(se, queries)
+    bad = chroma_check(rt, queries)
     store_check = (f"pool dense của kho khớp cosine tính tay ở cả {len(queries)} câu" if not bad else
                    f"⚠ {bad}/{len(queries)} câu pool dense của kho KHÁC cosine tính tay — bảng lượt này "
                    "KHÔNG tin được, chạy lại")
     if bad:
-        log.warning("kho %s: %d/%d cau pool dense lech cosine tinh tay -> chay lai", se.store.kind, bad, len(queries))
+        log.warning("kho %s: %d/%d cau pool dense lech cosine tinh tay -> chay lai", rt.store.kind, bad, len(queries))
 
-    tokens = [c.token_count for c in se.chunks]
+    tokens = {c.chunk_id: c.token_count for c in rt.chunks}
     configs = build_configs(pools, page_of, tokens, _floats(args.k), _floats(args.wd), _floats(args.ws))
     best = next(c for c in configs if c["k"] is not None)      # dòng một nhánh không tính là cấu hình gộp
     base = next(c for c in configs if c["is_base"])
@@ -310,7 +303,7 @@ def main(argv: list[str] | None = None) -> int:
     meta = {"doc_id": cs.doc_id, "chunks": str(cp), "queries": str(qpath),
             "n_chunks": len(cs.chunks), "n_searchable": len(cs.searchable),
             "n_pages": len({c.page_no for c in cs.chunks}), "n_queries": len(queries),
-            "model": args.model, "store": se.store.kind, "store_check": store_check,
+            "model": args.model, "store": rt.store.kind, "store_check": store_check,
             "store_mismatch": bad, "pool": POOL, "top_k": TOP_K,
             "time": time.strftime("%Y-%m-%d %H:%M"), "sec": round(time.perf_counter() - t0, 1)}
     types = {"base": by_type(base, queries), "best": by_type(best, queries)}
@@ -321,7 +314,7 @@ def main(argv: list[str] | None = None) -> int:
         {"meta": meta, "best": best["label"], "base": base["label"], "configs": configs,
          "misses_best": misses, "by_type": types}, ensure_ascii=False, indent=1), encoding="utf-8")
     ms = md.with_name(f"{cp.stem}_misses.json")
-    write_misses(ms, meta, best, misses, queries, page_titles(se.chunks))
+    write_misses(ms, meta, best, misses, queries, page_titles(rt.chunks))
 
     log.info("")
     for name, c in (("dang dung", base), ("tot nhat ", best)):

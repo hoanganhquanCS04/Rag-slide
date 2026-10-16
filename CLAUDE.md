@@ -85,7 +85,7 @@ mức "mô tả slide".
 ✅ S0   PDF → ParsedDocument      src/parser/      2 deck: Onboarding 51 trang, Thời gian làm việc 17 — chương từ mục lục
 ✅ S5   chunk                     src/chunker/     89 + 18 chunk, 1 trang = 1 chunk (không vector ảnh phụ) — khuôn như src/parser/
 ✅ S5   vector                    src/embedders/ · src/vectordb/ — khuôn như src/parser/
-✅ S5   tìm                       src/retrieval/   hybrid dense+BM25 gộp RRF, cố định top-5
+✅ S5   tìm                       src/runtime/retrieve.py · src/sparse/   hybrid dense+BM25 gộp RRF, cố định top-5 — đo ở src/evaluation/
 🚫 S1   BỎ — gộp vào S0                            xem §5
 🚫 S3   BỎ ở v0 — align vào chính mình thì vô nghĩa
 ✅ S2a  slide_type               luật, ParsedPage.slide_type — divider · exercise · content
@@ -123,7 +123,7 @@ deck.pdf  ← v0: CÙNG MỘT FILE →     source/*.pdf
 **Thứ tự chạy thật** (số stage là lớp khái niệm, KHÔNG phải thứ tự):
 
 ```
-S0 → S5 (chunk+embed) ─┬─► S6a deck_map + audit ─────────────┐
+S0 → S5 (chunk+embed) ─┬─► S6a (dùng lại index S5) ──────────┐
     → S2 (luật)        └─► S4 kịch bản → phát âm → S6b TTS ──┴─► S7
 ```
 
@@ -145,7 +145,7 @@ S0 → S5 (chunk+embed) ─┬─► S6a deck_map + audit ───────�
 | S5 KB Construction          | `source/*.pdf`                         | `KBChunks[]` + `KBIndex`                                                                | LLM + VLM + embedding         |
 | ~~S3 Alignment~~           | —                                       | **BỎ ở v0** — §3.0: nguồn chính là deck, align vào chính nó thì vô nghĩa | —                            |
 | S4 Scenario                 | tất cả trên                           | `Scenario[]`                                                                              | LLM, 2 pass                   |
-| S6a Build SlideIndex        | `KBChunk[]` (dùng lại index của S5) | `deck_map.txt` + audit                                                                    | embedding qua API             |
+| S6a Build SlideIndex        | `KBChunk[]` (dùng lại index của S5) | — (dùng lại index S5; `deck_map.txt` BỎ 2026-10-13)                                   | embedding qua API             |
 | S6b Precompute              | `Scenario[]` + `pronunciation.json`  | `precomputed/`                                                                            | TTS + embedding               |
 | S7 HITL                     | mọi artifact + flags                    | `DeckBundle` verified                                                                     | — (người, đọc + nghe)    |
 
@@ -202,13 +202,13 @@ Bản cũ đặt S1 là một vòng gọi LLM riêng mỗi trang, sinh `message`
 được bằng luật, một thứ sinh ra chỉ để nhồi ngữ cảnh toàn cục vào prompt — mà thiết kế
 này không nhồi.
 
-| S1 cũ định sinh | nay lấy ở đâu                                                                                                  |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------ |
-| `description`    | VLM mô tả ảnh ngay ở**S0** — đã có, đo được là dùng tốt                                       |
+| S1 cũ định sinh | nay lấy ở đâu                                                                                                      |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| `description`    | VLM mô tả ảnh ngay ở**S0** — đã có, đo được là dùng tốt                                           |
 | `slide_type`     | **LUẬT** trên `ParsedDocument`, không gọi model — `section_divider` ĐÃ CÓ ở `src/chunker/base.py` |
-| `entities`       | trích ở S0 (thuật ngữ, tên hàm, tên riêng)                                                                 |
-| `message`        | **BỎ**                                                                                                      |
-| `relations`      | **BỎ** — "sơ đồ bên trái" giải bằng `bbox`, không cần model                                     |
+| `entities`       | trích ở S0 (thuật ngữ, tên hàm, tên riêng)                                                                     |
+| `message`        | **BỎ**                                                                                                          |
+| `relations`      | **BỎ** — "sơ đồ bên trái" giải bằng `bbox`, không cần model                                         |
 
 **Luật `slide_type`** — đo trên `3_datavisualization`, **40/40 đúng**, không tốn API:
 
@@ -316,15 +316,19 @@ Spec đầy đủ: [docs/spec/scenario.md](docs/spec/scenario.md).
 
 ### S6a — dùng lại index của S5, không dựng index riêng
 
-- **Một vector cho mỗi chunk**, đã có ở `src/retrieval/build_index.py`. Multi-field **BỎ**: nó cần
+- **Một vector cho mỗi chunk**, đã có ở `src/embedders/cli.py`. Multi-field **BỎ**: nó cần
   `message` / `desc` / `relations` tách riêng, mà §5 S1 đã bỏ hết.
 - Tìm là **hybrid dense + BM25, gộp bằng RRF** — xem
   [docs/spec/search.md](docs/spec/search.md). Đo được: hybrid hơn từng nhánh riêng.
-- **Self-retrieval check** (`src/retrieval/audit.py`): lấy nội dung trang `i` làm truy vấn →
-  top-1 phải ra trang `i`. **Cảnh báo: bài này hiện gần như luôn 100%** vì câu hỏi lấy
-  từ chính văn bản — đề bài là đáp án. Nó chỉ chứng minh **không có hai chunk trùng nhau**.
-  Thứ đo thật là bộ câu hỏi người viết ở `data/eval/<doc_id>.queries.json` (`src/retrieval/eval.py`).
-- Sinh `deck_map.txt` (~150 token: danh sách section) cho prompt runtime
+- **Self-retrieval / quét chunk trùng: BỎ (2026-10-13, `audit.py` đã xoá).** Câu hỏi lấy từ chính
+  văn bản nên gần như luôn 100% — đề bài là đáp án; chunk trùng trong một trang thì `search` đã gộp
+  theo trang. Đo bằng bộ câu hỏi có nhãn `data/eval/<doc_id>.queries.json` (`src/evaluation/eval.py`)
+  và quét tham số RRF (`scripts/tune.sh`).
+- **`deck_map.txt` BỎ (2026-10-13)** — nó chỉ viết lại `doc.sections` (dò ở S0, `parser/sections.py`)
+  thành chữ cho prompt runtime. Chương / khoảng trang vẫn có trong bộ nhớ sau `enrich()`. Prompt runtime
+  không còn danh sách chương: câu hỏi cấu trúc ("bài gồm những phần nào") phải tìm ra trang mục lục —
+  đo được: hỏi "nội dung chính gồm những phần nào" ra p2 hạng 1 và trả lời đủ; hỏi chung chung "bài này
+  gồm những phần nào" KHÔNG ra p2 → từ chối. Hỏi khoảng trang của chương / tổng số trang → từ chối.
 - Tên file vector phải nhúng `model_id` — đổi embedding model mà không sinh lại thì
   runtime truy vấn index cũ bằng vector mới và trả rác **mà không báo lỗi**
 
@@ -365,6 +369,11 @@ input → regex fast-path ──(khớp)──→ goto_slide()          [~5ms]
                           └→ meta_action
 ```
 
+> **HIỆN TRẠNG v0 (2026-10-14): runtime CHỈ hỏi đáp** — `src/runtime/chat_engine.py`: tìm
+> (`retrieve.py`) → 1 lần LLM (`r_qa.md`, chỉ `answer` | `escalate`) → code kiểm nguồn. Điều hướng
+> (goto / hỏi lại / cổng biên RRF), vòng thuyết trình (`session.py`), fast-path, R3a đã BỎ khỏi code —
+> bản cũ xem git. Phần dưới là ĐÍCH; luật về điều hướng / cổng chưa có code nào áp dụng.
+
 **Luật cứng:**
 
 - **Đúng 1 lần gọi LLM** cho routing + rewrite + chọn tool. KHÔNG tách router riêng.
@@ -377,14 +386,14 @@ input → regex fast-path ──(khớp)──→ goto_slide()          [~5ms]
 
   ```
   TRẠNG THÁI  -> inline, bounded   "tôi đang nhìn gì" — không index nào trả lời được
-                 KBChunk trang hiện tại · deck_map (~150 tok)   (v0 không có history)
+                 KBChunk trang hiện tại   (v0 không có history, không có deck_map)
   TRI THỨC    -> TRUY XUẤT         slide_index · concept · section · KB chunk
   ```
 
   Prompt mục tiêu **~1.3k token**, không phải 3.6k.
 - **R2 = retrieve → LLM chọn.** KHÔNG có reranker.
 
-  - hybrid dense + BM25 gộp bằng RRF (`src/retrieval/search.py`) → **top-k = 5, CỐ ĐỊNH** →
+  - hybrid dense + BM25 gộp bằng RRF (`src/runtime/retrieve.py`) → **top-k = 5, CỐ ĐỊNH** →
     **cả top-5** vào prompt → LLM chỉ VERIFY và CHỌN trong 5, kèm lý do (không reranker
     lọc xuống 3 nữa: top-3 trượt 7/200 câu Onboarding mà top-5 có)
   - **Nhánh điều hướng phải TẮT lọc trang phân mục**: hỏi "quay lại phần đồ thị ba chiều"
@@ -457,12 +466,14 @@ src/parser/      S0 — cli.py · base.py · variants/docling.py (biến thể D
                  enrich.py (chương → cờ) · sections · flags ·
                  pictures (②) · tables (②b) · show.py (xem document.json)
 src/chunker/     S5 chunk — cli.py · factory.py · base.py · variants/page.py
-src/embedders/   S5 nhúng — base.py · cache.py · factory.py · variants/openai.py
+src/embedders/   S5 nhúng — cli.py (nhúng + nạp kho) · base.py · cache.py · factory.py · variants/openai.py
 src/vectordb/    S5 kho vector (CHỈ dense) — base.py · factory.py · variants/{inmem,chroma}.py
-src/retrieval/   tìm — sparse/ (BM25) · search.py (hybrid RRF) · build_index.py (nhúng + nạp kho) ·
-                 deck_map.py (S6a) · audit.py · eval.py · tune.py
+src/sparse/      S5 index từ khoá BM25 (nhánh sparse) — base.py · factory.py · variants/rankbm25.py
+src/evaluation/  đo tìm kiếm — eval.py (bộ câu hỏi có nhãn) · tune.py (quét K + trọng số RRF)
 src/scenario/    S4 — cli.py · generate.py · validate.py
-src/runtime/     R1–R7 (bản chữ chạy thử)
+src/runtime/     v0 CHỈ hỏi đáp — retrieve.py (Retriever: vector + BM25 gộp RRF, gộp trang · tìm thử) ·
+                 chat_engine.py (ChatEngine: tìm -> 1 lần LLM -> kiểm nguồn; API nhúng lỗi -> câu đó
+                 chỉ BM25) · models.py (RuntimeConfig · Reply · Answer). evaluation/ dùng chung Retriever
 src/prompts/     MỌI prompt (*.md)
 src/output/      MỌI artifact pipeline sinh ra (gitignore)
 ```
@@ -471,6 +482,7 @@ Khuôn mỗi stage có NHIỀU biến thể (chunker, embedders, vectordb, spars
 `"module:Class"`, import lười). **Các thư mục stage KHÔNG import nhau qua lại tuỳ tiện** — phần
 chung ở `src/utils/`, schema ở `src/models/`. Cache embedding là lớp bọc `embedders/cache.py`.
 Đường dẫn gốc / prompt / output CHỈ lấy từ `utils.config` — không tự tính `Path(__file__).parents[...]`.
+CLI mở đầu bằng `utils.config.console_setup()` (utf-8 + log INFO), không tự chép khối `reconfigure`.
 
 **Vị trí trong cây LƯU THẲNG, không dùng con trỏ ngược** (back-reference bỏ 2026-10-12): block có
 `page_no`, chunk có `page_no`, kịch bản trang có `page_no`. Cần chương thì `doc.section_of(page_no)`.
@@ -506,12 +518,11 @@ src/output/
 │   ├── <doc_id>/vectors__<model_id>.json   rows[i] = chunk_id, keys[i] = hash chữ của hàng i
 │   │                             (keys lệch chunks.json -> báo nhúng lại, không nạp vector cũ)
 │   └── cache/<model>/<sha1>.npy  DÙNG CHUNG mọi deck — cache theo hash nội dung
-│                                 (cả thư mục do python src/retrieval/build_index.py <chunks.json> ghi)
+│                                 (cả thư mục do python src/embedders/cli.py <chunks.json> ghi)
 ├── vectordb/chroma/              DÙNG CHUNG — kho Chroma: MỘT collection kb__<model_id> cho mọi bài,
 │                                 tách bằng metadata doc_id (chỉ khi VECTOR_DB=chroma)
-├── retrieval/<doc_id>/           S6a + đo tìm kiếm
-│   ├── deck_map.txt              python src/retrieval/deck_map.py <document.json>
-│   └── eval.json · eval_miss.* · chunks_tune.* · chunks_misses.json · self_retrieval.json
+├── evaluation/<doc_id>/          đo tìm kiếm — eval.json (src/evaluation/eval.py) ·
+│                                 <tên chunks>_tune.{md,json} · _misses.json (scripts/tune.sh)
 └── scenario/<doc_id>/            S4 — python src/scenario/cli.py <document.json>
     ├── scenario.json             kịch bản CẢ deck, mỗi entry kèm page_hash cho incremental
     └── scenario.md               bản đọc cho người, ghi cùng lúc với .json
@@ -528,9 +539,11 @@ lần trang / prompt / model đổi hoặc chạy `--force`. S7 phải có cơ c
 Kho vector KHÔNG mua tốc độ: 52 vector, quét vét cạn hết **0.01ms**; ngay cả 100.000 vector
 cũng chỉ 25ms, trong khi gọi API nhúng câu hỏi đã mất ~700ms. Chroma mua về **lưu đĩa +
 metadata filter + nhiều tài liệu chung một chỗ**. Kho chỉ làm nhánh dense — BM25 ở
-`src/retrieval/sparse/` (cùng hình với `vectordb/`, chọn bằng `SPARSE_INDEX`), RRF ở
-`retrieval/search.py`. `Searcher` khởi tạo gọi `sync` cả hai: lệch `chunks.json` thì nạp lại từ
-`.npy` / dựng lại BM25. Khung inmem/chroma/factory lấy từ `minhbtrc/chatbot-template` (MIT) — chỗ
+`src/sparse/` (cùng hình với `vectordb/`, chọn bằng `SPARSE_INDEX`), RRF ở
+`runtime/retrieve.py`. `Retriever` khởi tạo gọi `sync` cả hai: lệch `chunks.json` thì nạp lại từ
+`.npy` / dựng lại BM25. Hai kho cùng bộ hàm `index_documents` · `retrieve_context` · `delete_document` ·
+`sync` (lớp cha so bộ chunk → xoá deck → nạp lại). BM25 `index_documents` nhận NGUYÊN bộ chunk một deck
+(IDF tính trên cả deck) — gọi qua `sync`. Khung inmem/chroma/factory lấy từ `minhbtrc/chatbot-template` (MIT) — chỗ
 khác bản gốc ghi ở `src/vectordb/base.py`. Sơ đồ §7.1 là đích, chưa áp dụng.
 
 ### 7.1 Đích (nhiều deck)
@@ -546,8 +559,6 @@ PER-DECK LAYER
 └── deck_{id}/
     ├── Scenario
     ├── Qdrant: slide_index__{deck_id}__{model_id}
-    ├── deck_map.txt        (~150 token, danh sách section)
-    ├── audit/self_retrieval.json
     └── precomputed/
 
 SESSION LAYER
@@ -567,7 +578,6 @@ SESSION LAYER
 page_hash không đổi → reuse Scenario, TTS, vector (cache đã lo)
 page_hash đổi       → chunk + nhúng lại RIÊNG trang đó, chạy lại S4 cho nó
 luôn chạy lại S2     → slide_type/sections là luật, rẻ
-luôn chạy lại S6a    → deck_map + audit, rẻ
 ```
 
 Sửa 3/20 trang → ~40s thay vì ~6 phút.
@@ -590,6 +600,51 @@ synth lại câu chứa từ đó; lệch timing > 15% thì chạy lại pass 2 
 - Mọi prompt nằm trong `src/prompts/*.md`, KHÔNG hardcode trong file .py
 - Async cho mọi I/O; S1 và S4 phải song song hoá được (mặc định 5 luồng)
 - Không `print()`, dùng `logging` hoặc `rich`
+
+### Tổ chức code
+
+Mỗi thứ một chỗ, mỗi chỗ một việc. Đọc tên thư mục là phải đoán được bên trong làm gì.
+
+| Thứ           | Là gì                                                            | Luật                                                                                                                    |
+| -------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `models/`    | hình dạng dữ liệu (Pydantic) — "hợp đồng" giữa các stage | stage nói chuyện bằng model, không dict trần                                                                        |
+| `utils/`     | dụng cụ NHIỀU stage cùng dùng                                 | phép thử: xoá stage X mà file vẫn cần → `utils/`; chỉ X dùng → để trong X. Không biến thành thùng rác |
+| `cli.py`     | cửa trước chạy MỘT LẦN từ terminal                          | chỉ đọc tham số → gọi lớp làm việc → in kết quả. KHÔNG chứa logic                                          |
+| `app.py`     | cửa trước cho server chạy liên tục (chưa có ở v0)         | mỏng như `cli.py`, gọi cùng lớp logic bên dưới                                                                 |
+| `base.py`    | lớp cha (ABC): "ai làm việc này phải có những hàm này"    | chỉ hứa hẹn (`@abstractmethod`) + phần dùng chung, không làm thay lớp con                                      |
+| `variants/`  | các CÁCH khác nhau làm cùng một việc, mỗi cách một file  | thêm cách mới = thêm file mới, không sửa file cũ                                                                 |
+| `factory.py` | đưa tên (từ `.env`), trả đúng biến thể                  | một bảng `"tên": "module:Class"`, import lười                                                                     |
+
+- **Chỉ dựng `base + variants + factory` khi ĐÃ CÓ ≥ 2 cách làm.** Một cách thì cli gọi thẳng
+  (như `parser/`). Dựng khung sớm là code thừa — có cách thứ hai rồi tách cũng chưa muộn.
+- **Phụ thuộc chỉ đi XUỐNG:** `cli.py`/`app.py` → stage → `models/` + `utils/`. `utils/` không import
+  ngược lên stage; các stage không import lẫn nhau tuỳ tiện — cần chung thì đẩy xuống `utils/`/`models/`.
+- **Đặt tên — tên đầy đủ, KHÔNG viết tắt** (`output` không `out`, `chunk_list` không `cl`):
+  - Class = **danh từ**, `PascalCase`. Biến thể: `<Cách làm><Vai trò>` (`ChromaStore`, `PageChunker`,
+    `OpenAIEmbedder`); lớp khung: `Base<Vai trò>`.
+  - Hàm = **động từ**, `snake_case`: `load_chunks`, `build_index`, `create_vectordb`,
+    `normalize_polygon`. Trả đúng/sai thì `is_` / `has_` (`is_closing`).
+  - Hằng số `CHỮ_HOA` (`OUTPUT_DIR`). File `snake_case`, tên nói rõ việc (`sections.py`).
+  - Tên phải dùng chữ "và" (`parse_and_save`) = hàm làm quá nhiều việc → tách.
+- Docstring mọi hàm bằng tiếng Việt đời thường, không viết ký hiệu nội bộ ("NT3", "§10").
+- **Thêm stage mới:** ① model vào/ra trong `models/` → ② có nhiều cách làm không (không: vài file;
+  có: base/variants/factory) → ③ lớp làm việc thật → ④ `cli.py` bọc ngoài → ⑤ prompt ở
+  `src/prompts/`, đường dẫn lấy từ `utils.config`.
+
+### Xem code: dùng `build-graph` trước khi đọc file
+
+Repo có skill `build-graph` (từ `tirth8205/code-review-graph`) — dựng đồ thị code (file, class,
+hàm, ai gọi ai). Cài một lần:
+
+```
+npx skills add tirth8205/code-review-graph --skill build-graph --agent claude-code
+```
+
+- **Trước khi đọc / sửa / review code**: chạy `build-graph` để dựng hoặc cập nhật đồ thị, rồi dùng
+  nó tìm chỗ định nghĩa, nơi gọi, phụ thuộc giữa các stage — thay vì mở lần lượt từng file.
+- Sửa một hàm → xem đồ thị ai gọi nó trước, để biết sửa thì lan tới đâu.
+- Dùng đồ thị để kiểm luật "phụ thuộc chỉ đi xuống" ở trên: thấy `utils/` import stage, hoặc
+  stage import chéo nhau → báo ra.
 
 ### Thư viện
 
@@ -656,17 +711,15 @@ SmartArt đôi khi vỡ). Phải cài font Việt vào container.
 | Timing deviation                  | < 15% so với budget                          |
 | Flag precision (S7)               | ≥ 60%                                        |
 | P95 latency tới byte audio đầu | < 2.5s                                        |
-| Self-retrieval top-1 (S6a)        | ≥ 90% — ⚠️ xem cảnh báo dưới bảng    |
 | R2 recall@5                       | ≥ 95% — KHÔNG nới k, sửa RRF / dữ liệu |
 | R2 Top-1 accuracy                 | báo cáo                                     |
 | R2 harmful jump rate              | báo cáo — nhảy sai mà không hỏi lại   |
 
-⚠️ **Self-retrieval hiện gần như luôn 100% và KHÔNG nói lên gì.** Câu hỏi lấy từ chính
-văn bản của chunk — đề bài là đáp án. Nó chỉ chứng minh **không có hai chunk trùng nhau**.
-Số đo thật phải lấy từ bộ câu hỏi có nhãn ở `data/eval/<doc_id>.queries.json`
-(`src/retrieval/eval.py`) — đo 2026-10-02, top-1: Onboarding 200 câu hybrid 157 · dense 131 ·
-sparse 145; Thời gian làm việc 30 câu 28 · 29 · 29. Câu hiện đều do AI viết → số thiên vị,
-vẫn cần bộ câu **người viết**.
+Gate self-retrieval (≥ 90%) **BỎ 2026-10-13** — câu hỏi lấy từ chính văn bản nên gần như luôn
+100%, không nói lên gì. Số đo tìm kiếm lấy từ bộ câu hỏi có nhãn ở `data/eval/<doc_id>.queries.json`
+(`src/evaluation/eval.py`) — đo 2026-10-13, top-1 dense · sparse · hybrid: Onboarding 200 câu
+132 · 132 · 153 (top-5 hybrid 192); Thời gian làm việc 30 câu 25 · 29 · 27 (top-5 30/30).
+Câu hiện đều do AI viết → số thiên vị, vẫn cần bộ câu **người viết**.
 Xem [docs/spec/search.md §10](docs/spec/search.md).
 
 **Proxy tự nhiên — chạy được trong CI:** (v0 KHÔNG kiểm — bỏ khỏi bộ kiểm S4 2026-10-06, xem §5 S4)
@@ -710,3 +763,51 @@ calibrate được**, cổng dùng biên RRF, `calibrated: false` — xem §6.
 
 **Ngoài phạm vi v1:** voice/ASR · robot vật lý · điều khiển PowerPoint ngoài ·
 upload deck lúc runtime · cross-deck navigation
+
+<!-- code-review-graph MCP tools -->
+
+## MCP Tools: code-review-graph
+
+**This project has a knowledge graph. Start with the code-review-graph
+MCP tools to narrow scope, then read the source.** The graph is cheaper than scanning files and
+gives you structural context (callers, dependents, test coverage) that file search cannot.
+
+### When to use graph tools FIRST
+
+- **Exploring code**: `semantic_search_nodes_tool` or `query_graph_tool` instead of Grep
+- **Understanding impact**: `get_impact_radius_tool` instead of manually tracing imports
+- **Code review**: `detect_changes_tool` + `get_review_context_tool` instead of reading entire files
+- **Finding relationships**: `query_graph_tool` with callers_of/callees_of/imports_of/tests_for
+- **Architecture questions**: `get_architecture_overview_tool` + `list_communities_tool`
+
+### Verify in the source
+
+- Narrow scope with the graph, then read the source. Do not change code from graph output alone.
+- For any non-trivial change, read the implementation and the relevant tests before concluding.
+- Verify the exact source when touching behavior, database logic, migrations, retries, fallbacks,
+  recovery, or compatibility code.
+- When the graph and the source disagree, the source wins. The graph may be stale or may not
+  model that relationship.
+- An empty graph result can mean "not indexed" or "not statically visible", not "does not exist".
+
+### Key Tools
+
+| Tool                               | Use when                                               |
+| ---------------------------------- | ------------------------------------------------------ |
+| `detect_changes_tool`            | Reviewing code changes — gives risk-scored analysis   |
+| `get_review_context_tool`        | Need source snippets for review — token-efficient     |
+| `get_impact_radius_tool`         | Understanding blast radius of a change                 |
+| `get_affected_flows_tool`        | Finding which execution paths are impacted             |
+| `query_graph_tool`               | Tracing callers, callees, imports, tests, dependencies |
+| `semantic_search_nodes_tool`     | Finding functions/classes by name or keyword           |
+| `get_architecture_overview_tool` | Understanding high-level codebase structure            |
+| `refactor_tool`                  | Planning renames, finding dead code                    |
+
+### Workflow
+
+1. The graph auto-updates on file changes (via hooks).
+2. Use `detect_changes_tool` for code review.
+3. Use `get_affected_flows_tool` to understand impact.
+4. Use `query_graph_tool` pattern="tests_for" to check coverage.
+
+<!-- /code-review-graph MCP tools -->

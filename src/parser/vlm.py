@@ -1,4 +1,4 @@
-"""Hàm dùng chung cho mọi lượt gọi VLM: cổng API + đọc mảng JSON trong phản hồi."""
+"""Hàm dùng chung cho mọi lần gọi VLM: chọn server và đọc mảng JSON trong phản hồi."""
 
 from __future__ import annotations
 
@@ -13,7 +13,11 @@ FENCE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$")
 
 
 def vlm_endpoint() -> tuple[str, str | None, int | None]:
-    """-> (base_url, api_key, soft_tokens). Có `VLM_BASE_URL` thì đi cổng riêng, không thì `OPENAI_BASE_URL`."""
+    """Server VLM -> (địa chỉ, khoá API, số token ảnh).
+
+    Cách làm: có `VLM_BASE_URL` thì đi server riêng (không gửi OPENAI_API_KEY sang đó), không thì
+    đi `OPENAI_BASE_URL`.
+    """
     if base := os.environ.get("VLM_BASE_URL"):
         key = os.environ.get("VLM_API_KEY")       # không gửi OPENAI_API_KEY sang host khác
     else:
@@ -25,10 +29,10 @@ def vlm_endpoint() -> tuple[str, str | None, int | None]:
 
 
 def escape_stray_quotes(text: str) -> str:
-    """Escape dấu `"` nằm GIỮA chuỗi JSON mà VLM quên escape.
+    """Sửa JSON hỏng vì VLM quên escape dấu `"` nằm giữa chuỗi.
 
-    Onboarding p20: HTML bảng `<td colspan=4">` -> JSON vỡ -> mất CẢ trang. Trong chuỗi, `"` chỉ
-    được coi là đóng chuỗi khi ký tự kế (bỏ khoảng trắng) là `, } ] :` hoặc hết văn bản.
+    Cách làm: trong chuỗi, dấu `"` chỉ coi là đóng chuỗi khi ký tự kế tiếp là `, } ] :` hoặc hết
+    văn bản; còn lại thì thêm dấu escape.
     """
     out: list[str] = []
     in_str = False
@@ -55,7 +59,11 @@ def escape_stray_quotes(text: str) -> str:
 
 
 def load_json_array(content: str) -> list[Any] | None:
-    """Mảng JSON trong phản hồi; mảng bọc trong object thì lấy mảng. Hỏng -> None."""
+    """Lấy mảng JSON trong phản hồi của VLM; mảng bọc trong object thì lấy mảng; hỏng hết thì None.
+
+    Cách làm: thử lần lượt 3 cách đọc — nguyên văn (bỏ khung ```), cắt từ "[" đầu tiên, rồi sửa dấu
+    `"` lạc; cách nào đọc được thì dừng.
+    """
     # đọc NGUYÊN khối trước: _clean_json cắt từ "[" đầu tiên -> object bọc mảng thừa "}" -> hỏng cả trang
     # vá `"` lạc chỉ là đường lùi cuối — JSON đúng thì không đụng tới
     bare = FENCE.sub("", content)

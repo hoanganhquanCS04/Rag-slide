@@ -1,14 +1,7 @@
-"""Biến thể `chroma` — kho ghi đĩa (bản gốc: langchain_chroma.Chroma).
+"""Kho vector `chroma`: ghi đĩa, mọi deck chung một collection, tách bằng metadata `doc_id`.
 
-MỘT collection cho mọi tài liệu, tách bằng metadata `doc_id` — đúng hình §7.1 (KB dùng
-chung, truy vấn luôn kèm filter).
-
-Ba mặc định của Chroma phải đổi:
-
-    embedding_function     mặc định TỰ tải model MiniLM chạy local -> trái §12 "không model
-                           local", lại khác model với câu hỏi. Tắt: vector luôn do mình đưa.
-    space                  mặc định L2 -> cosine. Chroma trả distance = 1 - cosine.
-    anonymized_telemetry   mặc định BẬT, gửi số liệu sử dụng ra ngoài -> tắt.
+Cách làm: đổi 3 mặc định của Chroma — tắt embedding có sẵn (vector luôn do mình đưa), dùng cosine
+thay cho L2, tắt gửi số liệu sử dụng ra ngoài.
 """
 
 from __future__ import annotations
@@ -27,7 +20,7 @@ from models.kb_chunk import KBChunk
 
 
 def _where(where: Where | None) -> dict[str, Any] | None:
-    """dict phẳng -> cú pháp Chroma: nhiều điều kiện phải bọc `$and`, list -> `$in`."""
+    """Đổi bộ lọc dict phẳng sang cú pháp Chroma: nhiều điều kiện bọc `$and`, list thành `$in`."""
     conds = [{k: {"$in": v} if isinstance(v, list) else v} for k, v in (where or {}).items()]
     if not conds:
         return None
@@ -35,10 +28,12 @@ def _where(where: Where | None) -> dict[str, Any] | None:
 
 
 class ChromaStore(VectorStore):
+    """Kho vector dùng Chroma, lưu ở `src/output/vectordb/chroma` (hoặc CHROMA_PATH)."""
     kind = "chroma"
     persistent = True
 
     def __init__(self, model_id: str, path: str | Path | None = None):
+        """Mở / tạo kho Chroma và collection theo tên model, kiểm collection dùng cosine."""
         super().__init__(model_id)
         import chromadb
         from chromadb.config import Settings
@@ -59,7 +54,8 @@ class ChromaStore(VectorStore):
             raise SystemExit(f"collection {self.name} dang dung '{space}', can 'cosine' — "
                              f"xoa {self.path} roi chay lai (tu dung lai tu .npy, khong ton API)")
 
-    def upsert(self, chunks: list[KBChunk], vectors: np.ndarray) -> None:
+    def index_documents(self, chunks: list[KBChunk], vectors: np.ndarray) -> None:
+        """Thêm hoặc ghi đè vector theo chunk_id, chia lô theo giới hạn của Chroma."""
         vectors = np.asarray(vectors, dtype=np.float32)
         step = self._client.get_max_batch_size()
         for s in range(0, len(chunks), step):
@@ -70,14 +66,17 @@ class ChromaStore(VectorStore):
                 metadatas=[chunk_metadata(c, self.model_id) for c in part],
             )
 
-    def delete(self, where: Where) -> None:
-        self._col.delete(where=_where(where))
-
-    def query(self, vector: np.ndarray, k: int, where: Where | None = None) -> list[Hit]:
-        r = self._col.query(query_embeddings=[np.asarray(vector, dtype=np.float32)],
+    def retrieve_context(self, query_vector: np.ndarray, k: int, where: Where | None = None) -> list[Hit]:
+        """Tìm k chunk gần nhất -> [(chunk_id, cosine)] (cosine = 1 - khoảng cách Chroma trả về)."""
+        r = self._col.query(query_embeddings=[np.asarray(query_vector, dtype=np.float32)],
                             n_results=k, where=_where(where), include=["distances"])
         return [(cid, 1.0 - d) for cid, d in zip(r["ids"][0], r["distances"][0])]
 
+    def delete_document(self, doc_id: str) -> None:
+        """Xoá mọi vector của một deck."""
+        self._col.delete(where={"doc_id": doc_id})
+
     def metadata(self, doc_id: str) -> dict[str, dict[str, Any]]:
+        """Metadata mọi vector của một deck trong kho -> {chunk_id: metadata}."""
         r = self._col.get(where={"doc_id": doc_id}, include=["metadatas"])
         return {cid: dict(m or {}) for cid, m in zip(r["ids"], r["metadatas"])}

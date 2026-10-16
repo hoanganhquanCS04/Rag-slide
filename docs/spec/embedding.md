@@ -1,6 +1,6 @@
 # Embedding — biến chunk thành vector để tìm
 
-**Vào:** `src/output/chunker/*/chunks.json` · **Ra:** `src/output/embedders/*/vectors__<model_id>.{npy,json}` · **Code:** `src/embedders/` · `src/utils/vectors.py` · `src/retrieval/build_index.py`
+**Vào:** `src/output/chunker/*/chunks.json` · **Ra:** `src/output/embedders/*/vectors__<model_id>.{npy,json}` · **Code:** `src/embedders/` · `src/utils/vectors.py` · `src/embedders/cli.py`
 
 ---
 
@@ -100,10 +100,9 @@ Kể cả 7 trang phân mục và `p15` (trang docling bỏ sót nội dung — 
 **Lọc ở bước TRUY VẤN, không phải ở bước nhúng.** Đây là hai việc khác nhau:
 
 ```
-retrieval/build_index.py nhúng cả 51 chunk
-search.py    mặc định lọc content_type != "section_divider"
-             có cờ --no-filter để bật lại mà so
-audit.py     chạy CẢ HAI kiểu, in ra chênh lệch
+embedders/cli.py    nhúng cả 51 chunk
+runtime/retrieve.py mặc định lọc content_type != "section_divider"
+runtime/retrieve.py  có cờ --no-filter để bật lại mà so
 ```
 
 Ba lý do không lọc sớm:
@@ -207,7 +206,7 @@ Với deck này sparse không phải tuỳ chọn. Nội dung lẫn tiếng Vi�
 (`matplotlib`, `plt.savefig`, `Cartopy`, `cnames`) — đúng loại từ khoá mà dense hay
 trượt còn khớp chuỗi thì bắt chính xác.
 
-Đường bù, làm ở `search.py`:
+Đường bù, làm ở `runtime/retrieve.py`:
 
 ```
 rank-bm25 trên text_enriched  →  nhánh từ khoá
@@ -261,8 +260,8 @@ Gộp lô là chỗ API thắng `bge-m3` local ở offline: 3.6s so với ~43s c
 
 ### Còn phải làm
 
-Chạy **self-retrieval audit** đầy đủ (§5 S6a · gate §11 ≥ 90%): lấy nội dung trang `i`
-làm truy vấn, top-1 phải ra đúng trang `i`. Bốn câu ở trên mới là thăm dò, chưa phải gate.
+Đo bằng bộ câu hỏi có nhãn (`src/evaluation/eval.py`) — bốn câu ở trên mới là thăm dò.
+(Self-retrieval audit từng dự định làm gate ở đây đã bỏ 2026-10-13: gần như luôn 100%.)
 
 Nghi ngờ còn lại ở [kb-chunk.md §10](./kb-chunk.md): 7 trang `p9–p15` cùng tiêu đề —
 tiền tố `· trang N/40` tách được bao nhiêu phần?
@@ -273,7 +272,7 @@ tiền tố `· trang N/40` tách được bao nhiêu phần?
 
 ```bash
 # cần OPENAI_API_KEY (và OPENAI_BASE_URL nếu đi qua proxy)
-.venv/Scripts/python.exe src/retrieval/build_index.py src/output/chunker/3_datavisualization/chunks.json
+.venv/Scripts/python.exe src/embedders/cli.py src/output/chunker/3_datavisualization/chunks.json
                          # -> src/output/embedders/3_datavisualization/vectors__<model>.*
 ```
 

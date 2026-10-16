@@ -170,6 +170,7 @@ class CutPlanner:
     """
 
     def __init__(self, pieces: list[Piece], max_tokens: int, prefix_tokens: int):
+        """Nhớ các mảnh, token tiền tố; tính ngân sách thân chunk và giới hạn khi gộp khúc vụn."""
         self.pieces = pieces
         self.prefix_tokens = prefix_tokens
         self.budget = max_tokens - prefix_tokens

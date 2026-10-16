@@ -1,11 +1,10 @@
-"""File gốc -> `src/output/parser/<doc_id>/document.json`. ĐƯỜNG DUY NHẤT để parse (S0).
+"""Lệnh parse (S0): file gốc -> `src/output/parser/<doc_id>/document.json`.
 
-    python src/parser/cli.py data/raw/onboarding_kit.pdf                     # dùng cache nếu có
-    python src/parser/cli.py data/raw/onboarding_kit.pdf --redo              # gọi VLM lại cả file
+    python src/parser/cli.py data/raw/onboarding_kit.pdf                     # có cache thì dùng cache
+    python src/parser/cli.py data/raw/onboarding_kit.pdf --redo              # gọi lại VLM cả file
     python src/parser/cli.py data/raw/onboarding_kit.pdf --table-pages 21 22 # chỉ chép lại bảng 2 trang
 
-Luồng: ① bố cục -> ②b chép bảng -> ② xét ảnh -> document.json. Cache cùng thư mục:
-docling_vlmpipeline.json · tables.json · pictures.json. Chương / cờ: `parser.enrich`.
+Cách làm: ① bố cục -> ②b chép bảng -> ② xét ảnh -> document.json; cache nằm cùng thư mục.
 Xem lại kết quả: `python src/parser/show.py <doc_id> [--page 7]`.
 """
 
@@ -36,7 +35,11 @@ OUT = PARSER_OUTPUT
 
 def parse_file(src: Path, *, model: str, redo: bool = False,
                table_pages: set[int] | None = None) -> int:
-    """`table_pages`: chỉ chép lại bảng ở các trang này (bảng khác dùng cache)."""
+    """Parse một file và ghi `document.json`.
+
+    Cách làm: tìm file PDF để vẽ trang -> DoclingParser chạy ① ②b ② -> ghi file -> tính chương / cờ
+    (enrich) để in báo cáo.
+    """
     if not src.exists():
         raise SystemExit(f"khong thay file: {src}")
     if (pdf := page_pdf(src)) is None:
@@ -50,6 +53,7 @@ def parse_file(src: Path, *, model: str, redo: bool = False,
 
 
 def report(doc: ParsedDocument) -> None:
+    """In tóm tắt deck ra màn hình: số trang, số khối, ảnh có mô tả, bảng, các chương và các cờ."""
     log.info("")
     log.info("=== %s", doc.doc_id)
     log.info("    %d trang | %d block", doc.n_pages, sum(len(p.blocks) for p in doc.pages))
@@ -64,6 +68,7 @@ def report(doc: ParsedDocument) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Đọc tham số dòng lệnh rồi gọi `parse_file`."""
     ap = argparse.ArgumentParser(prog="parser", description=__doc__.splitlines()[0])
     ap.add_argument("file", type=Path, help="data/raw/<ten>.pdf | .pptx (can .pdf cung ten)")
     ap.add_argument("--redo", action="store_true", help="goi VLM lai du da co cache")

@@ -1,13 +1,7 @@
-"""Sinh danh sách chỗ cần người xem.
+"""Tìm các chỗ cần người xem (cờ) trong ParsedDocument.
 
-§10 cấm bắt người duyệt mở cả deck — chỉ duyệt phần bị flag. §11 lại có gate
-`Flag precision (S7) >= 60%`, nên luật flag phải CHỌN KỸ, không flag bừa.
-
-Ví dụ cụ thể về chọn kỹ: trên `3_DataVisualization` có 43 ảnh không được mô tả.
-Flag hết 43 cái thì precision sụp, vì đã đo được cả 43 đều dưới 1% diện tích và
-phần lớn là thanh điều khiển PowerPoint lọt vào lúc export — bỏ chúng là ĐÚNG.
-Luật đúng phải là "ảnh TRÊN ngưỡng mà vẫn không mô tả được", và luật đó trên file
-này bắn ra 0 flag.
+Để làm gì: người duyệt chỉ xem phần bị cờ, không phải mở cả deck — nên luật cờ phải chọn kỹ,
+không cờ bừa.
 """
 
 from __future__ import annotations
@@ -20,14 +14,10 @@ log = logging.getLogger(__name__)
 
 
 def _empty_page(doc: ParsedDocument) -> list[Flag]:
-    """Không chữ (ngoài tiêu đề) mà cũng không mô tả ảnh nào -> vào KB gần như rỗng.
+    """Cờ `empty_page`: trang không có chữ (ngoài tiêu đề) và không có ảnh / bảng có nội dung.
 
-    Cũng bắt trang VLM trả JSON hỏng ở bước ① (mất CẢ trang -> 0 khối) — lý do xem ở phản hồi thô
-    `logs/vlm_pipeline/<doc_id>/pNNN.txt`, gọi lại bằng `python src/parser/cli.py <file> --redo`.
-
-    Trang phân mục rỗng là ĐÚNG thiết kế — không bắn (trước đây bắn oan 7 cờ error,
-    CLI thoát mã 1, CI đỏ giả). Trang chỉ có tiêu đề + MỘT BẢNG có chữ cũng không rỗng —
-    Onboarding p21/p22/p49/p50 (bảng chấm công, danh mục văn bản ATTT) từng bị bắn oan.
+    Cách làm: bỏ qua trang chuyển chương (rỗng là đúng); bắt cả trang VLM trả JSON hỏng ở bước ① —
+    lý do xem trong `logs/vlm_pipeline/<doc_id>/pNNN.txt`.
     """
     out: list[Flag] = []
     for page in doc.pages:
@@ -51,7 +41,7 @@ def _empty_page(doc: ParsedDocument) -> list[Flag]:
 
 
 def _image_not_described(doc: ParsedDocument) -> list[Flag]:
-    """Ảnh TRÊN ngưỡng diện tích mà vẫn không có mô tả -> mất nội dung thật."""
+    """Cờ `image_not_described`: ảnh đủ to mà không có mô tả (hoặc gọi VLM bị lỗi)."""
     out: list[Flag] = []
     for page in doc.pages:
         for im in page.images:
@@ -69,12 +59,7 @@ def _image_not_described(doc: ParsedDocument) -> list[Flag]:
 
 
 def _table_empty(doc: ParsedDocument) -> list[Flag]:
-    """Docling khoanh được vùng bảng mà không đọc ra chữ nào -> mất nội dung thật.
-
-    Đo trên Onboarding Kit: cả 3 bảng rỗng (p20 hệ số OT, p33 mã giảm giá Vinpearl, p38 quy
-    định XLVP) là ẢNH CHỤP bảng dán vào slide — không có text layer, OCR tắt. VLM cũng không
-    chạm tới vì docling gán nhãn `table` chứ không phải `picture`. Người duyệt phải xem.
-    """
+    """Cờ `table_empty`: có vùng bảng mà không đọc ra chữ nào (thường là ảnh chụp bảng)."""
     return [
         Flag(
             kind="table_empty",
@@ -90,6 +75,7 @@ def _table_empty(doc: ParsedDocument) -> list[Flag]:
 
 
 def _no_sections(doc: ParsedDocument) -> list[Flag]:
+    """Cờ `no_sections`: không dò được chương nào."""
     if doc.sections:
         return []
     return [
@@ -102,6 +88,7 @@ def _no_sections(doc: ParsedDocument) -> list[Flag]:
 
 
 def build_flags(doc: ParsedDocument) -> list[Flag]:
+    """Chạy mọi luật cờ -> danh sách cờ, xếp theo mức độ (error trước) rồi theo trang."""
     flags = (
         _empty_page(doc)
         + _image_not_described(doc)
@@ -114,6 +101,7 @@ def build_flags(doc: ParsedDocument) -> list[Flag]:
 
 
 def apply_flags(doc: ParsedDocument) -> ParsedDocument:
+    """Gán danh sách cờ vào `doc.flags` và in số cờ theo loại."""
     doc.flags = build_flags(doc)
     by_kind: dict[str, int] = {}
     for f in doc.flags:

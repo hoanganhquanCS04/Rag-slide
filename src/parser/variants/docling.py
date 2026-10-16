@@ -1,8 +1,8 @@
-"""Bước ① qua docling VlmPipeline: mỗi trang một request VLM, preset `dots_ocr`.
+"""Bước ① qua docling VlmPipeline: mỗi trang một request VLM đọc ảnh cả trang.
 
-Prompt: `src/prompts/s0_vlm_layout_prompt.md` (khoá `paragraph`, loại khối viết thường) — `normalize_elements`
-đổi về đúng dạng dots_ocr trước khi `parse_dots_json` dựng DoclingDocument. Phản hồi thô từng trang ở
-`logs/vlm_pipeline/<doc_id>/pNNN.txt`: trang hỏng JSON thành trang rỗng, chỉ raw cho biết vì sao.
+Để làm gì: lấy bố cục trang — các khối chữ / bảng / ảnh, vị trí và chữ của từng khối.
+Cách làm: prompt ở `src/prompts/s0_vlm_layout_prompt.md`; phản hồi được sửa cho đúng dạng dots_ocr
+rồi docling dựng DoclingDocument; phản hồi thô từng trang lưu ở `logs/vlm_pipeline/<doc_id>/`.
 """
 
 from __future__ import annotations
@@ -91,11 +91,16 @@ _MD_STARS = re.compile(r"\*{1,3}(\S(?:[^*\n]*?\S)?)\*{1,3}")
 
 
 def _plain(text: str) -> str:
+    """Bỏ ký hiệu Markdown (#, gạch đầu dòng, **đậm**) mà VLM tự thêm vào chữ."""
     return _MD_STARS.sub(r"\1", _MD_LEAD.sub("", text))
 
 
 def normalize_elements(content: str) -> tuple[list[dict[str, Any]] | None, list[str]]:
-    """Phản hồi VLM -> (phần tử dạng dots_ocr, ghi chú). JSON hỏng -> (None, …)."""
+    """Sửa phản hồi VLM của một trang cho đúng dạng dots_ocr -> (danh sách phần tử, ghi chú).
+
+    Cách làm: đọc mảng JSON; bbox nhiều khung / 2 điểm -> gộp thành 1 hộp bao; đổi tên loại khối về
+    dạng docling hiểu; bỏ Markdown trong chữ; bỏ phần tử lặp; JSON hỏng -> None (mất cả trang).
+    """
     data = load_json_array(_NESTED_BBOX.sub(r'"bbox": [\1]', content))
     if data is None:
         return None, ["JSON hong -> mat ca trang"]
@@ -131,9 +136,10 @@ def normalize_elements(content: str) -> tuple[list[dict[str, Any]] | None, list[
 
 
 class GemmaVlmPipeline(VlmPipeline):
-    """VlmPipeline đọc JSON kiểu dots_ocr đã qua `normalize_elements`; bbox thang 0–1000."""
+    """VlmPipeline của docling, sửa lại để đọc được phản hồi của Gemma (toạ độ thang 0–1000)."""
 
     def _dots_page_document(self, conv_res, page, predicted_text, page_image) -> DoclingDocument:
+        """Dựng DoclingDocument cho một trang từ phản hồi VLM đã sửa (`normalize_elements`)."""
         assert page.size is not None
         elements, notes = normalize_elements(predicted_text)
         if notes:
@@ -160,7 +166,7 @@ _FURNITURE = {DocItemLabel.PAGE_HEADER, DocItemLabel.PAGE_FOOTER}
 
 
 class DoclingParser(BaseParser):
-    """① qua docling VlmPipeline + VLM đọc ảnh cả trang."""
+    """Parser dùng docling VlmPipeline + VLM đọc ảnh cả trang."""
 
     kind = "docling"
     scale = 4.0                    # ảnh trang = 4 × 72dpi
@@ -171,9 +177,11 @@ class DoclingParser(BaseParser):
 
     @property
     def raw_json(self) -> Path:
+        """Đường dẫn file cache của bước ① (`docling_vlmpipeline.json`)."""
         return self.out_dir / "docling_vlmpipeline.json"
 
     def parse_layout(self, src: Path, pdf: Path, *, redo: bool = False) -> ParsedDocument:
+        """Bước ①: có cache thì nạp lại, không có (hoặc `redo`) thì gọi VLM -> ParsedDocument."""
         if redo or not self.raw_json.exists():
             ddoc = self._convert(pdf)
         else:
@@ -182,7 +190,10 @@ class DoclingParser(BaseParser):
         return self._to_parsed(ddoc, src)
 
     def _convert(self, pdf: Path) -> DoclingDocument:
-        """Gọi VLM cả file -> ghi `raw_json` + phản hồi thô từng trang."""
+        """Gọi VLM cho cả file -> DoclingDocument; ghi cache + phản hồi thô từng trang.
+
+        Cách làm: bỏ ảnh trang khỏi cache (vẽ lại từ PDF khi cần) để file không phình.
+        """
         for name in _NOISY:
             logging.getLogger(name).setLevel(logging.WARNING)
         if not self.model:
@@ -208,6 +219,7 @@ class DoclingParser(BaseParser):
         return ddoc
 
     def _converter(self) -> DocumentConverter:
+        """Dựng DocumentConverter của docling: server VLM, prompt, độ phân giải, số trang chạy song song."""
         base, key, soft = vlm_endpoint()
         # `params` ghi đè HẲN tham số API của preset (model, max_tokens)
         params: dict[str, Any] = {"model": self.model, "max_tokens": self.max_tokens, "temperature": 0}
@@ -230,7 +242,7 @@ class DoclingParser(BaseParser):
             InputFormat.PDF: PdfFormatOption(pipeline_cls=GemmaVlmPipeline, pipeline_options=opts)})
 
     def _save_raw(self, res: ConversionResult) -> Path:
-        """Phản hồi thô từng trang -> logs/vlm_pipeline/<doc_id>/pNNN.txt (xoá bản lần trước)."""
+        """Ghi phản hồi thô của VLM từng trang ra `logs/vlm_pipeline/<doc_id>/pNNN.txt` (xoá bản cũ)."""
         d = RAW_DIR / self.out_dir.name
         d.mkdir(parents=True, exist_ok=True)
         for old in d.glob("p*.txt"):
@@ -241,7 +253,12 @@ class DoclingParser(BaseParser):
         return d
 
     def _to_parsed(self, ddoc: DoclingDocument, src: Path) -> ParsedDocument:
-        """DoclingDocument -> ParsedDocument: thứ tự đọc của docling, toạ độ [0,1] gốc trên-trái."""
+        """Đổi DoclingDocument thành ParsedDocument.
+
+        Cách làm: đi theo thứ tự đọc của docling; bỏ header / footer; đổi toạ độ về [0,1] gốc trên-trái;
+        đặt id `pNNN.bNN`; ảnh -> ParsedImage, bảng -> ParsedTable, chữ -> ParsedParagraph; cuối cùng gán
+        tiêu đề trang (khối title đầu tiên) và page_hash.
+        """
         pages = {no: ParsedPage(page_no=no) for no in sorted(ddoc.pages)}
         for item, _ in ddoc.iterate_items():
             if not isinstance(item, (TextItem, TableItem, PictureItem)) or not item.prov:

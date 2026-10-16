@@ -1,13 +1,7 @@
-"""Biến thể `openai` — gọi /v1/embeddings (cổng OPENAI_BASE_URL, khoá OPENAI_API_KEY).
+"""Embedder `openai`: gọi API /v1/embeddings (server OPENAI_BASE_URL, khoá OPENAI_API_KEY).
 
-Vì sao bỏ bge-m3 local (đo được, ghi lại để sau khỏi tranh cãi lại):
-
-    bge-m3 CPU      182ms/câu hỏi · 819ms/chunk · 4.3 GB đĩa · nạp nguội ~10 phút
-    API 3-small     719ms/câu hỏi · 0 GB đĩa    · không phải nạp
-
-API CHẬM GẤP 4 ở runtime (mất round-trip mạng) và ăn ~29% budget 2.5s của §2.
-Đổi lại máy không phải giữ model. Offline thì API nhanh hơn vì gửi cả lô một lần.
-Muốn quay lại local: thêm `variants/bge_m3.py` + một dòng trong `embedders/factory.py`.
+Vì sao dùng API thay cho model local bge-m3 (đo được): máy không phải giữ model 4.3 GB; offline
+thì API nhanh hơn vì gửi cả lô; đổi lại runtime chậm hơn (~719ms mỗi câu hỏi so với ~182ms).
 """
 
 from __future__ import annotations
@@ -28,9 +22,11 @@ TIMEOUT = 60.0
 
 
 class OpenAIEmbedder(Embedder):
+    """Embedder gọi API embeddings kiểu OpenAI."""
     kind = "openai"
 
     def __init__(self, model_id: str, *, retry: int = RETRY):
+        """Đọc khoá + địa chỉ API từ .env, tạo kết nối HTTP."""
         super().__init__(model_id, retry=retry)
         import httpx   # KHÔNG dùng urllib: Cloudflare chặn User-Agent Python-urllib (lỗi 1010)
 
@@ -48,9 +44,11 @@ class OpenAIEmbedder(Embedder):
 
     @property
     def dim(self) -> int:
+        """Số chiều theo tên model (không biết thì 1536)."""
         return DIM.get(self.model_id, 1536)
 
     def _request(self, batch: list[str]) -> np.ndarray:
+        """Gửi một lô chữ lên API -> ma trận vector, xếp đúng thứ tự gửi đi."""
         r = self.client.post(self.url, json={"model": self.model_id, "input": batch})
         if r.status_code != 200:
             raise RuntimeError(f"HTTP {r.status_code}: {r.text[:200]}")

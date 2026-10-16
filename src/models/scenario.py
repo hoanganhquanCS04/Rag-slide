@@ -1,8 +1,7 @@
-"""Schema của kịch bản (S4). Xem docs/spec/scenario.md §12.
+"""Kiểu dữ liệu của kịch bản (S4): cả deck -> từng trang, mỗi trang MỘT đoạn văn robot nói.
 
-Lưu ở file RIÊNG `src/output/scenario/<doc_id>/scenario.json`, không nhét vào `ParsedDocument`:
-ParsedDocument suy ra được từ PDF (parse lại là có), kịch bản thì LLM sinh + người duyệt
-(mất là phải trả tiền + duyệt lại).
+Để làm gì: lưu riêng ở `src/output/scenario/<doc_id>/scenario.json`, tách khỏi ParsedDocument
+(parse lại không làm mất kịch bản đã trả tiền viết).
 """
 
 from __future__ import annotations
@@ -15,37 +14,26 @@ SYL_PER_MIN = 200          # tiếng Việt nói 190–210 âm tiết/phút (§5
 
 # Cờ đỏ: KHÔNG đóng gói được cho tới khi người duyệt xử lý
 RED_FLAGS = {
-    "bad_grounding",            # content không trỏ đúng khối / delivery mang số, thuật ngữ
+    "bad_grounding",            # không có ref, hoặc ref không phải khối của trang
     "empty_script",
     "llm_failed",
 }
 
 
-class Prosody(BaseModel):
-    emphasis: list[str] = Field(default_factory=list)
-    pause_before_ms: int = 0
-    speed: float = 1.0
-
-
-class Grounding(BaseModel):
-    type: Literal["kb_chunk", "structure", "style"]
-    ref: str | None = None          # block_id, vd "p011.b02"
-
-
-class Sentence(BaseModel):
-    kind: Literal["content", "delivery"]
-    text: str
-    grounding: Grounding | None = None   # content mà None -> CỜ ĐỎ
-    syllables: int = 0                   # CODE tính theo kho phát âm, không để LLM khai
-    prosody: Prosody = Field(default_factory=Prosody)
-
-
 class SlideScript(BaseModel):
+    """Kịch bản của một trang: MỘT đoạn văn robot nói + các khối nguồn của đoạn đó.
+
+    Cách làm: `text` là đoạn văn liền (không chia câu dẫn / câu nội dung); `refs` là id các khối
+    trên trang mà đoạn văn lấy thông tin; `syllables` do code đếm theo kho phát âm.
+    `page_hash` + `prompt_hash` + `model` dùng để biết trang có phải viết lại không.
+    """
     page_no: int
     page_hash: str
     slide_type: Literal["section_divider", "exercise", "content"]
     section_id: str | None = None
-    sentences: list[Sentence] = Field(default_factory=list)
+    text: str = ""
+    refs: list[str] = Field(default_factory=list)   # id khối nguồn, vd ["p011.b02", "p011.b03"]
+    syllables: int = 0                             # CODE đếm theo kho phát âm, không để LLM khai
     flags: list[str] = Field(default_factory=list)
     unknown_terms: list[str] = Field(default_factory=list)
     passes: int = 1                      # 2 = phải sửa một lần -> đáng soi
@@ -53,23 +41,18 @@ class SlideScript(BaseModel):
     prompt_hash: str = ""
 
     @property
-    def syllables(self) -> int:
-        return sum(s.syllables for s in self.sentences)
-
-    @property
     def seconds(self) -> float:
+        """Thời lượng nói ước tính của trang (âm tiết / 200 mỗi phút)."""
         return self.syllables / SYL_PER_MIN * 60
 
     @property
     def red_flags(self) -> list[str]:
+        """Các cờ đỏ của trang (phải người duyệt mới dùng được)."""
         return [f for f in self.flags if f.split(":")[0] in RED_FLAGS]
-
-    @property
-    def text(self) -> str:
-        return " ".join(s.text for s in self.sentences)
 
 
 class Scenario(BaseModel):
+    """Kịch bản cả deck: model, hash prompt, hash phát âm và kịch bản từng trang."""
     doc_id: str
     model: str
     prompt_hash: str
@@ -80,4 +63,5 @@ class Scenario(BaseModel):
 
     @property
     def seconds(self) -> float:
+        """Tổng thời lượng nói của cả deck."""
         return sum(s.seconds for s in self.slides)

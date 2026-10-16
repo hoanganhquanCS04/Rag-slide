@@ -1,4 +1,4 @@
-"""Chọn embedder theo `EMBEDDER` trong .env (mặc định openai), bọc cache trừ khi tắt."""
+"""Chọn embedder theo `EMBEDDER` trong .env (mặc định openai), bọc thêm cache."""
 
 from __future__ import annotations
 
@@ -17,6 +17,11 @@ EMBEDDERS = {
 
 def create_embedder(kind: str | None = None, *, model_id: str = MODEL_ID, retry: int = RETRY,
                     cache: bool = True) -> Embedder:
+    """Tạo embedder theo tên -> object embedder (mặc định có bọc cache).
+
+    Cách làm: tra tên trong `EMBEDDERS` ("module:Class"), chỉ import module khi được chọn;
+    `cache=False` thì không bọc cache.
+    """
     kind = (kind or os.environ.get("EMBEDDER") or "openai").lower()
     if kind not in EMBEDDERS:
         raise SystemExit(f"EMBEDDER='{kind}' khong hop le — chon {' | '.join(EMBEDDERS)}")

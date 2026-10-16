@@ -1,7 +1,6 @@
-"""Lọc + kiểu kết quả dùng CHUNG cho kho vector (`store/`) và index từ khoá (`sparse/`).
+"""Kiểu bộ lọc (`Where`) và kiểu kết quả (`Hit`) dùng chung cho kho vector và BM25.
 
-Hai nhánh của search lọc bằng CÙNG một dict `where` và trả CÙNG kiểu `Hit` — để đi qua
-`search.py` một đường như nhau. Để ở đây thì `sparse/` không phải import `store/`.
+Để làm gì: hai nhánh tìm kiếm lọc cùng một kiểu và trả cùng một kiểu kết quả.
 """
 
 from __future__ import annotations
@@ -16,7 +15,10 @@ Hit = tuple[str, float]          # (chunk_id, điểm) — càng cao càng giố
 
 
 def filter_metadata(c: KBChunk) -> dict[str, Any]:
-    """Các trường `where` lọc được. PHẲNG: Chroma không nhận None / list / dict lồng."""
+    """Lấy các trường của chunk dùng để lọc (doc_id, page_no, ...).
+
+    Cách làm: lấy 6 trường, bỏ trường None (Chroma không nhận None).
+    """
     meta = {
         "doc_id": c.doc_id,
         "page_no": c.page_no,
@@ -29,7 +31,10 @@ def filter_metadata(c: KBChunk) -> dict[str, Any]:
 
 
 def matches(meta: dict[str, Any], where: Where | None) -> bool:
-    """Luật lọc của bản gốc (`make_metadata_filter`): giá trị là list -> thuộc, còn lại -> bằng."""
+    """Kiểm một chunk có khớp bộ lọc `where` không.
+
+    Cách làm: mọi điều kiện đều phải đúng; giá trị là list thì "thuộc list", còn lại thì "bằng".
+    """
     for k, v in (where or {}).items():
         if (meta.get(k) not in v) if isinstance(v, list) else (meta.get(k) != v):
             return False

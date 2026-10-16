@@ -1,1 +1,1 @@
-"""S4 — kịch bản robot nói. Xem docs/spec/scenario.md."""
+"""S4 — viết kịch bản robot nói cho từng trang. Xem docs/spec/scenario.md."""

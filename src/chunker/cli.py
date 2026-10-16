@@ -1,10 +1,10 @@
-"""ParsedDocument -> `src/output/chunker/<doc_id>/chunks.json`.
+"""Lệnh chunk (S5): document.json -> `src/output/chunker/<doc_id>/chunks.json`.
 
-    python src/chunker/cli.py src/output/parser/<ten>/document.json [--chunker page]
-    python src/chunker/cli.py src/output/parser/<ten>/document.json --page 19     # in chunk của 1 trang
-    python src/chunker/cli.py src/output/parser/<ten>/document.json --stats       # chỉ in thống kê
+    python src/chunker/cli.py src/output/parser/<ten>/document.json              # cắt + in mọi chunk
+    python src/chunker/cli.py src/output/parser/<ten>/document.json --page 19    # in chunk của trang 19
+    python src/chunker/cli.py src/output/parser/<ten>/document.json --stats      # chỉ in thống kê
 
-Mỗi bài một thư mục `src/output/chunker/<doc_id>/`. Bước sau — nhúng + nạp kho: `src/retrieval/build_index.py`.
+Bước sau — nhúng + nạp kho: `src/embedders/cli.py`.
 """
 
 from __future__ import annotations
@@ -36,11 +36,13 @@ OUT = CHUNKER_OUTPUT
 
 
 def _short(s: str, full: bool, n: int = 78) -> str:
+    """Rút gọn chữ để in một dòng: xuống dòng thành "⏎", dài quá thì cắt (trừ khi `full`)."""
     s = s.replace("\n", " ⏎ ")
     return s if full else (s[:n] + ("…" if len(s) > n else ""))
 
 
 def show(cs: ChunkSet, pages: list[int] | None, full: bool) -> None:
+    """In từng chunk (hoặc chỉ chunk của các trang được chọn): id, số token, % ảnh, chữ."""
     rows = cs.chunks if pages is None else [c for c in cs.chunks if c.page_no in pages]
     for c in rows:
         mark = "  " if c.is_searchable else "✗ "
@@ -49,6 +51,7 @@ def show(cs: ChunkSet, pages: list[int] | None, full: bool) -> None:
 
 
 def stats(cs: ChunkSet) -> None:
+    """In thống kê bộ chunk: số chunk, số chunk tìm được, token nhỏ nhất / trung vị / lớn nhất, trang chuyển chương."""
     n = [c.token_count for c in cs.chunks]
     s = [c.token_count for c in cs.searchable]
     log.info("")
@@ -65,6 +68,7 @@ def stats(cs: ChunkSet) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Đọc tham số, nạp + enrich document.json, cắt chunk, in kết quả, ghi `chunks.json`."""
     ap = argparse.ArgumentParser(prog="chunker", description=__doc__.splitlines()[0])
     ap.add_argument("parsed", type=Path, help="src/output/parser/<ten>/document.json")
     ap.add_argument("--chunker", default="page", choices=CHUNKERS)

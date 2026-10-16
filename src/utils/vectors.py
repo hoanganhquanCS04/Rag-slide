@@ -1,11 +1,8 @@
-"""File vector trên đĩa: `src/output/embedders/<doc_id>/vectors__<model>.{npy,json}`.
+"""Đọc / ghi file vector trên đĩa: `src/output/embedders/<doc_id>/vectors__<model>.{npy,json}`.
 
-MỘT chỗ đặt tên, ghi và đọc. Embedder và kho vector cùng dùng module này, KHÔNG import nhau.
-
-    .npy    ma trận (n_chunk, dim) float32, đã chuẩn hoá L2 — hàng i là chunk i của chunks.json
-    .json   sidecar: model, dim, rows[i] = chunk_id hàng i, keys[i] = text_key hàng i
-
-`.npy` là NGUỒN; kho vector (chroma) chỉ là bản sao để tìm, xoá đi thì `sync` dựng lại từ đây.
+Để làm gì: một chỗ duy nhất đặt tên, ghi và đọc file vector.
+    .npy    ma trận vector, hàng i = chunk i trong chunks.json
+    .json   thông tin kèm theo: model, chunk_id từng hàng, hash chữ từng hàng
 """
 
 from __future__ import annotations
@@ -20,31 +17,33 @@ import numpy as np
 from utils.config import EMBEDDERS_OUTPUT
 from models.kb_chunk import ChunkSet
 
-REBUILD = "chay `python src/retrieval/build_index.py src/output/chunker/<ten>/chunks.json` (trung cache, khong ton API)"
+REBUILD = "chay `python src/embedders/cli.py src/output/chunker/<ten>/chunks.json` (trung cache, khong ton API)"
 
 
 def model_slug(model_id: str) -> str:
+    """Tên model ngắn để đặt tên file: "openai/text-embedding-3-small" -> "text-embedding-3-small"."""
     return model_id.split("/")[-1].lower()
 
 
 def text_key(text: str, model_id: str) -> str:
-    """Vân tay 'chữ này nhúng bằng model này'. Tên file cache, kho vector dùng để biết vector
-    đang giữ còn khớp chunk không, và `load_vectors` dùng để bắt `.npy` cũ."""
+    """Mã hash của cặp (model, chữ).
+
+    Để làm gì: biết vector đang có còn khớp với chữ của chunk không (dùng cho cache và kiểm tra).
+    """
     return hashlib.sha1(f"{model_id}\x00{text}".encode()).hexdigest()
 
 
 def vectors_file(doc_id: str, model_id: str) -> Path:
-    """src/output/embedders/<doc_id>/vectors__<model>.npy.
-
-    Tên bài là tên thư mục; tên model PHẢI nằm trong tên file (§10) — đổi model mà trỏ vector
-    cũ là trả rác không báo lỗi.
-    """
+    """Đường dẫn file .npy của một deck với một model (tên model nằm trong tên file)."""
     return EMBEDDERS_OUTPUT / doc_id / f"vectors__{model_slug(model_id)}.npy"
 
 
 def save_vectors(cs: ChunkSet, mat: np.ndarray, *, model_id: str,
                  **info: Any) -> tuple[Path, Path]:
-    """Ghi .npy + .json. `info` (backend, n_api_calls, embed_sec…) chỉ để người đọc."""
+    """Ghi ma trận vector ra file .npy và thông tin kèm theo ra file .json.
+
+    Cách làm: `info` (thời gian, số lần gọi API...) chỉ ghi thêm cho người đọc.
+    """
     p_npy = vectors_file(cs.doc_id, model_id)
     p_npy.parent.mkdir(parents=True, exist_ok=True)
     p_json = p_npy.with_suffix(".json")
@@ -57,7 +56,7 @@ def save_vectors(cs: ChunkSet, mat: np.ndarray, *, model_id: str,
         "normalized": True,
         "n_vectors": len(cs.chunks),
         **info,
-        "sparse": False,   # API khong tra sparse — BM25 dung rieng o retrieval/sparse/
+        "sparse": False,   # API khong tra sparse — BM25 dung rieng o sparse/
         "rows": [c.chunk_id for c in cs.chunks],
         "keys": [text_key(c.text_enriched, model_id) for c in cs.chunks],
     }, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -65,10 +64,10 @@ def save_vectors(cs: ChunkSet, mat: np.ndarray, *, model_id: str,
 
 
 def load_vectors(cs: ChunkSet, path: str | Path, model_id: str) -> np.ndarray:
-    """Đọc .npy, kiểm hàng i ĐÚNG là chunk i của `cs` — cả chunk_id lẫn CHỮ.
+    """Đọc file .npy và kiểm nó khớp với bộ chunk hiện tại.
 
-    Chỉ so chunk_id là không đủ: chunker chạy lại đổi chữ mà giữ chunk_id thì kho nạp lại
-    vector của chữ CŨ, metadata ghi chữ MỚI — tìm ra trang sai mà không báo lỗi.
+    Cách làm: so model, so chunk_id từng hàng, so hash chữ từng hàng; lệch cái nào là dừng và
+    bảo chạy lại bước nhúng.
     """
     p = Path(path)
     if not p.exists():

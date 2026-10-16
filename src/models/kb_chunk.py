@@ -1,9 +1,7 @@
-"""KBChunk — mẩu tài liệu để đem đi nhúng vector và tìm kiếm.
+"""Kiểu dữ liệu của chunk (S5) và kết quả tìm kiếm.
 
-Xem [docs/spec/kb-chunk.md](../../docs/spec/kb-chunk.md) cho lý do từng quyết định.
-
-Tóm tắt: 1 trang = 1 chunk (dài thì cắt `.1`, `.2`…), mọi chunk trỏ về `page_no` vì R2
-điều hướng theo TRANG. Cắt ở `src/chunker/`.
+Để làm gì: chunk là mẩu chữ đem đi nhúng vector và tìm. Một trang = một chunk (trang dài thì
+cắt `.1`, `.2`...), chunk nào cũng trỏ về `page_no` vì runtime nhảy tới TRANG.
 """
 
 from __future__ import annotations
@@ -14,6 +12,11 @@ from pydantic import BaseModel, Field
 
 
 class KBChunk(BaseModel):
+    """Một chunk: chữ đem nhúng, trang nguồn, chương, loại trang và các khối gốc.
+
+    Cách làm: `text_enriched` = tiền tố [chương · tiêu đề · trang] + chữ, là thứ đem nhúng;
+    `text_raw` = chữ không tiền tố; `block_ids` trỏ về các khối trong ParsedDocument.
+    """
     chunk_id: str                 # "onboarding_kit#p018" | "...#p018.2" (trang bị cắt)
     doc_id: str
     page_no: int                  # R2 nhảy tới đây — mọi vector đều trỏ về một trang
@@ -33,23 +36,17 @@ class KBChunk(BaseModel):
 
     @property
     def is_searchable(self) -> bool:
-        """Trang phân mục không có nội dung -> lọc khỏi truy vấn mặc định.
-
-        KHÔNG xoá (§10 cấm vứt chunk) — chỉ lọc, để luật nhận diện sai còn sửa được
-        mà khỏi parse lại (parse lại tốn tiền API). Nhận diện là việc của `slide_type` —
-        không thêm ngưỡng token ngầm ở đây (ngưỡng cũ `>= 20` đo lại không lọc chunk nào).
-        """
+        """Chunk có được tìm mặc định không: trang chuyển chương thì không (chỉ lọc, không xoá)."""
         return self.content_type == "content"
 
     @property
     def image_ratio(self) -> float:
-        """Bao nhiêu phần nội dung là MÔ TẢ ẢNH do VLM viết — dễ sai số / bịa bối cảnh hơn chữ
-        VLM chép từ slide."""
+        """Bao nhiêu phần nội dung là mô tả ảnh do VLM viết (dễ sai hơn chữ chép từ slide)."""
         return self.n_images / len(self.block_ids) if self.block_ids else 0.0
 
 
 class ChunkSet(BaseModel):
-    """Cả bộ chunk của một tài liệu — ghi ra JSON đọc lại được (§9)."""
+    """Cả bộ chunk của một deck — nội dung file `chunks.json`."""
 
     doc_id: str
     max_tokens: int = 500
@@ -58,17 +55,19 @@ class ChunkSet(BaseModel):
 
     @property
     def searchable(self) -> list[KBChunk]:
+        """Các chunk được tìm mặc định (bỏ trang chuyển chương)."""
         return [c for c in self.chunks if c.is_searchable]
 
     def by_page(self, page_no: int) -> list[KBChunk]:
+        """Các chunk của một trang."""
         return [c for c in self.chunks if c.page_no == page_no]
 
 
 class SearchHit(BaseModel):
-    """Một kết quả tìm được. Xem docs/spec/search.md.
+    """Một kết quả tìm kiếm: trang, điểm RRF, hạng và điểm thô của từng nhánh (vector / BM25).
 
-    Giữ CẢ hạng lẫn điểm thô của từng nhánh: nhìn `rank_dense=11, rank_sparse=1` là biết
-    ngay kết quả này do BM25 kéo lên. Chỉ trả mỗi `score` thì không chẩn đoán được gì.
+    Cách làm: `score` chỉ để xếp thứ tự, KHÔNG phải độ tin cậy; giữ hạng từng nhánh để biết nhánh
+    nào kéo kết quả lên.
     """
 
     chunk_id: str

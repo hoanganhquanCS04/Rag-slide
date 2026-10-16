@@ -5,8 +5,9 @@
 **Model:** không có. Người — **đọc và NGHE**.
 
 > **⬜ Chưa có code.** Cờ v0 đang sinh ra để chờ S7: cờ S0 trong `document.json`
-> (`flags[]`), cờ S4 trong từng trang của `scenario.json`. `self_retrieval_fail` chưa bao
-> giờ bắn — self-retrieval gần như luôn 100% (xem [00-overview §8](./00-overview.md)).
+> (`flags[]`), cờ S4 trong từng trang của `scenario.json`. **`self_retrieval_fail` BỎ
+> 2026-10-13** cùng `audit.py` — self-retrieval gần như luôn 100%, cờ chưa bao giờ bắn. Các mục
+> nhắc tới nó dưới đây (bảng §3, §4b) giữ làm lịch sử, không còn nguồn sinh cờ.
 >
 > Vòng NGHE (§5b) và xử lý `self_retrieval_fail` (§4b) đã qua vòng chốt. Phần còn lại
 > (UI, thang hành động) vẫn là suy ra từ luật + tập flag — sửa thoải mái khi code thật.
@@ -242,7 +243,6 @@ DeckBundle {
   deck_id, version, reviewed_at, reviewed_by, mos_score
 
   slide_index (Qdrant collection)  <- TRUY XUẤT cho R2, không phải file text
-  deck_map.txt                     <- ~150 token, inline vào prompt
   manifest.json                    <- audio + duration + prosody
   slide_repr_lite[]                <- message, description, relations, entities
                                       (bỏ bbox, conf) — R3 dùng làm bảng chỉ trỏ

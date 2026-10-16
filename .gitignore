@@ -6,3 +6,5 @@ src/output/
 logs/
 data/
 test/
+# Added by code-review-graph
+.code-review-graph/
