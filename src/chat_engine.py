@@ -23,6 +23,7 @@ import json
 import logging
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from components.embedders.base import EmbedError, Embedder
@@ -165,18 +166,22 @@ class ChatEngine:
     def retrieve_context(self, question: str) -> tuple[list[SearchHit], str]:
         """Tìm các trang liên quan tới câu hỏi -> (các trang, cách đã dùng để tìm).
 
-        Bình thường tìm bằng cả vector lẫn từ khoá rồi gộp ("hybrid").
+        Hai cách tìm chạy CÙNG LÚC, mỗi cách một luồng: vector (chờ API nhúng) và từ khoá BM25
+        (chạy trong máy). Xong cả hai thì gộp ("hybrid").
         Nếu API nhúng vector lỗi thì câu này chỉ dùng kết quả từ khoá ("sparse").
         """
         if not any(c.is_searchable for c in self.chunk_set.chunks):
             return [], "hybrid"
-        mode = "hybrid"
-        try:
-            dense = self.vector_search(question)
-        except EmbedError as e:
-            log.warning("  [API nhúng lỗi -> câu này chỉ tìm bằng từ khoá] %s", str(e)[:120])
-            dense, mode = [], "sparse"
-        sparse = self.keyword_search(question)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            dense_job = pool.submit(self.vector_search, question)
+            sparse_job = pool.submit(self.keyword_search, question)
+            mode = "hybrid"
+            try:
+                dense = dense_job.result()      # lỗi trong luồng vector được ném lại ở đây
+            except EmbedError as e:
+                log.warning("  [API nhúng lỗi -> câu này chỉ tìm bằng từ khoá] %s", str(e)[:120])
+                dense, mode = [], "sparse"
+            sparse = sparse_job.result()
         return ensemble_search(dense, sparse, self.chunks_by_id, k=self.cfg.top_k), mode
 
     def _prepare_context(self, question: str, found: list[SearchHit]) -> str:
