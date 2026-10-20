@@ -84,7 +84,6 @@ def detect_sections(doc: ParsedDocument) -> tuple[list[SectionSpan], list[str]]:
                 title=_strip(it),
                 pages=(no, starts[i + 1][1] - 1 if i + 1 < len(starts) else last),
                 source="outline_page",
-                confidence=round(ratio, 2),
             )
             for i, (it, no) in enumerate(starts)
         ]

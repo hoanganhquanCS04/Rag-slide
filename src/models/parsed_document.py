@@ -329,13 +329,12 @@ class ParsedPage(_Base):
 
 
 class SectionSpan(_Base):
-    """Một chương: id, tên, trang đầu – trang cuối, nguồn (dò từ mục lục) và độ tin cậy."""
+    """Một chương: id, tên, trang đầu – trang cuối, nguồn (dò từ mục lục)."""
 
     id: str
     title: str
     pages: tuple[int, int]                # [trang đầu, trang cuối]
     source: Literal["outline_page", "manual"]
-    confidence: float = Field(ge=0.0, le=1.0)
 
     @property
     def start_page(self) -> int:

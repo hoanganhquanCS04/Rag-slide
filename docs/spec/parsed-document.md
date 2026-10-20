@@ -31,7 +31,7 @@ ParsedDocument
 ├── doc_id
 ├── source      {path, sha256}
 ├── parser      {docling_version, vlm_model, picture_area_threshold}
-├── sections[]  {id, title, pages: [đầu, cuối], source, confidence}   ← enrich(), không ghi file
+├── sections[]  {id, title, pages: [đầu, cuối], source}   ← enrich(), không ghi file
 ├── flags[]     {kind, severity, page_no, block_id, detail}           ← enrich(), không ghi file
 └── pages[]
      ├── page_no · title · section_id · page_hash
@@ -113,7 +113,7 @@ bao giờ thành block (VLM xếp vào `decorative`).
 
 ### Chương (`sections`)
 
-SUY RA chứ không parse ra — nên bắt buộc khai `source` + `confidence`. Nguồn duy nhất là
+SUY RA chứ không parse ra — nên bắt buộc khai `source`. Nguồn duy nhất là
 **trang mục lục** (`source: outline_page`; `manual` dành cho người sửa tay):
 
 - Tìm trong 5 trang đầu một trang có ≥ 3 dòng mà ≥ 60% dòng tìm được trang mở chương phía sau
@@ -122,9 +122,9 @@ SUY RA chứ không parse ra — nên bắt buộc khai `source` + `confidence`.
   trang bắt đầu chương, kéo tới trước trang bắt đầu chương kế tiếp.
 - Khớp: bỏ số thứ tự ("01.", "4."), không phân biệt hoa thường, tiêu đề CHỨA tên mục cũng
   tính ("CHẾ ĐỘ LƯƠNG THƯỞNG" ∋ "LƯƠNG THƯỞNG").
-- `confidence` = tỉ lệ mục khớp. Trang trước chương đầu (bìa, mục lục) không có `section_id`.
+- Trang trước chương đầu (bìa, mục lục) không có `section_id`.
 
-Không có mục lục khớp → `sections: []` + cờ `no_sections`. KHÔNG đoán.
+Không có mục lục khớp → `sections: []`. KHÔNG đoán.
 
 ### `slide_type` — KHÔNG ghi ra JSON
 
@@ -185,8 +185,8 @@ Khối `v02` không trỏ mẩu chữ docling nào, cũng không có vùng ngu�
 
 ```json
 "sections": [
-  {"id": "sec_00", "title": "Các thủ tục, quy trình, quy định, thông tin chung", "pages": [3, 13], "source": "outline_page", "confidence": 1.0},
-  {"id": "sec_01", "title": "Nhân sự", "pages": [14, 36], "source": "outline_page", "confidence": 1.0},
+  {"id": "sec_00", "title": "Các thủ tục, quy trình, quy định, thông tin chung", "pages": [3, 13], "source": "outline_page"},
+  {"id": "sec_01", "title": "Nhân sự", "pages": [14, 36], "source": "outline_page"},
   "..."
 ]
 ```

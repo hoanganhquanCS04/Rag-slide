@@ -235,11 +235,27 @@ class ChatEngine:
         return self._escalate("no_info", note=f"LLM tra hanh dong la: {raw}")
 
     def _escalate(self, reason: str, *, note: str = "") -> Reply:
-        """Tạo câu từ chối (chuyển cho người thật) theo lý do: no_info / off_topic / inappropriate."""
+        """Tạo câu TỪ CHỐI trả lời — robot nói câu soạn sẵn, để người thật giải đáp sau.
+
+        reason  lý do từ chối, chọn câu nói tương ứng trong ESCALATE_TEXT:
+                  no_info        slide không có thông tin  -> "Phần này slide không nói tới..."
+                  off_topic      câu hỏi ngoài bài          -> "Câu này nằm ngoài nội dung bài..."
+                  inappropriate  câu chửi bới, quấy rối     -> "Mình xin phép tiếp tục bài giảng nhé."
+        note    ghi chú nội bộ để xem lại vì sao từ chối (robot KHÔNG nói ra); bỏ trống thì ghi lý do.
+        """
         return Reply(action="escalate", text=ESCALATE_TEXT[reason], note=note or reason)
 
     def _fallback(self, hits: list[SearchHit], note: str) -> Reply:
-        """Dùng khi gọi LLM bị lỗi: nói chưa trả lời được, nhưng chỉ ra 1–2 trang liên quan."""
+        """Câu robot nói khi GỌI LLM BỊ LỖI (mạng rớt, quá giờ...) — không có câu trả lời của LLM.
+
+        Không im lặng: báo chưa trả lời được, và chỉ người nghe sang 2 trang tìm kiếm xếp đầu
+        (việc tìm vẫn chạy được, chỉ LLM hỏng).
+        Vd: "Mình chưa trả lời được ngay lúc này. Nội dung liên quan nằm ở trang 12 – PHÚC LỢI KHÁC,
+             trang 7 – CÁCH TÍNH LÀM THÊM GIỜ."
+
+        hits  các trang tìm được, trang tốt nhất đứng đầu
+        note  lý do lỗi, để xem lại (robot KHÔNG nói ra)
+        """
         pages = [h.page_no for h in hits[:2]]
         text = "Mình chưa trả lời được ngay lúc này."
         if pages:
@@ -247,18 +263,31 @@ class ChatEngine:
         return Reply(action="escalate", text=text, candidates=pages, via="fallback", note=note)
 
     def _list_pages(self, pages: list[int]) -> str:
-        """Viết danh sách trang kèm tên, vd: "trang 3 – Thời gian làm việc, trang 5 – Chế độ phúc lợi"."""
+        """Đổi danh sách số trang thành câu đọc được, kèm tên từng trang.
+
+        Vd: [12, 7] -> "trang 12 – PHÚC LỢI KHÁC, trang 7 – CÁCH TÍNH LÀM THÊM GIỜ"
+        Tên trang = tiêu đề trang; trang không có tiêu đề thì lấy dòng chữ đầu tiên (ParsedPage.label).
+        """
         return ", ".join(f"trang {p} – {self.doc.page(p).label}" for p in pages)
 
 
 def _ctx(hits: list[SearchHit]) -> str:
-    """Ghép các trang tìm được thành một đoạn chữ để đưa vào prompt.
+    """Ghép các trang tìm được thành MỘT đoạn chữ, điền vào chỗ {{found}} của prompt.
 
-    Mỗi trang có dòng đầu "[mã đoạn] trang N" (LLM dùng mã này để ghi nguồn), rồi tới nội dung.
+    Mỗi trang gồm 2 phần, các trang cách nhau một dòng trống:
+        dòng đầu   [mã đoạn] trang N   — LLM chép mã này vào "grounding" để ghi nguồn
+        bên dưới   chữ của trang (đã có tiền tố chương · tiêu đề · trang)
+
+    Vd với 1 trang:
+        [thoi_gian_lam_viec#p012] trang 12
+        [PHÚC LỢI KHÁC · PHÚC LỢI KHÁC · trang 12/17] PHÚC LỢI KHÁC ...
     """
     return "\n\n".join(f"[{h.chunk_id}] trang {h.page_no}\n{h.text_enriched}" for h in hits)
 
 
 def _ms(t0: float) -> int:
-    """Tính đã mất bao nhiêu mili giây kể từ lúc t0."""
+    """Đo thời gian: từ lúc t0 tới bây giờ là bao nhiêu mili giây (số nguyên).
+
+    Dùng: t0 = time.perf_counter() trước một bước, xong bước đó gọi _ms(t0). Vd tìm mất 0.73s -> 730.
+    """
     return int((time.perf_counter() - t0) * 1000)

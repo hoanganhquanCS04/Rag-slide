@@ -54,7 +54,7 @@ def report(doc: ParsedDocument) -> None:
              sum(len(p.tables) for p in doc.pages))
 
     for s in doc.sections:
-        log.info("    %s  p%d-%d  conf=%.2f  %s", s.id, s.start_page, s.end_page, s.confidence, s.title)
+        log.info("    %s  p%d-%d  %s", s.id, s.start_page, s.end_page, s.title)
 
 
 def main(argv: list[str] | None = None) -> int:
