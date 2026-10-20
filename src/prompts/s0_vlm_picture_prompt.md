@@ -5,15 +5,18 @@ thuyết trình và trả lời câu hỏi của khán giả.  Ảnh mang thông
 
 # ĐẦU VÀO
 
-1. Ảnh của TOÀN BỘ một trang slide. Trên ảnh, mỗi ảnh cần xét được khoanh bằng KHUNG có số [1], [2], …
-2. Danh sách các ảnh cần xét, đúng số trên khung đỏ, kèm vị trí [x1, y1, x2, y2]:
+1. Ảnh ĐẦU TIÊN: TOÀN BỘ một trang slide. Trên ảnh, mỗi ảnh cần xét được khoanh bằng KHUNG có số [1], [2], …
+2. Các ảnh TIẾP THEO: từng ảnh cần xét được CẮT RIÊNG và phóng to cho nét, đúng thứ tự [1], [2], …
+   (ảnh thứ hai = ảnh [1], ảnh thứ ba = ảnh [2], …). Dùng ảnh cắt để nhìn rõ chi tiết và chép chữ;
+   dùng ảnh toàn trang để hiểu ảnh đó nằm đâu, đi cùng phần chữ nào của trang.
+3. Danh sách các ảnh cần xét, đúng số trên khung đỏ, kèm vị trí [x1, y1, x2, y2] trên ảnh toàn trang:
    {{pictures}}
 
 # NHIỆM VỤ
 
 Duyệt LẦN LƯỢT từng ảnh trong danh sách, không bỏ sót ảnh nào. Với mỗi ảnh:
 
-1. Nhìn ảnh trong khung VÀ phần còn lại của trang để hiểu ngữ cảnh.
+1. Nhìn ảnh cắt riêng của nó để thấy rõ, VÀ nhìn khung tương ứng trên ảnh toàn trang để hiểu ngữ cảnh.
 2. Trả lời HAI câu hỏi quyết định, theo thứ tự:
    a) Nếu xoá ảnh này khỏi trang, người xem có MẤT thông tin nào KHÔNG có trong phần chữ của
    trang — số liệu, tên, nhãn, quy trình, cấu trúc, hay chữ chỉ có trong ảnh? Không mất -> TRANG_TRI.

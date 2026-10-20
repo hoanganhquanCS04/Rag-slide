@@ -8,9 +8,7 @@ Cách làm: cắt đúng vùng bảng (thêm lề), vẽ lại ~2000px bề ngan
 from __future__ import annotations
 
 import asyncio
-import base64
 import hashlib
-import io
 import json
 import logging
 import re
@@ -20,8 +18,16 @@ from typing import Any
 
 from utils.config import PROMPTS_DIR, ROOT
 from utils.llm import LLM
-from offline.parser.vlm import FENCE, vlm_endpoint
-from models.parsed_document import ParsedDocument, ParsedTable, norm_text
+from offline.parser.vlm import (
+    FENCE,
+    add_margin,
+    create_vlm_client,
+    region_size_pt,
+    render_region,
+    to_data_url,
+    user_message,
+)
+from models.parsed_document import ParsedDocument, ParsedTable, norm_lines, norm_text
 
 log = logging.getLogger(__name__)
 
@@ -39,21 +45,10 @@ _BAD_ESCAPE = re.compile(r'\\(?!["\\/bfnrtu])')
 def _crop_png(pdf: Any, page_no: int, box: tuple[float, float, float, float]) -> str:
     """Cắt vùng bảng (thêm lề) từ PDF, vẽ sao cho bề ngang bảng ~2000px -> ảnh PNG dạng data URL."""
     page = pdf[page_no - 1]
-    w_pt, _ = page.get_size()
-    l, t, r, b = (max(box[0] - MARGIN, 0.0), max(box[1] - MARGIN, 0.0),
-                  min(box[2] + MARGIN, 1.0), min(box[3] + MARGIN, 1.0))
-    scale = min(max(TARGET_WIDTH_PX / max((r - l) * w_pt, 1.0), 2.0), 8.0)
-    img = page.render(scale=scale).to_pil().convert("RGB")
-    W, H = img.size
-    img = img.crop((int(l * W), int(t * H), int(r * W), int(b * H)))
-    buf = io.BytesIO()
-    img.save(buf, "PNG")
-    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
-
-
-def _cell(v: Any) -> str:
-    """Chữ của một ô: dồn khoảng trắng trong từng dòng, giữ dấu xuống dòng."""
-    return "\n".join(t for line in str(v).split("\n") if (t := norm_text(line)))
+    region = add_margin(box, MARGIN)
+    width_pt, _ = region_size_pt(page, region)
+    scale = min(max(TARGET_WIDTH_PX / max(width_pt, 1.0), 2.0), 8.0)
+    return to_data_url(render_region(page, region, scale))
 
 
 def parse_table(content: str) -> list[list[str]]:
@@ -71,9 +66,9 @@ def parse_table(content: str) -> list[list[str]]:
         except (json.JSONDecodeError, ValueError):
             continue
     if isinstance(data, dict) and isinstance(data.get("columns"), list) and isinstance(data.get("rows"), list):
-        cols = [_cell(c) for c in data["columns"]]
+        cols = [norm_lines(str(c)) for c in data["columns"]]
         n = len(cols)
-        rows = [[_cell(c) for c in r][:n] + [""] * (n - len(r))
+        rows = [[norm_lines(str(c)) for c in r][:n] + [""] * (n - len(r))
                 for r in data["rows"] if isinstance(r, list)]
         cells = [cols, *rows]
     elif m := _TABLE.search(content):
@@ -94,12 +89,9 @@ def _key(page_hash: str, block_id: str, prompt_sha: str, model: str) -> str:
 async def _ask(llm: LLM, sem: asyncio.Semaphore, prompt: str, block_id: str,
                data_url: str) -> dict[str, Any]:
     """Gửi ảnh một bảng cho VLM -> {"cells", "shape"}, lỗi thì {"error"}."""
-    messages = [{"role": "user", "content": [
-        {"type": "image_url", "image_url": {"url": data_url}},
-        {"type": "text", "text": prompt}]}]
     async with sem:
         try:
-            content = await llm.chat(messages, tag=block_id, raw=True)
+            content = await llm.chat(user_message([data_url], prompt), tag=block_id, raw=True)
             cells = parse_table(content)
         except Exception as e:                                   # mạng / JSON hỏng -> giữ bảng ①
             log.warning("  bang %s: %s", block_id, e)
@@ -141,13 +133,7 @@ async def _run(layout: ParsedDocument, pdf_path: Path, out_json: Path, model: st
         pdf.close()
 
     if todo:
-        base, api_key, soft = vlm_endpoint()
-        extra: dict[str, Any] = {"temperature": 0, "max_tokens": MAX_TOKENS}
-        if soft:
-            extra["mm_processor_kwargs"] = {"max_soft_tokens": soft}
-        llm = LLM(model, LOG_DIR / out_json.parent.name, retry=3, timeout=300.0, backoff=5.0,
-                  extra=extra, base_url=base, api_key=api_key)
-        llm.json_mode = False                 # đọc tay (vá escape, bỏ ```), không ép JSON mode
+        llm = create_vlm_client(model, LOG_DIR / out_json.parent.name, max_tokens=MAX_TOKENS)
         sem = asyncio.Semaphore(CONCURRENCY)
         log.info("②b chep bang: %d bang goi %s, %d bang dung cache", len(todo), model, len(tables))
         try:

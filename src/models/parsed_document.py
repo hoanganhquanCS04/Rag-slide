@@ -46,6 +46,11 @@ def norm_text(s: str | None) -> str:
     return re.sub(r"\s+", " ", s or "").strip()
 
 
+def norm_lines(s: str | None) -> str:
+    """Chuẩn hoá TỪNG DÒNG (dồn khoảng trắng), bỏ dòng trống, giữ dấu xuống dòng giữa các dòng."""
+    return "\n".join(line for raw in (s or "").splitlines() if (line := norm_text(raw)))
+
+
 def slugify_doc_id(stem: str) -> str:
     """Đổi tên file gốc thành doc_id sạch: "3_DataVisualization (1)" -> "3_datavisualization".
 

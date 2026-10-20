@@ -1,7 +1,9 @@
 """Bước ② — xét từng ảnh bằng VLM: ảnh loại gì, có nội dung gì -> `pictures.json`.
 
 Để làm gì: bỏ ảnh trang trí, ghi nội dung cho ảnh có ích.
-Cách làm: mỗi trang có ảnh là một request — ảnh cả trang có KHUNG ĐỎ đánh số quanh từng ảnh,
+Cách làm: mỗi trang có ảnh là một request, gửi nhiều ảnh:
+    ảnh đầu      cả trang có KHUNG ĐỎ đánh số quanh từng ảnh — để VLM hiểu ngữ cảnh
+    ảnh sau đó   từng ảnh [1], [2]… CẮT RIÊNG, vẽ nét — để VLM nhìn rõ hình nhỏ
 VLM trả mỗi ảnh một loại:
     TRANG_TRI   bỏ khỏi document.json
     SO_DO       2–4 câu mô tả
@@ -13,9 +15,7 @@ Cache theo trang; trang lỗi thì lần chạy sau tự gọi lại.
 from __future__ import annotations
 
 import asyncio
-import base64
 import hashlib
-import io
 import json
 import logging
 import re
@@ -25,7 +25,16 @@ from typing import Any
 
 from utils.config import PROMPTS_DIR, ROOT
 from utils.llm import LLM
-from offline.parser.vlm import FENCE, load_json_array, vlm_endpoint
+from offline.parser.vlm import (
+    FENCE,
+    add_margin,
+    create_vlm_client,
+    load_json_array,
+    region_size_pt,
+    render_region,
+    to_data_url,
+    user_message,
+)
 from models.parsed_document import ParsedDocument, ParsedImage
 
 log = logging.getLogger(__name__)
@@ -34,6 +43,12 @@ PICTURE_PROMPT = PROMPTS_DIR / "s0_vlm_picture_prompt.md"
 LOG_DIR = ROOT / "logs" / "vlm_pictures"
 
 RENDER_SCALE = 2.0       # ảnh trang gửi VLM = 2 × 72dpi (Gemma 4 tự co theo VLM_SOFT_TOKENS)
+CROP_LONG_SIDE_PX = 1000 # ảnh cắt riêng: cạnh dài ~1000px — đủ nét, ít token (ảnh nhỏ hơn thì không co)
+CROP_MAX_SCALE = 8.0     # icon bé tí cũng không phóng quá 8 × 72dpi
+CROP_MARGIN = 0.01       # lề quanh hộp ảnh, theo bề trang (hộp của Gemma hay hụt mép)
+# Tối đa mấy ảnh cắt trong 1 request. Onboarding p4 có 104 ảnh: gửi 105 ảnh một lần làm vLLM treo
+# (2026-10-19) -> trang nhiều ảnh chia nhóm 8 ảnh, mỗi nhóm một request.
+MAX_PICTURES_PER_REQUEST = 8
 MAX_TOKENS = 8192        # ANH_CO_CHU chép nguyên văn nhiều ảnh chụp (Onboarding p31: 13 ảnh)
 CONCURRENCY = 8
 TYPES = ("TRANG_TRI", "SO_DO", "ANH_CO_CHU", "MINH_HOA")
@@ -63,9 +78,15 @@ def _page_image(pdf: Any, page_no: int, images: list[ParsedImage]) -> str:
         y = t * H - lh if t * H >= lh else t * H          # nhãn ngay trên khung, hết chỗ thì trong khung
         draw.rectangle([l * W, y, l * W + lw, y + lh], fill=(255, 0, 0))
         draw.text((l * W + 4, y + 2), label, fill=(255, 255, 255), font=font)
-    buf = io.BytesIO()
-    img.save(buf, "PNG")
-    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+    return to_data_url(img)
+
+
+def _crop_image(pdf: Any, page_no: int, image: ParsedImage) -> str:
+    """Cắt riêng một ảnh (thêm lề nhỏ) từ PDF, vẽ sao cho cạnh dài ~1000px -> ảnh PNG dạng data URL."""
+    page = pdf[page_no - 1]
+    region = add_margin(image.box, CROP_MARGIN)
+    long_side_pt = max(*region_size_pt(page, region), 1.0)
+    return to_data_url(render_region(page, region, min(CROP_LONG_SIDE_PX / long_side_pt, CROP_MAX_SCALE)))
 
 
 def _parse(content: str, n: int) -> dict[int, dict[str, Any]]:
@@ -110,16 +131,17 @@ def _key(page_hash: str, prompt_sha: str, model: str) -> str:
 
 
 async def _ask(llm: LLM, sem: asyncio.Semaphore, prompt: str, page_no: int,
-               images: list[ParsedImage], data_url: str) -> dict[str, Any]:
-    """Gửi ảnh một trang cho VLM -> {"items": [kết quả từng ảnh]}, lỗi thì {"error"}."""
+               images: list[ParsedImage], page_url: str, crop_urls: list[str]) -> dict[str, Any]:
+    """Gửi một nhóm ảnh của trang cho VLM -> {"items": [kết quả từng ảnh]}, lỗi thì {"error"}.
+
+    Thứ tự ảnh gửi: ảnh cả trang có khung đỏ, rồi ảnh cắt riêng của [1], [2]… đúng thứ tự danh sách.
+    """
     listing = "\n".join(f"[{k}] {_box1000(im)}" for k, im in enumerate(images, 1))
-    text = prompt.replace("{{pictures}}", listing)
-    messages = [{"role": "user", "content": [
-        {"type": "image_url", "image_url": {"url": data_url}},
-        {"type": "text", "text": text}]}]
+    messages = user_message([page_url, *crop_urls], prompt.replace("{{pictures}}", listing))
     async with sem:
         try:
-            content = await llm.chat(messages, tag=f"p{page_no:03d}", raw=True)
+            # tên file log theo ảnh đầu nhóm: trang chia nhiều nhóm thì mỗi nhóm một file, không đè nhau
+            content = await llm.chat(messages, tag=images[0].id, raw=True)
             got = _parse(content, len(images))
         except Exception as e:                                   # mạng / JSON hỏng -> chạy sau gọi lại
             log.warning("  anh p%d: %s", page_no, e)
@@ -157,29 +179,32 @@ async def _run(layout: ParsedDocument, pdf_path: Path, out_json: Path, model: st
                 pages[str(page.page_no)] = prev                   # cache: trang không đổi
                 continue
             todo.append((page.page_no, images, key))
-        # pypdfium2 không an toàn đa luồng -> vẽ hết ảnh trang TRƯỚC, rồi mới gọi song song
-        rendered = [(no, images, key, _page_image(pdf, no, images)) for no, images, key in todo]
+        # Trang nhiều ảnh chia nhóm, mỗi nhóm 1 request: ảnh trang chỉ khoanh nhóm đó + ảnh cắt của nhóm.
+        # pypdfium2 không an toàn đa luồng -> vẽ hết ảnh trang + ảnh cắt TRƯỚC, rồi mới gọi song song
+        rendered = [(no, group, key, _page_image(pdf, no, group), [_crop_image(pdf, no, im) for im in group])
+                    for no, images, key in todo
+                    for group in (images[i:i + MAX_PICTURES_PER_REQUEST]
+                                  for i in range(0, len(images), MAX_PICTURES_PER_REQUEST))]
     finally:
         pdf.close()
 
     if rendered:
-        base, api_key, soft = vlm_endpoint()
-        extra: dict[str, Any] = {"temperature": 0, "max_tokens": MAX_TOKENS}
-        if soft:
-            extra["mm_processor_kwargs"] = {"max_soft_tokens": soft}
-        llm = LLM(model, LOG_DIR / out_json.parent.name, retry=3, timeout=300.0, backoff=5.0,
-                  extra=extra, base_url=base, api_key=api_key)
-        llm.json_mode = False                 # Prompt B trả MẢNG; JSON mode ép object -> mất mục
+        # JSON mode tắt sẵn trong create_vlm_client: prompt trả MẢNG, JSON mode ép object -> mất mục
+        llm = create_vlm_client(model, LOG_DIR / out_json.parent.name, max_tokens=MAX_TOKENS)
         sem = asyncio.Semaphore(CONCURRENCY)
-        log.info("② xet anh: %d trang goi %s, %d trang dung cache", len(rendered), model,
-                 len(pages))
+        log.info("② xet anh: %d trang (%d request) goi %s, %d trang dung cache", len(todo), len(rendered),
+                 model, len(pages))
         try:
-            results = await asyncio.gather(*(_ask(llm, sem, prompt, no, images, url)
-                                             for no, images, _, url in rendered))
+            results = await asyncio.gather(*(_ask(llm, sem, prompt, no, group, page_url, crop_urls)
+                                             for no, group, _, page_url, crop_urls in rendered))
         finally:
             await llm.close()
-        for (no, _, key, _), res in zip(rendered, results):
-            pages[str(no)] = {"key": key, **res}
+        # gộp kết quả các nhóm về từng trang; nhóm nào lỗi thì cả trang tính là lỗi (lần sau gọi lại)
+        for (no, _, key, _, _), res in zip(rendered, results):
+            page_result = pages.setdefault(str(no), {"key": key, "items": []})
+            page_result["items"] += res.get("items", [])
+            if res.get("error"):
+                page_result["error"] = res["error"]
     else:
         log.info("② xet anh: %d trang deu dung cache (khong goi VLM)", len(pages))
 

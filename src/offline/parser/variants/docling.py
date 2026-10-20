@@ -38,6 +38,7 @@ from docling_core.types.doc import (  # noqa: E402
 from docling_core.types.doc.base import Size  # noqa: E402
 
 from offline.parser.base import BaseParser  # noqa: E402
+from offline.parser.oversize import read_oversized_pages  # noqa: E402
 from offline.parser.vlm import load_json_array, vlm_endpoint  # noqa: E402
 from utils.config import PROMPTS_DIR, ROOT  # noqa: E402
 from models.parsed_document import (  # noqa: E402
@@ -49,6 +50,7 @@ from models.parsed_document import (  # noqa: E402
     ParsedTable,
     ParserInfo,
     SourceInfo,
+    norm_lines,
     norm_text,
     polygon_from_box,
     slugify_doc_id,
@@ -185,13 +187,17 @@ class DoclingParser(BaseParser):
         return self.out_dir / "docling_vlmpipeline.json"
 
     def parse_layout(self, src: Path, pdf: Path, *, redo: bool = False) -> ParsedDocument:
-        """Bước ①: có cache thì nạp lại, không có (hoặc `redo`) thì gọi VLM -> ParsedDocument."""
+        """Bước ①: có cache thì nạp lại, không có (hoặc `redo`) thì gọi VLM -> ParsedDocument.
+
+        Sau đó ①b: trang quá khổ (poster) đọc lại theo mảnh; trang thường không đụng tới.
+        """
         if redo or not self.raw_json.exists():
             ddoc = self._convert(pdf)
         else:
             log.info("① %s co san (--redo de goi VLM lai)", self.raw_json.name)
             ddoc = DoclingDocument.load_from_json(self.raw_json)
-        return self._to_parsed(ddoc, src)
+        return read_oversized_pages(self._to_parsed(ddoc, src), pdf, self.out_dir / "oversize.json",
+                                    self.model, redo=redo, picture_area_threshold=self.picture_area_threshold)
 
     def _convert(self, pdf: Path) -> DoclingDocument:
         """Gọi VLM cho cả file -> DoclingDocument; ghi cache + phản hồi thô từng trang.
@@ -287,7 +293,7 @@ class DoclingParser(BaseParser):
             else:
                 # chuẩn hoá TỪNG DÒNG, giữ `\n`: dồn cả khối làm mục lục p2 thành 1 dòng -> sections.py
                 # bỏ qua p2, vớ mục lục con p3 -> một chương phủ p12–p51
-                if not (text := "\n".join(ln for raw in item.text.splitlines() if (ln := norm_text(raw)))):
+                if not (text := norm_lines(item.text)):
                     continue
                 block = ParsedParagraph(id=bid, page_no=page.page_no, polygon=polygon, content=text,
                                         role=_ROLE.get(item.label, "body"))  # type: ignore[arg-type]

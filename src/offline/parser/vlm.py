@@ -1,15 +1,26 @@
-"""Hàm dùng chung cho mọi lần gọi VLM: chọn server và đọc mảng JSON trong phản hồi."""
+"""Hàm dùng chung cho mọi lần gọi VLM: chọn server, vẽ ảnh gửi đi, dựng tin nhắn, đọc mảng JSON trả về.
+
+Các bước gọi VLM riêng (②b chép bảng, ② xét ảnh, ①b đọc trang quá khổ) đều dùng chung file này.
+"""
 
 from __future__ import annotations
 
+import base64
+import io
 import json
 import os
 import re
+from pathlib import Path
 from typing import Any
 
 from docling.utils.dots_utils import _clean_json
 
+from utils.llm import LLM
+
 FENCE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$")
+
+# Hộp (trái, trên, phải, dưới) theo thang [0,1] của trang
+Box = tuple[float, float, float, float]
 
 
 def vlm_endpoint() -> tuple[str, str | None, int | None]:
@@ -26,6 +37,60 @@ def vlm_endpoint() -> tuple[str, str | None, int | None]:
     # Gemma 4 trên vLLM: mặc định 280 token ảnh đọc sai dấu ("Ánh xạ" -> "Ảnh xá"); 1120 thì đúng
     soft = os.environ.get("VLM_SOFT_TOKENS")
     return base, key, int(soft) if soft else None
+
+
+def create_vlm_client(model: str, log_dir: Path, *, max_tokens: int, **params: Any) -> LLM:
+    """Tạo kết nối tới VLM, cấu hình chung cho mọi bước gọi VLM riêng.
+
+    Cách làm: temperature 0 (cùng ảnh ra cùng chữ), số token ảnh theo VLM_SOFT_TOKENS, thử lại 3 lần
+    cách nhau 5s, chờ tối đa 300s; tắt JSON mode — phản hồi được đọc tay (vá JSON hỏng, bỏ ```).
+    `params` = tham số thêm gửi kèm (vd repetition_penalty).
+    """
+    base, api_key, soft = vlm_endpoint()
+    extra: dict[str, Any] = {"temperature": 0, "max_tokens": max_tokens, **params}
+    if soft:
+        extra["mm_processor_kwargs"] = {"max_soft_tokens": soft}
+    llm = LLM(model, log_dir, retry=3, timeout=300.0, backoff=5.0, extra=extra, base_url=base, api_key=api_key)
+    llm.json_mode = False
+    return llm
+
+
+def user_message(image_urls: list[str], text: str) -> list[dict[str, Any]]:
+    """Dựng tin nhắn gửi VLM: các ảnh theo đúng thứ tự, rồi tới chữ prompt."""
+    images = [{"type": "image_url", "image_url": {"url": url}} for url in image_urls]
+    return [{"role": "user", "content": [*images, {"type": "text", "text": text}]}]
+
+
+def to_data_url(img: Any) -> str:
+    """Ảnh PIL -> PNG dạng data URL để gửi VLM."""
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+def add_margin(box: Box, margin: float) -> Box:
+    """Nới hộp thêm `margin` (theo bề trang) về mỗi phía, không vượt khỏi trang."""
+    l, t, r, b = box
+    return max(l - margin, 0.0), max(t - margin, 0.0), min(r + margin, 1.0), min(b + margin, 1.0)
+
+
+def region_size_pt(page: Any, box: Box) -> tuple[float, float]:
+    """Kích thước thật (pt) của một vùng trên trang PDF -> (rộng, cao)."""
+    w_pt, h_pt = page.get_size()
+    l, t, r, b = box
+    return (r - l) * w_pt, (b - t) * h_pt
+
+
+def render_region(page: Any, box: Box, scale: float) -> Any:
+    """Vẽ RIÊNG một vùng của trang PDF (pypdfium2) ở độ phóng `scale` (× 72dpi) -> ảnh PIL RGB.
+
+    Cách làm: chỉ vẽ đúng vùng cần (tham số crop = phần cắt bỏ ở lề trái, dưới, phải, trên, tính bằng pt),
+    không vẽ cả trang rồi mới cắt — trang khổ lớn vẽ cả trang ở độ phóng cao rất tốn bộ nhớ.
+    """
+    w_pt, h_pt = page.get_size()
+    l, t, r, b = box
+    crop = (l * w_pt, (1 - b) * h_pt, (1 - r) * w_pt, t * h_pt)
+    return page.render(scale=scale, crop=crop).to_pil().convert("RGB")
 
 
 def escape_stray_quotes(text: str) -> str:

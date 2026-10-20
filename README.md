@@ -13,16 +13,16 @@ trên slide.
 
 ## Đã làm đến đâu
 
-|    | Bước            | Code                            | Làm gì                                                                                                                                                                                                   |
-| -- | ----------------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ✅ | S0 Parse          | `src/offline/parser/`                | docling đọc chữ + toạ độ (tắt OCR) · VLM nhìn cả trang sắp chữ thành khối · VLM chép bảng từ ảnh bảng · chương từ trang mục lục · cờ cho người duyệt |
-| ✅ | S5 KB             | `src/offline/chunker/` · `src/components/embedders/` · `src/components/vectordb/` · `src/components/keyword_search.py` | 1 trang = 1 chunk (cắt khi > 500 token) · nhúng`text-embedding-3-small` qua API, cache theo nội dung · kho vector Chroma (vector + chữ + metadata) · index BM25                                                    |
-| ✅ | Tìm kiếm        | `src/utils/ensemble_search.py`            | hybrid vector + BM25, gộp bằng RRF (K=10, vector 1.5 : BM25 1), trả**top-5 trang**                                                                                                                                |
-| ✅ | Đo chất lượng | `src/evaluation/{eval,tune}.py` | bộ câu hỏi có nhãn · quét tham số RRF                                                                                                                                                            |
-| 🟡 | Hỏi đáp thử   | `scripts/try_ask.py`          | tìm → 1 lần gọi LLM → code kiểm nguồn, trong terminal                                                                                                                                               |
-| 🟡 | S4 kịch bản     | `src/offline/scenario/`               | bước 4 của`run_deck.sh` (`--no-scenario` để bỏ), chỉ viết lại trang đổi                                                                                                                    |
-|    |                   |                                 |                                                                                                                                                                                                            |
-|    |                   |                                 |                                                                                                                                                                                                            |
+|    | Bước            | Code                                                                                                                              | Làm gì                                                                                                                                                                            |
+| -- | ----------------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ✅ | S0 Parse          | `src/offline/parser/`                                                                                                           | docling đọc chữ + toạ độ (tắt OCR) · VLM nhìn cả trang sắp chữ thành khối · VLM chép bảng từ ảnh bảng · chương từ trang mục lục · cờ cho người duyệt |
+| ✅ | S5 KB             | `src/offline/chunker/` · `src/components/embedders/` · `src/components/vectordb/` · `src/components/keyword_search.py` | 1 trang = 1 chunk (cắt khi > 500 token) · nhúng`text-embedding-3-small` qua API, cache theo nội dung · kho vector Chroma (vector + chữ + metadata) · index BM25            |
+| ✅ | Tìm kiếm        | `src/utils/ensemble_search.py`                                                                                                  | hybrid vector + BM25, gộp bằng RRF (K=10, vector 1.5 : BM25 1), trả**top-5 trang**                                                                                         |
+| ✅ | Đo chất lượng | `src/evaluation/{eval,tune}.py`                                                                                                 | bộ câu hỏi có nhãn · quét tham số RRF                                                                                                                                       |
+| 🟡 | Hỏi đáp thử   | `scripts/try_ask.py`                                                                                                            | tìm → 1 lần gọi LLM → code kiểm nguồn, trong terminal                                                                                                                        |
+| 🟡 | S4 kịch bản     | `src/offline/scenario/`                                                                                                         | bước 4 của`run_deck.sh` (`--no-scenario` để bỏ), chỉ viết lại trang đổi                                                                                             |
+|    |                   |                                                                                                                                   |                                                                                                                                                                                     |
+|    |                   |                                                                                                                                   |                                                                                                                                                                                     |
 
 Số hiện tại (2026-10-02), hai deck đang làm:
 
@@ -74,14 +74,14 @@ Tạo file `.env` ở gốc repo từ file mẫu, rồi điền `OPENAI_API_KEY`
 cp .env.example .env
 ```
 
-| Biến                                   | Ví dụ                       | Dùng ở                                   |
-| --------------------------------------- | ----------------------------- | ------------------------------------------ |
-| `OPENAI_API_KEY`, `OPENAI_BASE_URL` | `https://api.yescale.io/v1` | mọi lần gọi API                         |
-| `VLM_MODEL`                           | `gemini-3.8-flash`          | ① đọc trang (bố cục, chữ, bảng, ảnh)    |
-| `LLM_MODEL`                           | `gemini-3.5-flash-lite`     | hỏi đáp thử, kịch bản                |
-| `EMBED_MODEL`                         | `text-embedding-3-small`    | ④ nhúng vector, tìm kiếm               |
-| `VECTOR_DB`                           | `chroma`                 | kho vector (bỏ trống =`chroma`)        |
-| `CHROMA_PATH`                         | `src/output/vectordb/chroma`          | chỗ Chroma ghi đĩa, tính từ gốc repo |
+| Biến                                   | Ví dụ                        | Dùng ở                                     |
+| --------------------------------------- | ------------------------------ | -------------------------------------------- |
+| `OPENAI_API_KEY`, `OPENAI_BASE_URL` | `https://api.yescale.io/v1`  | mọi lần gọi API                           |
+| `VLM_MODEL`                           | `gemini-3.8-flash`           | ① đọc trang (bố cục, chữ, bảng, ảnh) |
+| `LLM_MODEL`                           | `gemini-3.5-flash-lite`      | hỏi đáp thử, kịch bản                  |
+| `EMBED_MODEL`                         | `text-embedding-3-small`     | ④ nhúng vector, tìm kiếm                 |
+| `VECTOR_DB`                           | `chroma`                     | kho vector (bỏ trống =`chroma`)          |
+| `CHROMA_PATH`                         | `src/output/vectordb/chroma` | chỗ Chroma ghi đĩa, tính từ gốc repo   |
 
 Windows: terminal PowerShell mới cần `$env:PYTHONIOENCODING = "utf-8"` (script `.sh` tự đặt).
 
