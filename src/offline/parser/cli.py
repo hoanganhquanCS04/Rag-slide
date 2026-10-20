@@ -5,7 +5,6 @@
     python src/offline/parser/cli.py data/raw/onboarding_kit.pdf --table-pages 21 22 # chỉ chép lại bảng 2 trang
 
 Cách làm: ① bố cục -> ②b chép bảng -> ② xét ảnh -> document.json; cache nằm cùng thư mục.
-Xem lại kết quả: `python src/offline/parser/show.py <doc_id> [--page 7]`.
 """
 
 from __future__ import annotations
@@ -17,27 +16,21 @@ import sys
 from pathlib import Path
 
 if __package__ in (None, ""):  # chạy thẳng file: THAY src/offline/parser/ bằng src/ — để tables.py,
-    sys.path[0] = str(Path(__file__).resolve().parents[2])  # flags.py… không che module trùng tên
+    sys.path[0] = str(Path(__file__).resolve().parents[2])  # sections.py… không che module trùng tên
 
 from offline.parser.variants.docling import DoclingParser
-from utils.config import PARSER_OUTPUT
+from utils.config import PARSER_OUTPUT, console_setup
 from offline.parser.enrich import enrich, page_pdf
 from models.parsed_document import ParsedDocument, slugify_doc_id
 
-for _s in (sys.stdout, sys.stderr):
-    if hasattr(_s, "reconfigure"):
-        _s.reconfigure(encoding="utf-8", errors="replace")
-
 log = logging.getLogger("parser")
-
-OUT = PARSER_OUTPUT
 
 
 def parse_file(src: Path, *, model: str, redo: bool = False,
                table_pages: set[int] | None = None) -> int:
     """Parse một file và ghi `document.json`.
 
-    Cách làm: tìm file PDF để vẽ trang -> DoclingParser chạy ① ②b ② -> ghi file -> tính chương / cờ
+    Cách làm: tìm file PDF để vẽ trang -> DoclingParser chạy ① ②b ② -> ghi file -> tính chương
     (enrich) để in báo cáo.
     """
     if not src.exists():
@@ -45,15 +38,15 @@ def parse_file(src: Path, *, model: str, redo: bool = False,
     if (pdf := page_pdf(src)) is None:
         raise SystemExit(f"can PDF cung ten: {src.with_suffix('.pdf')} (scripts/pptx2pdf.ps1)")
 
-    p = DoclingParser(model, OUT / slugify_doc_id(src.stem))
+    p = DoclingParser(model, PARSER_OUTPUT / slugify_doc_id(src.stem))
     doc = p.run(src, pdf, redo=redo, table_pages=table_pages)
     p.save(doc)
-    report(enrich(doc))      # chương / cờ không nằm trong document.json — tính lại để in
+    report(enrich(doc))      # chương không nằm trong document.json — tính lại để in
     return 0
 
 
 def report(doc: ParsedDocument) -> None:
-    """In tóm tắt deck ra màn hình: số trang, số khối, ảnh có mô tả, bảng, các chương và các cờ."""
+    """In tóm tắt deck ra màn hình: số trang, số khối, ảnh có mô tả, bảng và các chương."""
     log.info("")
     log.info("=== %s", doc.doc_id)
     log.info("    %d trang | %d block", doc.n_pages, sum(len(p.blocks) for p in doc.pages))
@@ -62,15 +55,6 @@ def report(doc: ParsedDocument) -> None:
 
     for s in doc.sections:
         log.info("    %s  p%d-%d  conf=%.2f  %s", s.id, s.start_page, s.end_page, s.confidence, s.title)
-    for f in doc.flags:
-        where = f"p{f.page_no}" if f.page_no else "-"
-        log.info("    [%s] %-22s %-5s %s", f.severity, f.kind, where, f.detail)
-    # Trang mất chữ thì hỏi đáp về trang đó sẽ luôn từ chối -> nhắc to ở dòng cuối, đừng để chìm trong log
-    lost = sorted({f.page_no for f in doc.flags if f.kind == "empty_page" and f.page_no})
-    if lost:
-        log.warning("")
-        log.warning("⚠ %d TRANG MAT CHU: %s — hoi dap ve cac trang nay se tu choi. Xem logs/vlm_pipeline/%s/pNNN.txt, "
-                    "chay lai voi --redo", len(lost), " ".join(f"p{p}" for p in lost), doc.doc_id)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -82,7 +66,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--table-pages", nargs="+", type=int, default=None,
                     help="chi chep lai bang o cac trang nay (②b), khong goi lai ①: 21 22 | {6..9}")
     args = ap.parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    console_setup()
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
     table_pages = set(args.table_pages) if args.table_pages else None

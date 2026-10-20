@@ -8,7 +8,6 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import ClassVar
 
 from models.parsed_document import ParsedDocument
 from offline.parser.pictures import apply_pictures, run_pictures
@@ -22,8 +21,6 @@ class BaseParser(ABC):
 
     Cách làm: mọi file cache nằm trong `out_dir` (thư mục output của deck).
     """
-
-    kind: ClassVar[str]
 
     def __init__(self, model: str, out_dir: Path):
         """Nhớ tên model VLM và thư mục output của deck."""

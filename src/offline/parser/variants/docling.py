@@ -38,7 +38,6 @@ from docling_core.types.doc import (  # noqa: E402
 from docling_core.types.doc.base import Size  # noqa: E402
 
 from offline.parser.base import BaseParser  # noqa: E402
-from offline.parser.oversize import read_oversized_pages  # noqa: E402
 from offline.parser.vlm import load_json_array, vlm_endpoint  # noqa: E402
 from utils.config import PROMPTS_DIR, ROOT  # noqa: E402
 from models.parsed_document import (  # noqa: E402
@@ -170,8 +169,7 @@ _FURNITURE = {DocItemLabel.PAGE_HEADER, DocItemLabel.PAGE_FOOTER}
 class DoclingParser(BaseParser):
     """Parser dùng docling VlmPipeline + VLM đọc ảnh cả trang."""
 
-    kind = "docling"
-    scale = 4.0                    # ảnh trang = 4 × 72dpi
+    scale = 4.0                   # ảnh trang = 4 × 72dpi
     max_tokens = 4096
     # temperature 0 thì cùng ảnh luôn ra cùng chữ: trang đã lặp (vd quy_dinh_chung_t7_t8 p12 xuất
     # một khối "image" rỗng hàng chục lần tới hết max_tokens) thì --redo vẫn lặp y hệt. Phạt nhẹ
@@ -187,17 +185,13 @@ class DoclingParser(BaseParser):
         return self.out_dir / "docling_vlmpipeline.json"
 
     def parse_layout(self, src: Path, pdf: Path, *, redo: bool = False) -> ParsedDocument:
-        """Bước ①: có cache thì nạp lại, không có (hoặc `redo`) thì gọi VLM -> ParsedDocument.
-
-        Sau đó ①b: trang quá khổ (poster) đọc lại theo mảnh; trang thường không đụng tới.
-        """
+        """Bước ①: có cache thì nạp lại, không có (hoặc `redo`) thì gọi VLM -> ParsedDocument."""
         if redo or not self.raw_json.exists():
             ddoc = self._convert(pdf)
         else:
             log.info("① %s co san (--redo de goi VLM lai)", self.raw_json.name)
             ddoc = DoclingDocument.load_from_json(self.raw_json)
-        return read_oversized_pages(self._to_parsed(ddoc, src), pdf, self.out_dir / "oversize.json",
-                                    self.model, redo=redo, picture_area_threshold=self.picture_area_threshold)
+        return self._to_parsed(ddoc, src)
 
     def _convert(self, pdf: Path) -> DoclingDocument:
         """Gọi VLM cho cả file -> DoclingDocument; ghi cache + phản hồi thô từng trang.

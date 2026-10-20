@@ -38,7 +38,6 @@ EXERCISE_TITLE = re.compile(r"^\s*bài tập", re.I)
 LABEL_CHARS = 48         # ParsedPage.label: cắt dòng chữ đầu khi trang không có tiêu đề
 
 Point = tuple[float, float]
-Box = tuple[float, float, float, float]   # (trái, trên, phải, dưới), [0,1], gốc trên-trái
 
 
 def norm_text(s: str | None) -> str:
@@ -233,11 +232,6 @@ class ParsedImage(Block):
     picture_type: Literal["TRANG_TRI", "SO_DO", "ANH_CO_CHU", "MINH_HOA"] | None = None
     reason: str | None = None
 
-    @property
-    def needs_review(self) -> bool:
-        """Ảnh có cần người xem không (not_described hoặc api_error)."""
-        return self.why_empty in ("not_described", "api_error")
-
 
 AnyBlock = Annotated[
     ParsedParagraph | ParsedTable | ParsedImage,
@@ -307,11 +301,6 @@ class ParsedPage(_Base):
         first = first.split("\n")[0].strip()
         return first[:LABEL_CHARS] + ("…" if len(first) > LABEL_CHARS else "") or "(không có chữ)"
 
-    @property
-    def is_text_starved(self) -> bool:
-        """Trang có <= 1 khối chữ không (trang sống nhờ mô tả ảnh)."""
-        return len(self.paragraphs) <= 1
-
     def compute_hash(self) -> str:
         """Hash nội dung + vị trí mọi khối của trang.
 
@@ -363,21 +352,6 @@ class SectionSpan(_Base):
         return self.start_page <= page_no <= self.end_page
 
 
-class Flag(_Base):
-    """Một chỗ cần người xem: loại cờ, mức độ, trang, khối và mô tả ngắn."""
-
-    kind: Literal[
-        "empty_page",
-        "image_not_described",
-        "table_empty",
-        "no_sections",
-    ]
-    severity: Literal["info", "warn", "error"] = "warn"
-    page_no: int | None = None
-    block_id: str | None = None
-    detail: str = ""
-
-
 class SourceInfo(_Base):
     """File gốc: đường dẫn + hash."""
     path: str
@@ -393,17 +367,16 @@ class ParserInfo(_Base):
 
 
 class ParsedDocument(_Base):
-    """Cả deck: doc_id, file gốc, thông tin parser, chương, cờ và các trang.
+    """Cả deck: doc_id, file gốc, thông tin parser, chương và các trang.
 
-    Cách làm: `document.json` chỉ chứa các trang; chương và cờ do `parser.enrich` tính lúc nạp.
+    Cách làm: `document.json` chỉ chứa các trang; chương do `parser.enrich` tính lúc nạp.
     """
-    _ORDER: ClassVar[tuple[str, ...]] = ("doc_id", "source", "parser", "sections", "flags", "pages")
+    _ORDER: ClassVar[tuple[str, ...]] = ("doc_id", "source", "parser", "sections", "pages")
 
     doc_id: str
     source: SourceInfo
     parser: ParserInfo
     sections: list[SectionSpan] = Field(default_factory=list)
-    flags: list[Flag] = Field(default_factory=list)
     pages: list[ParsedPage] = Field(default_factory=list)
 
     # -------- truy vấn

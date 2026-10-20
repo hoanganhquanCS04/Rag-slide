@@ -224,14 +224,10 @@ Luật dễ quên:
 
 ---
 
-## 4. Cờ
+## 4. Cờ — BỎ (2026-10-20)
 
-| `kind` | mức | nghĩa |
-|---|---|---|
-| `empty_page` | error | không chữ, không mô tả ảnh → vào KB gần như rỗng — gồm cả trang VLM trả JSON hỏng ở ① (mất cả trang; `detail` trỏ tới `logs/vlm_pipeline/<doc_id>/pNNN.txt`). Không bắn ở trang `section_divider` |
-| `image_not_described` | error | ảnh đủ to mà bước ② không cho mô tả (VLM bỏ sót / lỗi) |
-| `table_empty` | error | docling khoanh được bảng mà 0 ô có chữ — thường là ảnh chụp bảng. Trang có bố cục VLM thì VLM đọc bảng từ ảnh |
-| `no_sections` | info | không tìm thấy trang mục lục khớp → không có chương |
+`flags.py` đã xoá. Trang VLM trả JSON hỏng ở ① vẫn thấy qua log `vlm pN: JSON hong -> mat ca trang`
+lúc parse; phản hồi thô ở `logs/vlm_pipeline/<doc_id>/pNNN.txt`.
 
 ---
 
@@ -242,9 +238,6 @@ Luật dễ quên:
 .venv\Scripts\python.exe src\offline\parser\cli.py "data\raw\<file>.pdf"
 .venv\Scripts\python.exe src\offline\parser\cli.py "data\raw\<file>.pdf" --redo               # gọi lại VLM cả file
 .venv\Scripts\python.exe src\offline\parser\cli.py "data\raw\<file>.pdf" --table-pages 21 22  # chỉ chép lại bảng 2 trang
-
-# xem (đã enrich: link · chương · cờ)
-.venv\Scripts\python.exe src\offline\parser\show.py <doc_id> --page 9 10 11
 ```
 
 ```
@@ -254,7 +247,7 @@ parser.run(src, pdf)                       parser/base.py
 parser.save(doc)  -> document.json
 
 enrich(ParsedDocument.load(...))           parser/enrich.py — KB / S4 / runtime tự gọi khi nạp
-  sections.py → flags.py → bỏ block rỗng không cờ
+  sections.py → bỏ block rỗng
 ```
 
 - `enrich` không ghi lại file: kết quả chỉ nằm trong bộ nhớ, tính lại mỗi lần nạp.

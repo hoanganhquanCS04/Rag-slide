@@ -175,7 +175,7 @@ Xem [docs/spec/parsed-document.md](docs/spec/parsed-document.md) cho schema đ�
 - `GemmaVlmPipeline` vá: toạ độ 0–1000 (docling tưởng pixel Qwen2-VL) · bbox nhiều khung / 2 điểm →
   hộp bao (không vá thì mất trang bìa + 3 ví dụ có số, Thời gian làm việc p1, p8) · bỏ ký hiệu
   Markdown prompt gốc sinh ra · mảng bọc trong object `{"elements": [...]}` (p4, p7 mất cả trang) ·
-  khoá `content` thay `text`. JSON hỏng → mất CẢ trang → cờ `empty_page`; raw ở `logs/vlm_pipeline/`
+  khoá `content` thay `text`. JSON hỏng → mất CẢ trang (log `JSON hong`); raw ở `logs/vlm_pipeline/`
 - Mô tả TỪNG ảnh cắt rời đã bỏ: không biết ảnh nào chỉ để trang trí (Onboarding: ảnh Tết tả thành
   Trung Thu) — mô tả ảnh viết trong lượt đọc cả trang
 - Ảnh không có mô tả phải ghi `why_empty` — phân biệt *chưa gọi* (`area_below_threshold`)
@@ -223,10 +223,9 @@ content          còn lại                                              ✅ Đ�
 ```
 
 **Luật nằm ở MỘT chỗ: `ParsedPage.slide_type`** (property — tính lại mỗi lần nạp, KHÔNG ghi
-ra JSON: deck mới gần như toàn `content`, ghi ra là nhiễu). `flags.py`, `chunker/`, S4 đều
-chỉ đọc property đó.
+ra JSON: deck mới gần như toàn `content`, ghi ra là nhiễu). `chunker/`, S4 đều
+chỉ đọc property đó. (`flags.py` gắn cờ BỎ 2026-10-20.)
 
-- `flags.py` không bắn `empty_page` ở trang phân mục.
 - KB coi trang bài tập là `content` (có nội dung thật, phải tìm được).
 - S4 viết lại trang khi `slide_type` đổi. Trang `exercise`: 2–4 câu, ĐỌC yêu cầu, không giảng.
 - `title` và `agenda` chỉ 2 trang trong 40, lợi ích nhỏ — chưa làm.
@@ -471,7 +470,7 @@ src/components/      LINH KIỆN: làm một việc chung, không biết gì v�
   keyword_search.py    BM25Index — bảng BM25 trong RAM, 1 cách làm nên 1 file (không base/factory)
 src/offline/         CHUẨN BỊ DỮ LIỆU trước, chạy 1 lần, lưu ra file — mỗi bước có cli.py
   parser/              S0 — cli.py · base.py · variants/docling.py (biến thể DUY NHẤT, cli gọi thẳng) · vlm.py ·
-                       enrich.py (chương → cờ) · sections · flags · pictures (②) · tables (②b) · show.py
+                       enrich.py (chương, bỏ khối rỗng) · sections · pictures (②) · tables (②b)
   chunker/             S5 — cli.py (chunk -> nhúng -> ghi Chroma; `--dry-run` chỉ xem) · factory.py · base.py ·
                        variants/page.py
   scenario/            S4 — cli.py · generate.py · validate.py
@@ -515,9 +514,8 @@ src/output/
 ├── parser/<doc_id>/              S0 — python src/offline/parser/cli.py <file>  (① + ②b + ②)
 │   ├── docling_vlmpipeline.json  ① DoclingDocument VlmPipeline (cache — có rồi thì không gọi VLM)
 │   ├── tables.json · pictures.json   ②b chép bảng · ② xét ảnh (cache theo bảng / trang)
-│   ├── document.json             ParsedDocument — link / chương / cờ KHÔNG có trong file:
+│   ├── document.json             ParsedDocument — chương KHÔNG có trong file:
 │   │                             KB, S4, runtime gọi `offline.parser.enrich.enrich()` lúc nạp
-│   │                             xem: python src/offline/parser/show.py <doc_id> [--page 7]
 │   └── boxes/                    ảnh khung từng trang (scripts/try_docling_gemma.py), chỉ để soi
 ├── embedders/cache/<model>/<sha1>.npy   DÙNG CHUNG mọi deck — cache nhúng theo hash chữ (không gọi lại API)
 ├── vectordb/chroma/              DÙNG CHUNG — kho Chroma: MỘT collection kb__<model_id> cho mọi bài,

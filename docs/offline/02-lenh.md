@@ -82,13 +82,11 @@ Ghi chú:
 - ① chạy CẢ file (VlmPipeline không chạy từng trang lẻ); cache là cả file `docling_vlmpipeline.json`.
   Sửa `src\prompts\s0_vlm_layout_prompt.md` hoặc `VLM_MODEL` KHÔNG tự gọi lại — phải `run "<file>" --redo`.
 - Mọi chữ do VLM đọc (`vlm`), KHÔNG đối chiếu text layer PDF — chữ sai chỉ thấy khi người soi
-  (ảnh khung `--draw-only`, `show --page N --full`).
+  (ảnh khung `--draw-only`, hoặc mở `document.json`).
 - Log ① `vlm pN: ...` = đã nắn khung nhiều dòng / bỏ Markdown. Trang hỏng JSON thành trang rỗng
-  + cờ `empty_page`: xem phản hồi thô `logs\vlm_pipeline\<ten>\pNNN.txt`.
+  (log `JSON hong -> mat ca trang`): xem phản hồi thô `logs\vlm_pipeline\<ten>\pNNN.txt`.
 - Xem khung vẽ lên trang: `python scripts\try_docling_gemma.py "<file>" --draw-only` ->
   `src\output\parser\<ten>\boxes\pages\`.
-- `run` thoát mã `3` khi có cờ mức `error` — vẫn ghi file bình thường, mã lỗi để CI bắt.
-  `run_deck.sh` gặp mã 3 vẫn chạy tiếp; mã khác (không thấy file, thiếu khoá API…) thì DỪNG.
 - ④ chữ không đổi thì lấy vector từ cache (`src\output\embedders\cache\`), không gọi API.
 - ④ KHÔNG ghi file chunk nào: chunk nằm trong bộ nhớ rồi vào thẳng Chroma (chữ + vector + metadata).
   Cuối lệnh in `kho chroma (kb__<model>): nap N ban ghi, xoa M ban ghi cu`. Mọi tài liệu chung MỘT
@@ -123,11 +121,7 @@ LLM mỗi trang ĐỔI — trang không đổi thì giữ nguyên. Chạy riêng
 
 ### Nội dung một trang
 
-```powershell
-.venv\Scripts\python.exe src\offline\parser\show.py <ten>                       # tổng quan + chương + cờ
-.venv\Scripts\python.exe src\offline\parser\show.py <ten> --page 7              # một trang
-.venv\Scripts\python.exe src\offline\parser\show.py <ten> --page 2 3 4 5 --full     # nhiều trang, không cắt chữ
-```
+Mở `src\output\parser\<ten>\document.json` (mỗi trang một mục `page_no`, khối theo thứ tự đọc).
 
 ```
 --- trang 7 | CÁCH TÍNH LÀM THÊM GIỜ | chuong: sec_02 (LÀM THÊM GIỜ, p6-8)

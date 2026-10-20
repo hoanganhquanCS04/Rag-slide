@@ -39,7 +39,7 @@ Trộn hai loại vào một file thì mỗi lần parse lại là đe doạ k�
 dính với trang 15 (nội dung gõ tay mất sau một lần parse lại).
 
 **Lưu tách, xem chung:** `src/offline/scenario/cli.py <parsed> --show --page 11` in kịch bản của trang,
-mỗi câu content kèm `block_id` nó trỏ tới — mở `python src/offline/parser/show.py <ten> --page 11` cạnh bên là đối chiếu được.
+mỗi câu content kèm `block_id` nó trỏ tới — mở `document.json` của deck cạnh bên là đối chiếu được.
 
 ---
 
