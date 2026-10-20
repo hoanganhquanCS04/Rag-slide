@@ -2,12 +2,12 @@
 
 **Vào:** `src/output/parser/<doc_id>/document.json` (`ParsedDocument`) — file DUY NHẤT, không đọc
 `docling_vlmpipeline.json` / `tables.json` / `pictures.json` (đã gộp vào đó ở S0) · **Ra:**
-`src/output/chunker/<doc_id>/chunks.json` · **Code:** [src/offline/chunker/](../../src/offline/chunker/) — `BaseChunker`
+kho Chroma `src/output/vectordb/chroma/` (chunk xong nhúng rồi ghi thẳng, không file chunk) · **Code:** [src/offline/chunker/](../../src/offline/chunker/) — `BaseChunker`
 ([base.py](../../src/offline/chunker/base.py)) + biến thể `page` ([variants/page.py](../../src/offline/chunker/variants/page.py))
 
 ```
-python src/offline/chunker/cli.py src/output/parser/<doc_id>/document.json   # -> src/output/chunker/<doc_id>/chunks.json
-python src/offline/embedder/cli.py src/output/chunker/<doc_id>/chunks.json            # -> src/output/embedders/<doc_id>/vectors__<model>.*
+python src/offline/chunker/cli.py src/output/parser/<doc_id>/document.json            # chunk -> nhúng -> ghi Chroma
+python src/offline/chunker/cli.py src/output/parser/<doc_id>/document.json --dry-run  # chỉ xem chunk, không ghi
 ```
 
 ---

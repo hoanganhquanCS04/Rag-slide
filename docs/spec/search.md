@@ -1,6 +1,6 @@
 # Search — từ câu hỏi ra số trang
 
-**Vào:** `src/output/chunker/*/chunks.json` + `src/output/embedders/*/vectors__<model>.npy` · **Ra:** `SearchHit[]` · **Code:** `src/utils/ensemble_search.py` + `src/components/keyword_search.py` (BM25) · đo: `src/evaluation/{eval,tune}.py`
+**Vào:** kho Chroma (chunk: chữ + vector + metadata) · **Ra:** `SearchHit[]` · **Code:** `src/utils/ensemble_search.py` + `src/components/keyword_search.py` (BM25) · đo: `src/evaluation/{eval,tune}.py`
 
 ---
 
@@ -172,8 +172,8 @@ trên 100 câu còn lại) cũng hay chọn K = 15 1:1. Đổi cách chunk / đ�
 #### Tune — `scripts/tune.sh`
 
 ```bash
-bash scripts/tune.sh src/output/chunker/<ten>/chunks.json                  # -> src/output/evaluation/<ten>/chunks_tune.md + .json
-bash scripts/tune.sh src/output/chunker/<ten>/chunks_thu.json --k 5,10,20 --wd 1,1.5,2     # -> src/output/evaluation/<ten>/chunks_thu_tune.*
+bash scripts/tune.sh <doc_id>                         # -> src/output/evaluation/<doc_id>/tune.md + tune.json
+bash scripts/tune.sh <doc_id> --k 5,10,20 --wd 1,1.5,2
 ```
 
 - Pool 50 của mỗi nhánh lấy MỘT lần mỗi câu (`branch_ranks` trong tune.py, hỏi thẳng `retrieve_context`
@@ -183,7 +183,7 @@ bash scripts/tune.sh src/output/chunker/<ten>/chunks_thu.json --k 5,10,20 --wd 1
   thì ghi đè báo cáo của chính file đó: top-1/3/5, MRR, token 5 trang đầu, **cứu / hỏng** so với
   cấu hình code đang dùng, bảng theo `type` câu hỏi, câu trượt top-5 của cấu hình tốt nhất.
 - Đổi cách chunk -> chỉ đổi file đầu vào; bộ chunk chưa nhúng thì tự nhúng (có cache).
-- Kho theo `VECTOR_DB`. Báo cáo tự so pool dense của kho với cosine tính tay từ `.npy`:
+- Đọc kho Chroma thật (đo cách chunk khác: `CHROMA_PATH=<thư mục khác>`). Báo cáo tự so pool dense của kho với cosine tính tay từ vector lấy ra khỏi kho:
   Chroma từng trả pool lệch thỉnh thoảng (~3/14 lượt, nặng nhất ngay sau khi dựng lại S5) —
   lệch thì bảng lượt đó không tin được, script thoát mã 1.
 
@@ -240,16 +240,14 @@ class SearchHit(BaseModel):
     rank_sparse: int | None   # hạng ở nhánh BM25
     score_dense: float        # cosine thô, để debug
     score_sparse: float       # BM25 thô, để debug
-    text_enriched: str        # đưa thẳng cho LLM ở R4
-    image_ratio: float        # bao nhiêu phần là mô tả ảnh do VLM viết
+    text_enriched: str        # đưa thẳng cho LLM ở R4 (lấy từ `document` của bản ghi Chroma)
 ```
 
 **Giữ cả hạng lẫn điểm thô của từng nhánh.** Nhìn `rank_dense=11, rank_sparse=1` là biết
 ngay kết quả này do BM25 kéo lên — chẩn đoán được. Chỉ trả mỗi điểm RRF thì mù.
 
-`image_ratio` đi kèm vì NT2: R4 phải biết phần nội dung nó đang dựa vào là chữ slide hay mô tả
-ảnh do VLM tự viết (dễ bịa bối cảnh hơn). Không tính theo `provenance`: từ 2026-10-08 mọi chữ đều
-`vlm`.
+`image_ratio` (cảnh báo "có X% là mô tả ảnh" trong prompt) BỎ khỏi runtime 2026-10-16 — vẫn còn ở
+`KBChunk` cho offline.
 
 **Nhiều chunk cùng một trang thì gộp.** Trang 34 có 3 chunk; trả về 3 dòng cùng trỏ p34 là
 lãng phí top-k. Gộp theo `page_no`, giữ chunk **điểm cao nhất**.
@@ -288,7 +286,7 @@ Dựng bảng BM25 mất ~10ms cho 52 chunk, làm **một lần lúc khởi đ�
 ## 8. Chạy
 
 ```bash
-python src/utils/ensemble_search.py src/output/chunker/3_datavisualization/chunks.json "làm sao lưu biểu đồ ra file ảnh"
+python scripts/try_ask.py 3_datavisualization "làm sao lưu biểu đồ ra file ảnh"   # log [1] = kết quả tìm
 ```
 
 | cờ | nghĩa |
@@ -386,8 +384,8 @@ Khe rất hẹp, và đây mới là deck **duy nhất** đo được — deck t
 `data/eval/<doc_id>.queries.json` (không có thì `data/eval/queries.json`):
 
 ```bash
-python src/evaluation/eval.py src/output/chunker/3_datavisualization/chunks.json -o src/output/evaluation/3_datavisualization/eval.json
-python src/evaluation/eval.py src/output/chunker/3_datavisualization/chunks.json --by nguoi
+python src/evaluation/eval.py 3_datavisualization -o src/output/evaluation/3_datavisualization/eval.json
+python src/evaluation/eval.py 3_datavisualization --by nguoi
 ```
 
 Câu hỏi sát thực tế, nhưng nhãn do người gán nên dễ thiên vị.

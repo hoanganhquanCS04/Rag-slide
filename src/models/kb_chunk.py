@@ -6,7 +6,7 @@ cắt `.1`, `.2`...), chunk nào cũng trỏ về `page_no` vì runtime nhảy t
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -46,7 +46,7 @@ class KBChunk(BaseModel):
 
 
 class ChunkSet(BaseModel):
-    """Cả bộ chunk của một deck — nội dung file `chunks.json`."""
+    """Cả bộ chunk của một deck, kết quả của chunker (nằm trong bộ nhớ, không ghi file)."""
 
     doc_id: str
     max_tokens: int = 500
@@ -61,6 +61,22 @@ class ChunkSet(BaseModel):
     def by_page(self, page_no: int) -> list[KBChunk]:
         """Các chunk của một trang."""
         return [c for c in self.chunks if c.page_no == page_no]
+
+
+class StoredChunk(BaseModel):
+    """Một bản ghi trong kho tìm kiếm: mã chunk, chữ đã nhúng, metadata dùng để lọc.
+
+    Kho vector và BM25 đều trả về kiểu này, nên kết quả tìm mang sẵn chữ — không phải tra file nào.
+    """
+
+    chunk_id: str
+    document: str                 # = text_enriched của chunk, đúng thứ đã đem đi nhúng
+    metadata: dict[str, Any] = Field(default_factory=dict)   # doc_id · page_no · section_id · content_type
+
+    @property
+    def page_no(self) -> int:
+        """Trang của chunk, đọc từ metadata."""
+        return int(self.metadata["page_no"])
 
 
 class SearchHit(BaseModel):
@@ -80,5 +96,4 @@ class SearchHit(BaseModel):
     score_sparse: float = 0.0         # BM25 thô, để debug
 
     text_enriched: str = ""       # đưa thẳng cho LLM ở R4
-    image_ratio: float = 0.0      # bao nhiêu phần là mô tả ảnh do VLM viết
     n_chunks: int = 1             # gộp mấy chunk của cùng trang lại

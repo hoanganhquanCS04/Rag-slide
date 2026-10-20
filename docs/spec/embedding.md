@@ -1,6 +1,6 @@
 # Embedding — biến chunk thành vector để tìm
 
-**Vào:** `src/output/chunker/*/chunks.json` · **Ra:** `src/output/embedders/*/vectors__<model_id>.{npy,json}` · **Code:** `src/components/embedders/` · `src/utils/vectors.py` · `src/offline/embedder/cli.py`
+**Vào:** chunk trong bộ nhớ (từ `src/offline/chunker/cli.py`) · **Ra:** vector ghi thẳng vào Chroma (không còn `.npy` riêng, bỏ 2026-10-16) · **Code:** `src/components/embedders/` · `src/utils/vectors.py`
 
 ---
 
@@ -176,24 +176,18 @@ nguyên tắc `tts_hash` ở §5 S6b: *"phần tốn tiền nhất, phải reuse
 
 ## 8. File sinh ra
 
-```
-src/output/embedders/3_datavisualization/vectors__text-embedding-3-small.npy   ma trận (51, 1536) float32
-src/output/embedders/3_datavisualization/vectors__text-embedding-3-small.json  {model, backend, dim, normalized, rows:[chunk_id...], keys:[hash chữ...]}
-```
+Từ 2026-10-16 KHÔNG còn file vector riêng (`vectors__<model>.npy` / `.json` đã bỏ): vector ghi thẳng vào
+Chroma, collection `kb__<model_id>`. Còn lại trên đĩa chỉ có cache nhúng `embedders/cache/<model>/<sha1>.npy`.
 
-**`model_id` nằm trong TÊN FILE.** Đây là luật §5 S6a áp cho file thay vì Qdrant
-collection:
+**`model_id` nằm trong TÊN COLLECTION** (và tên thư mục cache). Đây là luật §5 S6a:
 
 > Đổi embedding model mà không rebuild thì runtime truy vấn index cũ bằng vector mới và
 > trả rác **mà không báo lỗi**
 
-Tên file khác nhau thì không thể vô tình dùng nhầm. Chiều vector cũng khác nhau
+Tên collection khác nhau thì không thể vô tình dùng nhầm. Chiều vector cũng khác nhau
 (1024 của `bge-m3` vs 1536 của `3-small`) nên nạp nhầm là vỡ ngay — nhưng **đừng trông
 vào đó**: `3-small` và `ada-002` cùng 1536 chiều mà vector hoàn toàn khác nhau, nạp nhầm
 sẽ im lặng trả rác.
-
-File `.json` giữ thứ tự hàng → `chunk_id`, vì `.npy` chỉ là ma trận số, không biết hàng
-nào là chunk nào.
 
 ---
 
@@ -272,8 +266,8 @@ tiền tố `· trang N/40` tách được bao nhiêu phần?
 
 ```bash
 # cần OPENAI_API_KEY (và OPENAI_BASE_URL nếu đi qua proxy)
-.venv/Scripts/python.exe src/offline/embedder/cli.py src/output/chunker/3_datavisualization/chunks.json
-                         # -> src/output/embedders/3_datavisualization/vectors__<model>.*
+.venv/Scripts/python.exe src/offline/chunker/cli.py src/output/parser/3_datavisualization/document.json
+                         # -> chunk + nhúng + ghi Chroma (vector không còn ghi ra .npy)
 ```
 
 | cờ | nghĩa |

@@ -9,13 +9,10 @@ from __future__ import annotations
 import logging
 import time
 from abc import ABC, abstractmethod
-from pathlib import Path
 from typing import ClassVar
 
 import numpy as np
 
-from utils.config import ROOT
-from utils.vectors import save_vectors
 from models.kb_chunk import ChunkSet
 
 log = logging.getLogger(__name__)
@@ -84,8 +81,8 @@ class Embedder(ABC):
         return out
 
 
-def embed_chunkset(cs: ChunkSet, embedder: Embedder) -> tuple[Path, Path]:
-    """Nhúng mọi chunk (kể cả trang chuyển chương) và ghi file vector -> (file .npy, file .json).
+def embed_chunkset(cs: ChunkSet, embedder: Embedder) -> np.ndarray:
+    """Nhúng mọi chunk (kể cả trang chuyển chương) -> ma trận vector, hàng i = chunk i.
 
     Cách làm: nhúng `text_enriched` (chữ có tiền tố), không phải `text_raw`.
     """
@@ -93,10 +90,6 @@ def embed_chunkset(cs: ChunkSet, embedder: Embedder) -> tuple[Path, Path]:
     t0 = time.perf_counter()
     mat = embedder.embed(texts)
     dt = time.perf_counter() - t0
-
-    paths = save_vectors(cs, mat, model_id=embedder.model_id, backend=embedder.backend,
-                         n_api_calls=embedder.n_api_calls, embed_sec=round(dt, 2))
-    log.info("nhung %d vector trong %.1fs (%.0fms/chunk, %d lan goi API) -> %s",
-             len(texts), dt, dt / max(len(texts), 1) * 1000, embedder.n_api_calls,
-             paths[0].relative_to(ROOT))
-    return paths
+    log.info("nhung %d vector trong %.1fs (%.0fms/chunk, %d lan goi API)",
+             len(texts), dt, dt / max(len(texts), 1) * 1000, embedder.n_api_calls)
+    return mat

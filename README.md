@@ -16,7 +16,7 @@ trên slide.
 |    | Bước            | Code                            | Làm gì                                                                                                                                                                                                   |
 | -- | ----------------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | ✅ | S0 Parse          | `src/offline/parser/`                | docling đọc chữ + toạ độ (tắt OCR) · VLM nhìn cả trang sắp chữ thành khối · VLM chép bảng từ ảnh bảng · chương từ trang mục lục · cờ cho người duyệt |
-| ✅ | S5 KB             | `src/offline/chunker/` · `src/components/embedders/` · `src/components/vectordb/` · `src/components/keyword_search.py` | 1 trang = 1 chunk (cắt khi > 500 token) · nhúng`text-embedding-3-small` qua API, cache theo nội dung · kho vector Chroma hoặc RAM · index BM25                                                    |
+| ✅ | S5 KB             | `src/offline/chunker/` · `src/components/embedders/` · `src/components/vectordb/` · `src/components/keyword_search.py` | 1 trang = 1 chunk (cắt khi > 500 token) · nhúng`text-embedding-3-small` qua API, cache theo nội dung · kho vector Chroma (vector + chữ + metadata) · index BM25                                                    |
 | ✅ | Tìm kiếm        | `src/utils/ensemble_search.py`            | hybrid vector + BM25, gộp bằng RRF (K=10, vector 1.5 : BM25 1), trả**top-5 trang**                                                                                                                                |
 | ✅ | Đo chất lượng | `src/evaluation/{eval,tune}.py` | bộ câu hỏi có nhãn · quét tham số RRF                                                                                                                                                            |
 | 🟡 | Hỏi đáp thử   | `scripts/try_ask.py`          | tìm → 1 lần gọi LLM → code kiểm nguồn, trong terminal                                                                                                                                               |
@@ -45,10 +45,9 @@ data/raw/<file>.pdf
 src/output/parser/<ten>/document.json      ParsedDocument — nguồn của mọi bước sau
    │ ④a chunk                                                        miễn phí
    ▼
-src/output/chunker/<ten>/chunks.json
    │ ④b index: nhúng vector + nạp kho                               💰 API+  có cache
    ▼
-src/output/embedders/<ten>/vectors__<model>.npy  (+ src/output/vectordb/chroma/)
+src/output/vectordb/chroma/   kho chunk (chữ + vector + metadata), không có file chunk riêng
    │ ⑥ S4 kịch bản: chỉ trang đổi mới gọi LLM                       💰 API (~1–2 lần/trang)
    ▼
 src/output/scenario/<ten>/scenario.json · scenario.md
@@ -81,7 +80,7 @@ cp .env.example .env
 | `VLM_MODEL`                           | `gemini-3.8-flash`          | ① đọc trang (bố cục, chữ, bảng, ảnh)    |
 | `LLM_MODEL`                           | `gemini-3.5-flash-lite`     | hỏi đáp thử, kịch bản                |
 | `EMBED_MODEL`                         | `text-embedding-3-small`    | ④ nhúng vector, tìm kiếm               |
-| `VECTOR_DB`                           | `chroma` hoặc `inmem`    | kho vector (bỏ trống =`inmem`)         |
+| `VECTOR_DB`                           | `chroma`                 | kho vector (bỏ trống =`chroma`)        |
 | `CHROMA_PATH`                         | `src/output/vectordb/chroma`          | chỗ Chroma ghi đĩa, tính từ gốc repo |
 
 Windows: terminal PowerShell mới cần `$env:PYTHONIOENCODING = "utf-8"` (script `.sh` tự đặt).
@@ -107,7 +106,7 @@ python scripts/try_ask.py "data/raw/<file>.pdf"            # tên file gốc cũ
 python scripts/try_ask.py <ten> "nghỉ phép năm được mấy ngày"
 
 # 3. Chỉ tìm, xem trang nào ra và do nhánh nào kéo lên
-python src/utils/ensemble_search.py src/output/chunker/<ten>/chunks.json "làm thêm ngày lễ hệ số bao nhiêu" --explain
+python scripts/try_ask.py <ten> "làm thêm ngày lễ hệ số bao nhiêu"     # log [1] = trang tìm được + hạng dense / BM25
 
 # Xem nội dung đã parse / chunk của một trang
 python src/offline/parser/show.py <ten> --page 7
@@ -151,11 +150,11 @@ src/
 ├── models/          schema Pydantic dùng chung: ParsedDocument · KBChunk · Scenario · Reply/Answer
 ├── components/      LINH KIỆN thay được, không biết gì về slide
 │   ├── embedders/     chữ -> vector: openai (EMBEDDER), cache bọc ngoài
-│   ├── vectordb/      kho vector: inmem | chroma (VECTOR_DB)
-│   └── keyword_search.py   BM25 trong RAM, cùng bộ hàm với vectordb/
+│   ├── vectordb/      kho vector: chroma (VECTOR_DB)
+│   └── keyword_search.py   BM25 trong RAM, dựng từ bản ghi của kho vector
 ├── offline/         CHUẨN BỊ DỮ LIỆU, chạy một lần, mỗi bước một cli.py
 │   ├── parser/        S0 — file gốc -> ParsedDocument   cli.py (parse) · show.py (xem) · enrich (chương · cờ)
-│   ├── chunker/       S5 — ParsedDocument -> chunks.json
+│   ├── chunker/       S5 — ParsedDocument -> chunk -> nhúng -> ghi thẳng Chroma
 │   ├── embedder/      S5 — cli.py nhúng chunks + nạp kho
 │   └── scenario/      S4 kịch bản
 ├── utils/           dùng chung: config (đường dẫn, .env) · llm · vectors · tokens · syllables ·

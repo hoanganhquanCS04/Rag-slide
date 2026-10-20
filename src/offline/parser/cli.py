@@ -65,6 +65,12 @@ def report(doc: ParsedDocument) -> None:
     for f in doc.flags:
         where = f"p{f.page_no}" if f.page_no else "-"
         log.info("    [%s] %-22s %-5s %s", f.severity, f.kind, where, f.detail)
+    # Trang mất chữ thì hỏi đáp về trang đó sẽ luôn từ chối -> nhắc to ở dòng cuối, đừng để chìm trong log
+    lost = sorted({f.page_no for f in doc.flags if f.kind == "empty_page" and f.page_no})
+    if lost:
+        log.warning("")
+        log.warning("⚠ %d TRANG MAT CHU: %s — hoi dap ve cac trang nay se tu choi. Xem logs/vlm_pipeline/%s/pNNN.txt, "
+                    "chay lai voi --redo", len(lost), " ".join(f"p{p}" for p in lost), doc.doc_id)
 
 
 def main(argv: list[str] | None = None) -> int:

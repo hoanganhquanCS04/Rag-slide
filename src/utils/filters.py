@@ -7,25 +7,24 @@ from __future__ import annotations
 
 from typing import Any
 
-from models.kb_chunk import KBChunk
+from models.kb_chunk import KBChunk, StoredChunk
 
 # Lọc metadata: {"doc_id": "x", "page_no": [3, 4]}  =  doc_id == "x"  VÀ  page_no ∈ {3, 4}
 Where = dict[str, Any]
-Hit = tuple[str, float]          # (chunk_id, điểm) — càng cao càng giống
+Hit = tuple[StoredChunk, float]  # (bản ghi tìm được, điểm) — càng cao càng giống
 
 
 def filter_metadata(c: KBChunk) -> dict[str, Any]:
-    """Lấy các trường của chunk dùng để lọc (doc_id, page_no, ...).
+    """Lấy các trường của chunk dùng để lọc, cất cạnh vector trong kho.
 
-    Cách làm: lấy 6 trường, bỏ trường None (Chroma không nhận None).
+    Cách làm: lấy 4 trường, bỏ trường None (Chroma không nhận None). Không cất thứ suy ra được
+    (trang có được tìm không = `content_type == "content"`).
     """
     meta = {
         "doc_id": c.doc_id,
         "page_no": c.page_no,
         "section_id": c.section_id,
-        "vector_role": c.vector_role,
         "content_type": c.content_type,
-        "is_searchable": c.is_searchable,
     }
     return {k: v for k, v in meta.items() if v is not None}
 

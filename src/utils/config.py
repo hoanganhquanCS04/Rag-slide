@@ -28,9 +28,8 @@ EVAL_QUERIES_DIR = ROOT / "data" / "eval"      # <doc_id>.queries.json — câu 
 # Mọi artifact pipeline sinh ra. Mỗi thư mục con TRÙNG TÊN thư mục code trong src/ sinh ra nó.
 OUTPUT_DIR = ROOT / "src" / "output"
 PARSER_OUTPUT = OUTPUT_DIR / "parser"          # <doc_id>/document.json + cache VLM (S0)
-CHUNKER_OUTPUT = OUTPUT_DIR / "chunker"        # <doc_id>/chunks.json (S5)
-EMBEDDERS_OUTPUT = OUTPUT_DIR / "embedders"    # <doc_id>/vectors__<model>.{npy,json} · cache/<model>/
-VECTORDB_OUTPUT = OUTPUT_DIR / "vectordb"      # chroma/ (chỉ khi VECTOR_DB=chroma)
+EMBEDDERS_OUTPUT = OUTPUT_DIR / "embedders"    # cache/<model>/<sha1>.npy — cache nhúng theo hash chữ
+VECTORDB_OUTPUT = OUTPUT_DIR / "vectordb"      # chroma/ — kho vector (vector + chữ + metadata)
 EVALUATION_OUTPUT = OUTPUT_DIR / "evaluation"  # <doc_id>/eval.json · <tên chunks>_tune.{md,json} · _misses.json
 SCENARIO_OUTPUT = OUTPUT_DIR / "scenario"      # <doc_id>/scenario.{json,md} (S4)
 

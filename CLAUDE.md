@@ -83,7 +83,7 @@ mức "mô tả slide".
 
 ```
 ✅ S0   PDF → ParsedDocument      src/offline/parser/      2 deck: Onboarding 51 trang, Thời gian làm việc 17 — chương từ mục lục
-✅ S5   chunk                     src/offline/chunker/     89 + 18 chunk, 1 trang = 1 chunk (không vector ảnh phụ) — khuôn như src/offline/parser/
+✅ S5   chunk + ghi kho           src/offline/chunker/     89 + 18 chunk, 1 trang = 1 chunk (không vector ảnh phụ) — chunk xong nhúng + ghi thẳng Chroma, không file chunk
 ✅ S5   vector                    src/components/embedders/ · src/components/vectordb/ — khuôn như src/offline/parser/
 ✅ S5   tìm                       src/utils/ensemble_search.py · src/components/keyword_search.py   hybrid dense+BM25 gộp RRF, cố định top-5 — đo ở src/evaluation/
 🚫 S1   BỎ — gộp vào S0                            xem §5
@@ -316,7 +316,7 @@ Spec đầy đủ: [docs/spec/scenario.md](docs/spec/scenario.md).
 
 ### S6a — dùng lại index của S5, không dựng index riêng
 
-- **Một vector cho mỗi chunk**, đã có ở `src/offline/embedder/cli.py`. Multi-field **BỎ**: nó cần
+- **Một vector cho mỗi chunk**, nhúng ở `src/offline/chunker/cli.py` (chunk xong nhúng + ghi kho luôn). Multi-field **BỎ**: nó cần
   `message` / `desc` / `relations` tách riêng, mà §5 S1 đã bỏ hết.
 - Tìm là **hybrid dense + BM25, gộp bằng RRF** — xem
   [docs/spec/search.md](docs/spec/search.md). Đo được: hybrid hơn từng nhánh riêng.
@@ -450,10 +450,11 @@ input → regex fast-path ──(khớp)──→ goto_slide()          [~5ms]
 
 ## 7. Cấu trúc lưu trữ
 
-### 7.0 HIỆN TRẠNG v0 — file JSON trên đĩa + kho vector (inmem | chroma) ★
+### 7.0 HIỆN TRẠNG v0 — file JSON trên đĩa + kho vector Chroma ★
 
-Chưa có tầng shared/per-deck. Nguồn là file JSON + `.npy` để mở ra xem; kho vector chỉ là
-BẢN SAO để tìm, xoá đi thì tự dựng lại từ `.npy`, không tốn API.
+Chưa có tầng shared/per-deck. Parse ghi file JSON (`document.json`) để mở ra xem; chunk KHÔNG ghi file —
+chunk xong nhúng rồi vào thẳng Chroma (bỏ `chunks.json` + `.npy` 2026-10-16). Chunk chỉ còn một bản: trong
+Chroma. Xoá kho thì chạy lại `src/offline/chunker/cli.py <document.json>` (trúng cache nhúng, không tốn API).
 
 **Code** — `src/`, khuôn theo `minhbtrc/chatbot-template` (đổi 2026-10-16): `chat_engine.py` ở ngoài
 cùng, linh kiện thay được ở `components/`, các bước chuẩn bị dữ liệu ở `offline/`:
@@ -466,13 +467,13 @@ src/models/          schema Pydantic dùng chung — parsed_document.py (S0) · 
                      scenario.py (S4) · runtime.py (RuntimeConfig · Reply · Answer)
 src/components/      LINH KIỆN: làm một việc chung, không biết gì về slide, thay được cách làm
   embedders/           nhúng chữ -> vector — base.py · cache.py · factory.py · variants/openai.py
-  vectordb/            kho vector (CHỈ dense) — base.py · factory.py · variants/{inmem,chroma}.py
+  vectordb/            kho vector (CHỈ dense) — base.py · factory.py · variants/chroma.py (inmem bỏ 2026-10-16)
   keyword_search.py    BM25Index — bảng BM25 trong RAM, 1 cách làm nên 1 file (không base/factory)
 src/offline/         CHUẨN BỊ DỮ LIỆU trước, chạy 1 lần, lưu ra file — mỗi bước có cli.py
   parser/              S0 — cli.py · base.py · variants/docling.py (biến thể DUY NHẤT, cli gọi thẳng) · vlm.py ·
                        enrich.py (chương → cờ) · sections · flags · pictures (②) · tables (②b) · show.py
-  chunker/             S5 chunk — cli.py · factory.py · base.py · variants/page.py
-  embedder/cli.py      S5 nhúng cả bộ chunk -> .npy + nạp kho (gọi components/embedders + vectordb)
+  chunker/             S5 — cli.py (chunk -> nhúng -> ghi Chroma; `--dry-run` chỉ xem) · factory.py · base.py ·
+                       variants/page.py
   scenario/            S4 — cli.py · generate.py · validate.py
 src/utils/           dụng cụ nhiều nơi dùng — config.py (gốc repo, .env, MODEL_ID, PROMPTS_DIR,
                      OUTPUT_DIR) · llm.py · vectors.py · filters.py · tokens.py · syllables.py ·
@@ -500,14 +501,14 @@ data/eval/<doc_id>.queries.json           câu hỏi có nhãn để đo retriev
 data/pronunciation.json                   KHO PHÁT ÂM CHUNG mọi deck — máy đề xuất từ kịch bản, người chốt
 .env  VLM_MODEL · LLM_MODEL · EMBED_MODEL  tên model dùng — sửa ở đây, KHÔNG sửa trong code
 .env  VLM_BASE_URL · LLM_BASE_URL       cổng riêng (vLLM local) cho VLM / LLM chữ — bỏ trống = OPENAI_BASE_URL
-.env  EMBEDDER · VECTOR_DB=inmem|chroma · CHROMA_PATH   chọn biến thể — không sửa code
+.env  EMBEDDER · VECTOR_DB=chroma · CHROMA_PATH   chọn biến thể — không sửa code
 
 logs/vlm_pipeline/<doc_id>/pNNN.txt       phản hồi thô của VLM từng trang (xem vì sao trang hỏng)
 ```
 
 **Output** — `src/output/` (gitignore). Mỗi thư mục con mang TÊN thư mục code sinh ra nó (`parser/`,
 `chunker/`, `embedders/`…, KHÔNG kèm `offline/` / `components/`), đường dẫn là hằng số trong `utils.config`
-(`PARSER_OUTPUT`, `CHUNKER_OUTPUT`, …) — dời code không làm đổi chỗ output:
+(`PARSER_OUTPUT`, `EMBEDDERS_OUTPUT`, …) — dời code không làm đổi chỗ output:
 
 ```
 src/output/
@@ -518,17 +519,12 @@ src/output/
 │   │                             KB, S4, runtime gọi `offline.parser.enrich.enrich()` lúc nạp
 │   │                             xem: python src/offline/parser/show.py <doc_id> [--page 7]
 │   └── boxes/                    ảnh khung từng trang (scripts/try_docling_gemma.py), chỉ để soi
-├── chunker/<doc_id>/chunks.json  S5 — KBChunk[]  (src/offline/chunker/cli.py)
-├── embedders/
-│   ├── <doc_id>/vectors__<model_id>.npy    ma trận vector — tên model PHẢI nằm trong tên file
-│   ├── <doc_id>/vectors__<model_id>.json   rows[i] = chunk_id, keys[i] = hash chữ của hàng i
-│   │                             (keys lệch chunks.json -> báo nhúng lại, không nạp vector cũ)
-│   └── cache/<model>/<sha1>.npy  DÙNG CHUNG mọi deck — cache theo hash nội dung
-│                                 (cả thư mục do python src/offline/embedder/cli.py <chunks.json> ghi)
+├── embedders/cache/<model>/<sha1>.npy   DÙNG CHUNG mọi deck — cache nhúng theo hash chữ (không gọi lại API)
 ├── vectordb/chroma/              DÙNG CHUNG — kho Chroma: MỘT collection kb__<model_id> cho mọi bài,
-│                                 tách bằng metadata doc_id (chỉ khi VECTOR_DB=chroma)
-├── evaluation/<doc_id>/          đo tìm kiếm — eval.json (src/evaluation/eval.py) ·
-│                                 <tên chunks>_tune.{md,json} · _misses.json (scripts/tune.sh)
+│                                 tách bằng metadata doc_id. NƠI DUY NHẤT chứa chunk (chữ + vector + metadata)
+│                                 ghi bởi: python src/offline/chunker/cli.py <document.json>
+├── evaluation/<doc_id>/          đo tìm kiếm — eval.json (src/evaluation/eval.py <doc_id>) ·
+│                                 tune.{md,json} · tune_misses.json (scripts/tune.sh <doc_id>)
 └── scenario/<doc_id>/            S4 — python src/offline/scenario/cli.py <document.json>
     ├── scenario.json             kịch bản CẢ deck, mỗi entry kèm page_hash cho incremental
     └── scenario.md               bản đọc cho người, ghi cùng lúc với .json
@@ -546,11 +542,17 @@ Kho vector KHÔNG mua tốc độ: 52 vector, quét vét cạn hết **0.01ms**;
 cũng chỉ 25ms, trong khi gọi API nhúng câu hỏi đã mất ~700ms. Chroma mua về **lưu đĩa +
 metadata filter + nhiều tài liệu chung một chỗ**. Kho chỉ làm nhánh dense — BM25 ở
 `src/components/keyword_search.py` (cùng bộ hàm với `vectordb/`), RRF ở `utils/ensemble_search.py`.
-`ChatEngine` (và `evaluation.eval.SearchSetup`) khởi tạo gọi `sync` cả hai: lệch `chunks.json` thì nạp lại từ
-`.npy` / dựng lại BM25. Hai kho cùng bộ hàm `index_documents` · `retrieve_context` · `sync`
-(so bộ chunk → xoá deck → nạp lại). BM25 `index_documents` nhận NGUYÊN bộ chunk một deck
-(IDF tính trên cả deck) — gọi qua `sync`. Khung inmem/chroma/factory lấy từ `minhbtrc/chatbot-template` (MIT) — chỗ
-khác bản gốc ghi ở `src/components/vectordb/base.py`. Sơ đồ §7.1 là đích, chưa áp dụng.
+
+**Mỗi bản ghi Chroma chỉ có 4 trường chuẩn** (chốt 2026-10-16): `id` = `chunk_id` · `embedding` ·
+`document` = `text_enriched` · `metadata` = `doc_id`, `page_no`, `section_id`, `content_type` (chỉ trường
+lọc — không hash, không cờ suy ra được; trang được tìm = `content_type == "content"`). Tìm trả
+`[(StoredChunk, điểm)]` — có sẵn chữ + metadata. **Không còn `sync`** (bỏ 2026-10-16): ghi kho chỉ ở offline
+(`replace_document`: ghi bộ mới rồi xoá chunk cũ không còn); `ChatEngine` khởi tạo đọc `get_document(doc_id)`
+rồi dựng BM25 trong RAM từ CHÍNH các bản ghi đó — hai nhánh luôn cùng một bản chữ. Hệ quả: đổi `document.json`
+hay cách chunk mà không chạy lại `chunker/cli.py` thì runtime vẫn dùng bản cũ. Ghi Chroma bằng xoá-rồi-thêm, KHÔNG `upsert`:
+upsert GỘP metadata, khoá cũ nằm lại. `evaluation.eval.SearchSetup` đọc Chroma thật theo `doc_id`,
+y như `ChatEngine`. Đo cách chunk khác mà không đè kho thật: `CHROMA_PATH=<thư mục khác>` cho cả lệnh chunk lẫn eval. Khung chroma/factory lấy từ
+`minhbtrc/chatbot-template` (MIT) — chỗ khác bản gốc ghi ở `src/components/vectordb/base.py`. Sơ đồ §7.1 là đích, chưa áp dụng.
 
 ### 7.1 Đích (nhiều deck)
 
@@ -666,7 +668,7 @@ npx skills add tirth8205/code-review-graph --skill build-graph --agent claude-co
 | Parse PDF nguồn | `PyMuPDF`, `unstructured` hoặc `docling` cho cây heading                                                                                       |
 | Embedding        | **v0: `text-embedding-3-small` qua API** (dense-only, 1536 chiều) · đích: `bge-m3` (dense + sparse 1 forward)                            |
 | Rerank           | **KHÔNG dùng** (chốt 2026-10-01) — `bge-reranker-v2-m3` local đã loại (2.2 GB), không chờ quyền `/rerank` trên API key — xem §6 |
-| Vector DB        | **v0: `chromadb` hoặc RAM** — chọn bằng `VECTOR_DB` (`src/components/vectordb/`). Tắt embedding có sẵn, cosine, tắt telemetry                 |
+| Vector DB        | **v0: `chromadb`** — `VECTOR_DB` (`src/components/vectordb/`). Tắt embedding có sẵn, cosine, tắt telemetry; bản ghi = id · vector · chữ · metadata lọc |
 | Schema           | Pydantic v2                                                                                                                                            |
 
 **Cảnh báo:** LibreOffice render pptx không khớp 100% với PowerPoint (font thay thế,
@@ -751,7 +753,7 @@ Xem [docs/spec/search.md §10](docs/spec/search.md).
 **Trong phạm vi:** **một file `.pdf` duy nhất, vừa làm deck vừa làm KB** · parse bằng
 docling, VLM mô tả ảnh gọi **qua API** · nhúng vector cũng **qua API**
 (`text-embedding-3-small`) — **không chạy model local nào** · lưu **file JSON trên đĩa**,
-kho vector Chroma hoặc RAM (`VECTOR_DB`) · tiếng Việt, thuật ngữ giữ gốc tiếng Anh
+kho vector Chroma (`VECTOR_DB`) · tiếng Việt, thuật ngữ giữ gốc tiếng Anh
 
 **Chấp nhận đánh đổi** (xem §3.0): không có `chart_data` / `tables` / `build_steps` từ
 XML · S3 Alignment suy biến nên bỏ qua · độ sâu trả lời giới hạn ở mức **mô tả slide** ·

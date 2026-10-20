@@ -31,7 +31,7 @@ REPO = Path(__file__).resolve().parent.parent       # chỉ để nạp src/ —
 sys.path.insert(0, str(REPO / "src"))
 os.chdir(REPO)                                       # --config mặc định config/runtime.json tính từ gốc repo
 
-from utils.config import CHUNKER_OUTPUT, PARSER_OUTPUT, ROOT
+from utils.config import PARSER_OUTPUT, ROOT
 from utils.tokens import count_tokens
 from utils.ensemble_search import RRF_K, W_DENSE, W_SPARSE
 from utils.llm import DEFAULT_MODEL
@@ -65,7 +65,7 @@ def show_debug(ans: Answer, cfg: RuntimeConfig, full_prompt: bool) -> None:
         for h in found:
             head = h.text_enriched.split("] ", 1)[-1].replace("\n", " ⏎ ")
             print(f"     {'★' if h.chunk_id in chosen else ' '} [{h.chunk_id.split('#', 1)[1]}] {count_tokens(h.text_enriched)} tok"
-                  + (f" · {h.image_ratio:.0%} anh" if h.image_ratio else "") + f" · {head[:90]}…")
+                  f" · {head[:90]}…")
         if full_prompt:
             print("       ----- prompt -----")
             print("\n".join("       " + ln for ln in p.splitlines()))
@@ -122,8 +122,7 @@ def main() -> int:
     qs = [" ".join(args.question)] if args.question else []
     # Tên file gốc -> doc_id bằng ĐÚNG hàm run_deck.sh dùng; doc_id đưa vào thì giữ nguyên
     doc_id = slugify_doc_id(Path(args.doc).stem)
-    missing = [f for f in (PARSER_OUTPUT / doc_id / "document.json", CHUNKER_OUTPUT / doc_id / "chunks.json")
-               if not f.exists()]
+    missing = [f for f in (PARSER_OUTPUT / doc_id / "document.json",) if not f.exists()]
     if missing:
         raise SystemExit(f"chua dung '{doc_id}' (thieu {', '.join(str(f.relative_to(ROOT)) for f in missing)}) — chay truoc:\n"
                          f'    bash scripts/run_deck.sh "data/raw/<file goc>.pdf"')

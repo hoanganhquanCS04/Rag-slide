@@ -19,7 +19,6 @@ Mỗi câu hỏi xử lý riêng, không nhớ các câu hỏi trước.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import re
 import time
@@ -28,16 +27,15 @@ from pathlib import Path
 
 from components.embedders.base import EmbedError, Embedder
 from components.embedders.factory import create_embedder
-from models.kb_chunk import ChunkSet, SearchHit
+from models.kb_chunk import SearchHit
 from models.parsed_document import ParsedDocument
 from models.runtime import Answer, Reply, RuntimeConfig
 from offline.parser.enrich import enrich
-from utils.config import CHUNKER_OUTPUT, MODEL_ID, PARSER_OUTPUT, PROMPTS_DIR
+from utils.config import MODEL_ID, PARSER_OUTPUT, PROMPTS_DIR
 from utils.ensemble_search import POOL, ensemble_search
 from utils.filters import Hit, Where
 from components.keyword_search import BM25Index
 from utils.llm import LLM
-from utils.vectors import vectors_file
 from components.vectordb.factory import create_store
 
 log = logging.getLogger(__name__)
@@ -75,14 +73,18 @@ class ChatEngine:
         # Nội dung bộ slide — chỉ dùng để lấy tên trang khi gợi ý "xem trang 3 – ..."
         self.doc = enrich(ParsedDocument.load(PARSER_OUTPUT / doc_id / "document.json"))
 
-        # Các đoạn của bộ slide + hai kho tìm kiếm. Kho nào lệch với chunks.json thì tự nạp lại.
-        chunks_path = CHUNKER_OUTPUT / doc_id / "chunks.json"
-        self.chunk_set = ChunkSet.model_validate(json.loads(chunks_path.read_text(encoding="utf-8")))
-        self.chunks_by_id = {c.chunk_id: c for c in self.chunk_set.chunks}
+        # Hai kho tìm kiếm. Kho vector (Chroma) đã nạp sẵn ở offline, chứa cả chữ lẫn metadata;
+        # bảng BM25 dựng trong RAM từ chính các bản ghi đó, nên hai nhánh tìm trên CÙNG một bản chữ.
+        self.doc_id = doc_id
         self.store = create_store(model_id=MODEL_ID)                        # kho vector
-        self.store.sync(self.chunk_set, vectors_file(self.chunk_set.doc_id, MODEL_ID))
+        records = self.store.get_document(doc_id)
+        if not records:
+            raise SystemExit(f"{doc_id}: kho vector chua co bai nay — chay "
+                             f"`python src/offline/chunker/cli.py src/output/parser/{doc_id}/document.json`")
         self.bm25 = BM25Index()                                             # kho từ khoá, nằm trong RAM
-        self.bm25.sync(self.chunk_set)
+        self.bm25.index_documents(records)
+        # Bộ slide có trang nội dung nào không (toàn trang chuyển chương thì không cần tìm)
+        self.has_content = any(r.metadata.get("content_type") == "content" for r in records)
         self._embedder: Embedder | None = None
 
         self.cfg = cfg
@@ -149,7 +151,7 @@ class ChatEngine:
         Chỉ tìm trong bộ slide này, và bỏ các trang chỉ có tên chương (trang chuyển chương),
         vì chúng không có nội dung để trả lời.
         """
-        return {"doc_id": self.chunk_set.doc_id, "is_searchable": True}
+        return {"doc_id": self.doc_id, "content_type": "content"}
 
     def vector_search(self, question: str) -> list[Hit]:
         """Tìm bằng vector: biến câu hỏi thành vector (gọi API) -> 50 đoạn gần nhất [(mã đoạn, cosine)].
@@ -170,7 +172,7 @@ class ChatEngine:
         (chạy trong máy). Xong cả hai thì gộp ("hybrid").
         Nếu API nhúng vector lỗi thì câu này chỉ dùng kết quả từ khoá ("sparse").
         """
-        if not any(c.is_searchable for c in self.chunk_set.chunks):
+        if not self.has_content:
             return [], "hybrid"
         with ThreadPoolExecutor(max_workers=2) as pool:
             dense_job = pool.submit(self.vector_search, question)
@@ -182,7 +184,7 @@ class ChatEngine:
                 log.warning("  [API nhúng lỗi -> câu này chỉ tìm bằng từ khoá] %s", str(e)[:120])
                 dense, mode = [], "sparse"
             sparse = sparse_job.result()
-        return ensemble_search(dense, sparse, self.chunks_by_id, k=self.cfg.top_k), mode
+        return ensemble_search(dense, sparse, k=self.cfg.top_k), mode
 
     def _prepare_context(self, question: str, found: list[SearchHit]) -> str:
         """Điền các trang tìm được và câu hỏi vào mẫu prompt -> prompt hoàn chỉnh."""
@@ -253,13 +255,8 @@ def _ctx(hits: list[SearchHit]) -> str:
     """Ghép các trang tìm được thành một đoạn chữ để đưa vào prompt.
 
     Mỗi trang có dòng đầu "[mã đoạn] trang N" (LLM dùng mã này để ghi nguồn), rồi tới nội dung.
-    Trang có nhiều chữ do máy tự mô tả từ ảnh thì kèm cảnh báo "có thể sai con số".
     """
-    return "\n\n".join(
-        f"[{h.chunk_id}] trang {h.page_no}"
-        + (f" (có {h.image_ratio:.0%} là mô tả ảnh do máy viết — có thể sai con số)" if h.image_ratio else "")
-        + f"\n{h.text_enriched}"
-        for h in hits)
+    return "\n\n".join(f"[{h.chunk_id}] trang {h.page_no}\n{h.text_enriched}" for h in hits)
 
 
 def _ms(t0: float) -> int:

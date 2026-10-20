@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Hashable, TypeVar
 
-from models.kb_chunk import KBChunk, SearchHit
+from models.kb_chunk import SearchHit
 from utils.filters import Hit
 
 # Tham số gộp RRF. Các số này ĐO bằng scripts/tune.sh, không đoán.
@@ -60,38 +60,38 @@ def group_by_page(hits: list[SearchHit]) -> list[SearchHit]:
     return sorted(output.values(), key=lambda h: -h.score)
 
 
-def ensemble_search(dense: list[Hit], sparse: list[Hit], chunks_by_id: dict[str, KBChunk], *,
+def ensemble_search(dense: list[Hit], sparse: list[Hit], *,
                     k: int = TOP_K, group_pages: bool = True, rrf_k: int = RRF_K,
                     w_dense: float = W_DENSE, w_sparse: float = W_SPARSE) -> list[SearchHit]:
     """Gộp kết quả tìm bằng vector và tìm bằng BM25 -> k trang liên quan nhất.
 
-    dense, sparse   kết quả từng cách tìm, dạng [(chunk_id, điểm)], tốt nhất đứng đầu.
-                    Muốn chỉ dùng một cách thì đưa danh sách rỗng cho cách kia.
-    chunks_by_id    mã đoạn -> đoạn, để lấy số trang và nội dung
+    dense, sparse   kết quả từng cách tìm, dạng [(bản ghi, điểm)], tốt nhất đứng đầu.
+                    Bản ghi mang sẵn chữ và số trang. Muốn chỉ dùng một cách thì đưa danh sách rỗng cho cách kia.
     group_pages     gộp các đoạn cùng trang (mặc định có)
 
     Điểm `score` của kết quả chỉ để xếp thứ tự, KHÔNG nói lên mức độ chắc chắn.
     """
+    # Bản ghi theo mã đoạn, lấy từ CẢ hai nhánh — đoạn chỉ một nhánh tìm ra vẫn có chữ
+    records = {record.chunk_id: record for record, _ in [*dense, *sparse]}
     # Hạng = vị trí trong danh sách kết quả, đếm từ 1
-    dense_rank = {chunk_id: rank for rank, (chunk_id, _) in enumerate(dense, 1)}
-    sparse_rank = {chunk_id: rank for rank, (chunk_id, _) in enumerate(sparse, 1)}
-    dense_score, sparse_score = dict(dense), dict(sparse)
+    dense_rank = {record.chunk_id: rank for rank, (record, _) in enumerate(dense, 1)}
+    sparse_rank = {record.chunk_id: rank for rank, (record, _) in enumerate(sparse, 1)}
+    dense_score = {record.chunk_id: score for record, score in dense}
+    sparse_score = {record.chunk_id: score for record, score in sparse}
     fused = rrf_fuse(dense_rank, sparse_rank, k=rrf_k, w_dense=w_dense, w_sparse=w_sparse)
 
     hits = [
         SearchHit(
             chunk_id=chunk_id,
-            page_no=chunks_by_id[chunk_id].page_no,
+            page_no=records[chunk_id].page_no,
             score=score,
             rank_dense=dense_rank.get(chunk_id),
             rank_sparse=sparse_rank.get(chunk_id),
             score_dense=float(dense_score.get(chunk_id, 0.0)),
             score_sparse=float(sparse_score.get(chunk_id, 0.0)),
-            text_enriched=chunks_by_id[chunk_id].text_enriched,
-            image_ratio=chunks_by_id[chunk_id].image_ratio,
+            text_enriched=records[chunk_id].document,
         )
         for chunk_id, score in sorted(fused.items(), key=lambda kv: -kv[1])
-        if chunk_id in chunks_by_id           # phòng kho còn sót đoạn cũ không có trong chunks.json
     ]
     if group_pages:
         hits = group_by_page(hits)

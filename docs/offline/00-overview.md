@@ -3,7 +3,7 @@
 > **File này là THIẾT KẾ ĐÍCH.** Cái đang chạy thật: [01-hien-trang.md](./01-hien-trang.md).
 > Hiện trạng v0 khác thiết kế ở ba điểm: **một file PDF duy nhất vừa làm deck vừa làm KB**
 > (không phải `.pptx` + `source/*.pdf` tách biệt) · lưu **file JSON trên đĩa** + kho vector
-> Chroma/RAM, chưa có Qdrant · mới code **S0, S5, S4** (S6a dùng lại index S5; `deck_map` bỏ 2026-10-13) — chưa có S2
+> Chroma, chưa có Qdrant · mới code **S0, S5, S4** (S6a dùng lại index S5; `deck_map` bỏ 2026-10-13) — chưa có S2
 > `time_budget`, S6b, S7. Trạng thái từng stage ghi ở §3.3 và §4 dưới đây.
 >
 > Hệ quả của việc gộp hai nguồn: [CLAUDE.md §3.0](../../CLAUDE.md). Tóm tắt — mất bản
@@ -166,7 +166,7 @@ R2  hỏi điều hướng   →  KHÔNG lọc            (trang mở chương l
 Chưa dựng Qdrant và **chưa cần**: 52 vector quét vét cạn hết **0.01ms**, 100.000 vector
 cũng chỉ 25ms — trong khi gọi API nhúng câu hỏi đã mất ~700ms. Kho vector mua về metadata
 filter và nhiều deck, **không phải tốc độ**. v0 dùng Chroma (ghi đĩa, một collection cho mọi
-tài liệu, lọc bằng `doc_id`) hoặc RAM — chọn bằng `VECTOR_DB`, xem `src/components/vectordb/`.
+tài liệu, lọc bằng `doc_id`; mỗi bản ghi = id · vector · chữ · metadata lọc) — xem `src/components/vectordb/`.
 
 ### 3.2 Thời gian thật (đo 2026-10-02)
 
@@ -246,11 +246,11 @@ VÀO  src/output/parser/<doc_id>/document.json
   │            1536 chiều · chuẩn hoá L2 · cache theo hash(model + chữ)
   │            nhúng CẢ BỘ, kể cả phân mục — lọc là việc của lúc TRUY VẤN
   │
-  └─> [index]  dense: kho vector chroma | inmem (BẢN SAO của .npy, tự đồng bộ)
-               sparse: BM25 dựng trong RAM lúc khởi động (src/components/keyword_search.py)
+  └─> [index]  dense: kho vector chroma (vector + chữ + metadata, nạp ở offline)
+               sparse: BM25 dựng trong RAM lúc khởi động, từ bản ghi của kho (src/components/keyword_search.py)
                gộp bằng RRF K=10, dense 1.5 : sparse 1   <- đo bằng scripts/tune.sh
                KHÔNG cộng điểm: hai thang đo không so được
-RA   src/output/chunker/<doc_id>/chunks.json · src/output/embedders/<doc_id>/vectors__<model_id>.npy + src/output/vectordb/chroma/
+RA   src/output/vectordb/chroma/ (chunk: chữ + vector + metadata — không file chunk riêng)
 ```
 
 Đo được (2026-10-02, câu hỏi do AI viết — thiên vị): Onboarding 200 câu **hybrid 157 top-1 /
@@ -389,7 +389,7 @@ Mọi artifact là **Pydantic v2 model**, ghi ra JSON, đọc lại được. Kh
 các stage. Pipeline phải resume được từ bất kỳ stage nào — nghĩa là mỗi stage đọc file
 của stage trước chứ không nhận object trong bộ nhớ.
 
-Cây dưới là ĐÍCH. v0 đang ghi vào `src/output/parser/` · `src/output/chunker/` · `src/output/scenario/` — xem
+Cây dưới là ĐÍCH. v0 đang ghi vào `src/output/parser/` · `src/output/vectordb/chroma/` · `src/output/scenario/` — xem
 [01-hien-trang.md §1](./01-hien-trang.md).
 
 ```
@@ -471,7 +471,7 @@ dirty += {MỌI trang sau nó trong cùng chương}    (vì đọc kịch bản 
 
 - Python 3.11+, type hints bắt buộc, Pydantic v2 cho schema.
 - Mỗi stage là một module độc lập, **chạy riêng được qua CLI**:
-  `python src/offline/embedder/cli.py src/output/chunker/<ten>/chunks.json`
+  `python src/offline/chunker/cli.py src/output/parser/<ten>/document.json`
 - Gọi LLM/VLM: retry exponential backoff, log **full prompt + response** vào `logs/`.
   Không log thì không bao giờ debug được vì sao model bịa.
 - Mọi prompt nằm trong `src/prompts/*.md`. **Không hardcode prompt trong file `.py`.**

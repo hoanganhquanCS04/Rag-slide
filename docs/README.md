@@ -2,7 +2,7 @@
 
 > **HIỆN TRẠNG v0 — đọc trước.** Bài toán: robot thuyết trình và trả lời câu hỏi từ
 > **một file PDF duy nhất**, file đó vừa là deck vừa là KB. Lưu file JSON trên đĩa + kho
-> vector Chroma (hoặc RAM), **không chạy model local nào** (VLM, LLM, embedding đều qua API).
+> vector Chroma, **không chạy model local nào** (VLM, LLM, embedding đều qua API).
 >
 > So với bản thiết kế cũ: **S1 đã bỏ** (gộp vào S0), **S3 đã bỏ** (align vào chính mình),
 > **multi-field embed đã bỏ**. Lý do ở [CLAUDE.md §5](../CLAUDE.md).
@@ -20,7 +20,7 @@
 
 ```
 ✅ S0  file raw → ParsedDocument   src/offline/parser/           docling + VLM bố cục trang + chép bảng
-✅ S5  chunk + vector + kho        src/offline/chunker/ · src/components/embedders/ · src/components/vectordb/ · src/components/keyword_search.py   1536 chiều · cache · chroma | inmem · BM25
+✅ S5  chunk + vector + kho        src/offline/chunker/ · src/components/embedders/ · src/components/vectordb/ · src/components/keyword_search.py   1536 chiều · cache · chroma · BM25
 ✅     tìm hybrid + đo             src/utils/ensemble_search.py · src/evaluation/{eval,tune}.py
    ─── bốn dòng trên + S4: MỘT lệnh  bash scripts/run_deck.sh "<file>"
 🟡 S4  kịch bản                    src/offline/scenario/         bước 4 của run_deck.sh, nhịp chưa đạt gate

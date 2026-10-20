@@ -171,6 +171,10 @@ class DoclingParser(BaseParser):
     kind = "docling"
     scale = 4.0                    # ảnh trang = 4 × 72dpi
     max_tokens = 4096
+    # temperature 0 thì cùng ảnh luôn ra cùng chữ: trang đã lặp (vd quy_dinh_chung_t7_t8 p12 xuất
+    # một khối "image" rỗng hàng chục lần tới hết max_tokens) thì --redo vẫn lặp y hệt. Phạt nhẹ
+    # việc lặp token để VLM thoát vòng — nhẹ thôi, vì bảng có nhiều ô / số giống nhau là chuyện thật.
+    repetition_penalty = 1.05
     timeout = 300.0                # trang VLM lặp từng tới 110s
     concurrency = 8
     picture_area_threshold = 0.05
@@ -222,7 +226,8 @@ class DoclingParser(BaseParser):
         """Dựng DocumentConverter của docling: server VLM, prompt, độ phân giải, số trang chạy song song."""
         base, key, soft = vlm_endpoint()
         # `params` ghi đè HẲN tham số API của preset (model, max_tokens)
-        params: dict[str, Any] = {"model": self.model, "max_tokens": self.max_tokens, "temperature": 0}
+        params: dict[str, Any] = {"model": self.model, "max_tokens": self.max_tokens, "temperature": 0,
+                                  "repetition_penalty": self.repetition_penalty}   # vLLM nhận thẳng tham số này
         if soft:
             params["mm_processor_kwargs"] = {"max_soft_tokens": soft}
         engine = ApiVlmEngineOptions(

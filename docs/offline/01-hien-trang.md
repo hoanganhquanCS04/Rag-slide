@@ -25,11 +25,9 @@ src/output/parser/<ten>/docling_vlmpipeline.json           cache phản hồi VL
         ▼
 src/output/parser/<ten>/document.json            ★ ParsedDocument — NGUỒN của mọi bước sau
         │
-        ├──④a chunk ──► src/output/chunker/<ten>/chunks.json      KBChunk[]  → để TÌM
-        │   ④b index: nhúng + nạp kho ────────────── 💰 embedding (cache theo nội dung)
-        │      ▼
-        │   src/output/embedders/<ten>/vectors__<model>.{npy,json}
-        │   src/output/vectordb/chroma/                        kho vector — BẢN SAO từ .npy
+        ├──④ chunk → nhúng → ghi kho ───────────── 💰 embedding (cache theo nội dung)
+        │      ▼   (chunk không ghi ra file — vào thẳng kho)
+        │   src/output/vectordb/chroma/                        kho vector — vector + chữ + metadata
         │      │
         │      └─ eval.py / tune.sh ──► src/output/evaluation/<ten>/   đo chất lượng tìm
         │
@@ -130,22 +128,21 @@ KHÔNG overlap · trang phân mục -> content_type "section_divider", lọc lú
 Trang bị cắt thì chunk mang đuôi `.1`, `.2` (`…#p009.1`). Mọi chunk đều trỏ về `page_no` —
 điều hướng theo TRANG.
 
-Chữ và vector ở **hai file riêng**, nối bằng thứ tự hàng:
+Chữ và vector nằm **chung một bản ghi** trong Chroma (bỏ `chunks.json` + `.npy` 2026-10-16):
 
 ```
-src/output/chunker/<ten>/chunks.json                              chữ + metadata
-src/output/embedders/<ten>/vectors__text-embedding-3-small.npy   ma trận (số chunk × 1536), chuẩn hoá L2
-src/output/embedders/<ten>/vectors__text-embedding-3-small.json  rows[i] = chunk_id, keys[i] = hash chữ của hàng i
-src/output/embedders/cache/<model>/<sha1>.npy             cache dùng chung, khoá = hash(model + chữ)
+src/output/vectordb/chroma/                     chunk: id · vector · chữ · metadata — nơi DUY NHẤT
+src/output/embedders/cache/<model>/<sha1>.npy   cache nhúng dùng chung, khoá = hash(model + chữ)
 ```
 
 Tên model nằm trong tên file vector: đổi model mà quên nhúng lại thì tìm kiếm trả rác
 **không báo lỗi** — nhúng tên vào là để không lẫn được.
 
-**Kho vector** (`src/components/vectordb/`, chọn bằng `VECTOR_DB`): `chroma` ghi đĩa, một collection
-`kb__<model>` cho mọi tài liệu, lọc bằng `doc_id` · `inmem` giữ trong RAM, nạp lại mỗi lần
-chạy. Kho chỉ lo nhánh vector và là BẢN SAO của `.npy` — lệch với `chunks.json` thì tự nạp
-lại, xoá đi thì tự dựng lại, không gọi API.
+**Kho vector** (`src/components/vectordb/`, `VECTOR_DB=chroma`): ghi đĩa, một collection
+`kb__<model>` cho mọi tài liệu, lọc bằng `doc_id`. Mỗi bản ghi = `chunk_id` · vector · chữ
+(`text_enriched`) · metadata lọc (`doc_id`, `page_no`, `section_id`, `content_type`). Nạp ở offline
+(`chunker/cli.py`: chunk xong nhúng rồi ghi luôn, không file chunk); lúc chạy chỉ đọc, BM25 dựng từ chính
+các bản ghi đó. Không còn `sync`: đổi `document.json` thì chạy lại `chunker/cli.py` (trúng cache, không gọi API).
 
 **Tìm** (`src/utils/ensemble_search.py`) = hai nhánh, gộp bằng RRF:
 
@@ -226,7 +223,6 @@ slide: nó là chữ trên slide hay mô tả ảnh (`kind`), nằm ở đâu (`
 | có `docling_vlmpipeline.json` | `src/output/parser/<ten>/` | không gọi lại VLM. Cache theo FILE, không theo trang: đổi model / prompt phải `--redo` cả file |
 | `page_hash` = hash(nội dung + vị trí mọi block) | `ParsedPage` | S4 chỉ viết lại trang có hash đổi |
 | cache vector theo hash(model + `text_enriched`) | `src/output/embedders/cache/` | chữ không đổi → 0 lần gọi API |
-| `sync` so metadata từng chunk | kho vector, BM25 | lệch thì nạp lại từ `.npy`, khớp thì thôi |
 | `pronunciation_hash` | `Scenario` | đổi bảng phát âm → biết timing đã lệch |
 
 Đo được (2026-10-02): chạy lại `run_deck.sh` trọn luồng cho cả hai deck → **0 lần gọi

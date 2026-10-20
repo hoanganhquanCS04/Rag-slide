@@ -1,8 +1,11 @@
 """Đo chất lượng tìm kiếm bằng bộ câu hỏi có nhãn `data/eval/<doc_id>.queries.json`.
 
-    python src/evaluation/eval.py src/output/chunker/<ten>/chunks.json                 # bộ câu hỏi của deck
-    python src/evaluation/eval.py src/output/chunker/<ten>/chunks.json --by nguoi      # chỉ câu người viết
-    python src/evaluation/eval.py src/output/chunker/<ten>/chunks.json --rrf-k 7 --wd 1.25
+    python src/evaluation/eval.py <doc_id>                       # vd onboarding_kit — bộ câu hỏi của deck
+    python src/evaluation/eval.py <doc_id> --by nguoi            # chỉ câu người viết
+    python src/evaluation/eval.py <doc_id> --rrf-k 7 --wd 1.25
+
+Đo trên kho vector thật (Chroma) — chạy `src/offline/chunker/cli.py` trước. Muốn đo thử một cách chunk
+khác mà không đè kho thật: đặt `CHROMA_PATH=<thư mục khác>` cho cả lệnh chunk lẫn lệnh này.
 
 Để làm gì: câu hỏi do người viết (không lấy từ chính tài liệu) nên sát thực tế. Quét cấu hình RRF
 bằng `tune.py`, dùng lại các hàm ở đây. Cách làm: với mỗi câu, tìm rồi xem trang đúng có ở hạng 1 / trong top-k không.
@@ -22,12 +25,11 @@ if __package__ in (None, ""):  # chạy thẳng file: THAY src/evaluation/ bằn
 
 from components.embedders.base import Embedder
 from components.embedders.factory import create_embedder
-from models.kb_chunk import ChunkSet, SearchHit
+from models.kb_chunk import SearchHit
 from utils.config import EVAL_QUERIES_DIR, MODEL_ID, console_setup
 from utils.ensemble_search import POOL, RRF_K, TOP_K, W_DENSE, W_SPARSE, ensemble_search
 from utils.filters import Hit, Where
 from components.keyword_search import BM25Index
-from utils.vectors import vectors_file
 from components.vectordb.factory import create_store
 
 log = logging.getLogger(__name__)
@@ -37,23 +39,22 @@ Mode = Literal["hybrid", "dense", "sparse"]
 
 
 class SearchSetup:
-    """Hai kho tìm kiếm của MỘT bộ chunk, nạp sẵn để đo — cùng cách nạp và cùng 3 bước tìm như chat_engine.py.
+    """Hai kho tìm kiếm của MỘT deck, nạp sẵn để đo — cùng cách nạp và cùng 3 bước tìm như chat_engine.py.
 
     Không dùng thẳng ChatEngine: nó kéo theo LLM + prompt, mà đo tìm kiếm không cần.
     """
 
-    def __init__(self, chunks_path: str | Path, *, vectors_path: str | Path | None = None,
-                 model_id: str = MODEL_ID):
-        """Đọc chunks.json, đưa kho vector + kho BM25 về đúng bộ chunk này."""
-        self.chunk_set = ChunkSet.model_validate(json.loads(Path(chunks_path).read_text(encoding="utf-8")))
-        self.chunks = self.chunk_set.chunks
-        self.chunks_by_id = {c.chunk_id: c for c in self.chunks}
+    def __init__(self, doc_id: str, *, model_id: str = MODEL_ID):
+        """Đọc mọi bản ghi của deck từ kho vector, rồi dựng BM25 từ chính các bản ghi đó."""
+        self.doc_id = doc_id
         self.model_id = model_id
-        self.vectors_path = Path(vectors_path) if vectors_path else vectors_file(self.chunk_set.doc_id, model_id)
         self.store = create_store(model_id=model_id)
-        self.store.sync(self.chunk_set, self.vectors_path)
+        self.records = self.store.get_document(doc_id)
+        if not self.records:
+            raise SystemExit(f"{doc_id}: kho vector chua co bai nay — chay "
+                             f"`python src/offline/chunker/cli.py src/output/parser/{doc_id}/document.json`")
         self.bm25 = BM25Index()
-        self.bm25.sync(self.chunk_set)
+        self.bm25.index_documents(self.records)
         self._embedder: Embedder | None = None
 
     @property
@@ -65,7 +66,7 @@ class SearchSetup:
 
     def where(self, filter_dividers: bool = True) -> Where:
         """Bộ lọc chung hai nhánh: chỉ bộ slide này; filter_dividers=True thì bỏ trang chuyển chương."""
-        return {"doc_id": self.chunk_set.doc_id, **({"is_searchable": True} if filter_dividers else {})}
+        return {"doc_id": self.doc_id, **({"content_type": "content"} if filter_dividers else {})}
 
     def vector_search(self, query: str, where: Where) -> list[Hit]:
         """Tìm bằng vector -> POOL đoạn gần nhất [(mã đoạn, cosine)] (gọi API nhúng)."""
@@ -78,12 +79,12 @@ class SearchSetup:
     def search(self, query: str, *, k: int = TOP_K, mode: Mode = "hybrid", filter_dividers: bool = True,
                rrf_k: int = RRF_K, w_dense: float = W_DENSE, w_sparse: float = W_SPARSE) -> list[SearchHit]:
         """Tìm -> k trang đầu. mode="dense"/"sparse" thì nhánh còn lại để rỗng (và không gọi tới)."""
-        if not any(c.is_searchable or not filter_dividers for c in self.chunks):
+        if not any(r.metadata.get("content_type") == "content" or not filter_dividers for r in self.records):
             return []
         where = self.where(filter_dividers)
         dense = self.vector_search(query, where) if mode in ("hybrid", "dense") else []
         sparse = self.keyword_search(query, where) if mode in ("hybrid", "sparse") else []
-        return ensemble_search(dense, sparse, self.chunks_by_id, k=k,
+        return ensemble_search(dense, sparse, k=k,
                                rrf_k=rrf_k, w_dense=w_dense, w_sparse=w_sparse)
 
 
@@ -133,9 +134,8 @@ def run(setup: SearchSetup, queries: list[dict], *, mode: Mode = "hybrid", k: in
 def main(argv: list[str] | None = None) -> int:
     """Đọc tham số, chạy bộ câu hỏi theo từng kiểu (dense / sparse / hybrid), in và ghi kết quả ra JSON."""
     ap = argparse.ArgumentParser(prog="eval")
-    ap.add_argument("chunks")
+    ap.add_argument("doc", help="doc_id, vd onboarding_kit")
     ap.add_argument("--queries", default=None, help="mac dinh data/eval/<doc_id>.queries.json")
-    ap.add_argument("--vectors", default=None)
     ap.add_argument("--model", default=MODEL_ID)
     ap.add_argument("-k", type=int, default=5)
     ap.add_argument("--by", default=None, choices=["ai", "nguoi"],
@@ -149,8 +149,8 @@ def main(argv: list[str] | None = None) -> int:
 
     console_setup()
 
-    setup = SearchSetup(args.chunks, vectors_path=args.vectors, model_id=args.model)
-    qpath = Path(args.queries) if args.queries else default_queries(setup.chunk_set.doc_id)
+    setup = SearchSetup(args.doc, model_id=args.model)
+    qpath = Path(args.queries) if args.queries else default_queries(setup.doc_id)
     qs = load_queries(qpath, args.by)
     if not qs:
         raise SystemExit(f"{qpath}: khong co cau hoi nao khop")
@@ -159,7 +159,7 @@ def main(argv: list[str] | None = None) -> int:
     # trọng số chỉ có tác dụng ở hybrid — dense/sparse riêng thì thứ hạng là thứ hạng của nhánh đó
     is_default = (args.rrf_k, args.wd, args.ws) == (RRF_K, W_DENSE, W_SPARSE)
     rrf = {"k": args.rrf_k, "w_dense": args.wd, "w_sparse": args.ws, "is_default": is_default}
-    report: dict = {"doc_id": setup.chunk_set.doc_id, "model": args.model, "k": args.k,
+    report: dict = {"doc_id": setup.doc_id, "model": args.model, "k": args.k,
                     "queries": str(qpath), "rrf": rrf,
                     "n_queries": len(qs), "n_by_ai": n_ai, "modes": {}}
 

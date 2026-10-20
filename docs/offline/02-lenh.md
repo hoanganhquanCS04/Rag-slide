@@ -44,7 +44,7 @@ xuất bằng `scripts\pptx2pdf.ps1`).
 bản (S4). Bước nào có cache thì không tốn API — chạy lại thoải mái:
 
 ```bash
-bash scripts/run_deck.sh "data/raw/<file>.pdf"               # -> document.json, chunks.json + vector + kho, scenario.json
+bash scripts/run_deck.sh "data/raw/<file>.pdf"               # -> document.json, chunk vào kho Chroma, scenario.json
 bash scripts/run_deck.sh "data/raw/<file>.pdf" --redo        # gọi lại VLM cả file (mặc định dùng cache)
 bash scripts/run_deck.sh "data/raw/<file>.pdf" --eval        # thêm bước đo bộ câu hỏi có nhãn -> src/output/evaluation/<ten>/eval.json
 ```
@@ -64,11 +64,10 @@ Từng bước riêng lẻ (chính là những gì `run_deck.sh` gọi):
 # ①③ đọc file -> src\output\parser\<ten>\{docling_vlmpipeline.json, document.json}   [① tốn API]
 .venv\Scripts\python.exe src\offline\parser\cli.py "data\raw\<file>.pdf"
 
-# ④a chunk -> src\output\chunker\<ten>\chunks.json
+# ④ chunk -> nhúng vector -> ghi thẳng kho src\output\vectordb\chroma\  [tốn API nếu chữ đổi]
 .venv\Scripts\python.exe src\offline\chunker\cli.py src\output\parser\<ten>\document.json
-
-# ④b nhúng vector + nạp kho -> src\output\embedders\<ten>\vectors__<model>.{npy,json} + src\output\vectordb\chroma\  [tốn API]
-.venv\Scripts\python.exe src\offline\embedder\cli.py src\output\chunker\<ten>\chunks.json
+# chỉ xem chunk (không nhúng, không ghi kho)
+.venv\Scripts\python.exe src\offline\chunker\cli.py src\output\parser\<ten>\document.json --dry-run --page 19
 ```
 
 Bên trong `parser\cli.py`:
@@ -91,13 +90,11 @@ Ghi chú:
 - `run` thoát mã `3` khi có cờ mức `error` — vẫn ghi file bình thường, mã lỗi để CI bắt.
   `run_deck.sh` gặp mã 3 vẫn chạy tiếp; mã khác (không thấy file, thiếu khoá API…) thì DỪNG.
 - ④ chữ không đổi thì lấy vector từ cache (`src\output\embedders\cache\`), không gọi API.
-- ④ luôn ghi `src\output\chunker\<doc_id>\chunks.json` (kể cả khi chỉ `--page` / `--stats`), vector ghi cạnh nó.
-- ④ nạp kho theo `VECTOR_DB`:
-  - `chroma` — nạp luôn ở bước này. Cuối lệnh in `kho chroma (kb__<model>): nap N vector`
-    hoặc `da khop, khong doi`. Mọi tài liệu chung MỘT collection, tách bằng `doc_id`.
-  - `inmem` — không ghi gì; mỗi lần tìm kiếm tự nạp từ `.npy` vào RAM (vài ms).
-- Kho chỉ là BẢN SAO. Nguồn là `chunks.json` + `.npy`: xoá `src\output\vectordb\chroma\` thì lần tìm kiếm
-  sau tự dựng lại, **không gọi API**.
+- ④ KHÔNG ghi file chunk nào: chunk nằm trong bộ nhớ rồi vào thẳng Chroma (chữ + vector + metadata).
+  Cuối lệnh in `kho chroma (kb__<model>): nap N ban ghi, xoa M ban ghi cu`. Mọi tài liệu chung MỘT
+  collection, tách bằng `doc_id`. `--dry-run` thì chỉ in chunk, không nhúng, không ghi.
+- Kho là nơi DUY NHẤT chứa chunk. Xoá `src\output\vectordb\chroma\` thì chạy lại ④ — cache nhúng có
+  sẵn nên **không gọi API**.
 
 ### Kịch bản (S4) — bước 4 của `run_deck.sh`
 
@@ -187,30 +184,10 @@ Xem cả deck bằng mắt: mở thẳng `src\output\parser\<ten>\document.json`
 
 ## C. Thử tìm kiếm
 
-```powershell
-.venv\Scripts\python.exe src\search\cli.py src\output\chunker\<ten>\chunks.json "làm thêm ngày lễ hệ số bao nhiêu" -k 3 --explain
+```bash
+python scripts/try_ask.py <ten> "làm thêm ngày lễ hệ số bao nhiêu"     # log [1] in hạng dense / BM25 từng trang
+python src/evaluation/eval.py <ten> --mode sparse                      # chỉ BM25, không gọi API
 ```
-
-```
-HOI (hybrid): làm thêm ngày lễ hệ số bao nhiêu
- 1. trang 8   0.1250  [LÀM THÊM GIỜ · TRƯỜNG HỢP 1: Làm thêm ngày OFF (Hệ số 2) · tr
-      dense hang 1    cos=0.498  |  bm25 hang 1    diem=8.37  |  gop 1 chunk  |  vlm 11%
- 2. trang 7   0.1176  [LÀM THÊM GIỜ · CÁCH TÍNH LÀM THÊM GIỜ · trang 7/17] CÁCH TÍNH
-      dense hang 2    cos=0.480  |  bm25 hang 2    diem=7.94  |  gop 1 chunk  |  vlm 67%
-```
-
-`--explain` in hạng của từng nhánh — `dense hang 7 | bm25 hang 2` là biết kết quả do nhánh
-nào kéo lên. `--sparse-only` = chỉ BM25, không gọi API · `--dense-only` · `--no-filter` = giữ
-cả trang phân mục (kiểu tìm của câu điều hướng) · `--no-group` = không gộp chunk cùng trang.
-
-Dòng log đầu mỗi lần tìm cho biết kho có khớp không:
-
-```
-nap 18 chunk | kho chroma | tu khoa rank_bm25 | model text-embedding-3-small                      <- khớp, dùng luôn
-nap 18 chunk | kho chroma (nap lai 18 vector) | tu khoa rank_bm25 | model text-embedding-3-small  <- vừa tự nạp lại từ .npy
-```
-
-`nap lai` lặp lại MỌI lần chạy = `chunks.json` bị đổi mà chưa chạy ④b `src\offline\embedder\cli.py`.
 
 Hỏi đáp trọn vòng (tìm → LLM → code kiểm nguồn): `scripts\try_ask.py`, xem mục A.
 
@@ -219,28 +196,28 @@ Hỏi đáp trọn vòng (tìm → LLM → code kiểm nguồn): `scripts\try_as
 ## D. Đo chất lượng
 
 ```powershell
-# bộ câu hỏi có nhãn — số đo THẬT. Chạy cả dense / sparse / hybrid
-.venv\Scripts\python.exe src\evaluation\eval.py src\output\chunker\<ten>\chunks.json
+# bộ câu hỏi có nhãn — số đo THẬT. Chạy cả dense / sparse / hybrid (đọc kho Chroma)
+.venv\Scripts\python.exe src\evaluation\eval.py <ten>
 # chỉ BM25 — không gọi API, chạy được khi không có mạng / khoá
-.venv\Scripts\python.exe src\evaluation\eval.py src\output\chunker\<ten>\chunks.json --mode sparse
+.venv\Scripts\python.exe src\evaluation\eval.py <ten> --mode sparse
 # thử cấu hình gộp khác (mặc định = hằng số của utils/ensemble_search.py: K=10, dense 1.5 : sparse 1)
-.venv\Scripts\python.exe src\evaluation\eval.py src\output\chunker\<ten>\chunks.json --rrf-k 7 --wd 1.25
+.venv\Scripts\python.exe src\evaluation\eval.py <ten> --rrf-k 7 --wd 1.25
 ```
 
 ```bash
 # quét K + trọng số dense/sparse của RRF
-bash scripts/tune.sh src/output/chunker/<ten>/chunks.json
-bash scripts/tune.sh src/output/chunker/<ten>/chunks.json --k 5,10,20 --wd 1,1.5,2
+bash scripts/tune.sh <ten>
+bash scripts/tune.sh <ten> --k 5,10,20 --wd 1,1.5,2
 ```
 
 - `eval.py`, `tune.sh`, `run_deck.sh --eval` không truyền `--queries` thì cùng lấy
   `data\eval\<ten>.queries.json` (không có thì bộ chung `queries.json` của `3_datavisualization`).
   Dòng `===` đầu log in tên file câu hỏi đang dùng.
-- `tune.sh` ra ba file, đặt theo tên file vào, trong `src\output\evaluation\<ten>\`:
-  `<tên chunks>_tune.md` (người đọc) · `_tune.json` (máy đọc) · `_misses.json` (câu trượt
+- `tune.sh` ra ba file trong `src\output\evaluation\<ten>\`:
+  `tune.md` (người đọc) · `tune.json` (máy đọc) · `tune_misses.json` (câu trượt
   top-5 của cấu hình tốt nhất, cùng dạng file câu hỏi — đưa thẳng vào `--queries` được).
 - `tune.sh` lấy câu hỏi ở `data\eval\<ten>.queries.json` (không có thì `queries.json`, đổi bằng
-  `--queries`). Đổi cách chunk thì chỉ đổi file vào — bộ chunk chưa nhúng thì tự nhúng.
+  `--queries`). Đo cách chunk khác mà không đè kho thật: `CHROMA_PATH=<thư mục khác>` cho cả ④ lẫn tune.
   Chỉ ĐO, không đổi mặc định của `utils/ensemble_search.py`. Thoát mã 1 khi kho vector trả pool lệch — chạy
   lại. Chi tiết: `docs\spec\search.md` §4.
 - Toàn bộ câu eval hiện do AI viết rồi tự chấm — số thiên vị, log in `CANH BAO`.
@@ -262,8 +239,8 @@ bash scripts/tune.sh src/output/chunker/<ten>/chunks.json --k 5,10,20 --wd 1,1.5
 | file slide gốc | `run_deck.sh "<file>" --redo` (→ S4 nếu cần kịch bản) |
 | `src\prompts\s0_vlm_layout_prompt.md` / `VLM_MODEL` | `run_deck.sh "<file>" --redo` — gọi lại VLM cả file |
 | luật chunk (`src\offline\chunker\`) | `run_deck.sh "<file>"` — chỉ chunk có chữ đổi mới gọi API nhúng |
-| `EMBED_MODEL` | `run_deck.sh` — nhúng lại TOÀN BỘ, ra file vector + collection mới mang tên model mới |
-| `VECTOR_DB` / xoá `src\output\vectordb\chroma\` | không cần chạy gì — lần tìm sau tự nạp kho từ `.npy`, 0 lần gọi API |
+| `EMBED_MODEL` | `run_deck.sh` — nhúng lại TOÀN BỘ, ra collection mới mang tên model mới |
+| xoá `src\output\vectordb\chroma\` | `run_deck.sh "<file>"` (hoặc chỉ ④) — dựng lại kho từ cache nhúng, 0 lần gọi API |
 | `data\pronunciation.json` | S4 — trang không đổi chỉ được đếm lại âm tiết, không gọi LLM |
 | `src\prompts\s4_scenario.md` hoặc `LLM_MODEL` | S4 — tự nhận ra prompt/model đổi, viết lại mọi trang |
 

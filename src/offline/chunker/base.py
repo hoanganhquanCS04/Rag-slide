@@ -1,6 +1,7 @@
-"""Lớp cha của chunker: ParsedDocument -> ChunkSet (nội dung `chunks.json`).
+"""Lớp cha của chunker: ParsedDocument -> ChunkSet (danh sách chunk, nằm trong bộ nhớ).
 
-Để làm gì: phần dùng chung cho mọi chunker — gắn tiền tố, dựng KBChunk, gom cả deck, ghi file.
+Để làm gì: phần dùng chung cho mọi chunker — gắn tiền tố, dựng KBChunk, gom cả deck.
+Không ghi file: `cli.py` nhúng rồi ghi thẳng ChunkSet vào kho vector.
 Chunker cụ thể chỉ phải viết `chunk_page`.
 Cách làm: đầu vào là document.json đã `enrich()`; trang chuyển chương được đánh dấu
 `section_divider` để lọc lúc tìm (không xoá).
@@ -10,7 +11,6 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from pathlib import Path
 from typing import ClassVar
 
 from utils.tokens import TOKENIZER_ID, count_tokens
@@ -23,13 +23,12 @@ MAX_TOKENS = 500
 
 
 class BaseChunker(ABC):
-    """Khung chạy chunk: cắt từng trang -> gom thành ChunkSet -> ghi `out_dir/chunks.json`."""
+    """Khung chạy chunk: cắt từng trang -> gom thành ChunkSet."""
 
     kind: ClassVar[str]
 
-    def __init__(self, out_dir: Path, max_tokens: int = MAX_TOKENS):
-        """Nhớ thư mục output và số token tối đa mỗi chunk."""
-        self.out_dir = out_dir
+    def __init__(self, max_tokens: int = MAX_TOKENS):
+        """Nhớ số token tối đa mỗi chunk."""
         self.max_tokens = max_tokens
 
     @abstractmethod
@@ -49,14 +48,6 @@ class BaseChunker(ABC):
                  doc.doc_id, len(chunks), n_split,
                  sum(1 for c in chunks if c.content_type == "section_divider"), len(cs.searchable))
         return cs
-
-    def save(self, cs: ChunkSet) -> Path:
-        """Ghi ChunkSet ra `out_dir/chunks.json` -> đường dẫn file."""
-        path = self.out_dir / "chunks.json"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(cs.model_dump_json(indent=2), encoding="utf-8")
-        log.info("ghi -> %s (%d KB)", path, path.stat().st_size // 1024)
-        return path
 
     # ------------------------------------------------------------------ dùng chung cho biến thể
 
