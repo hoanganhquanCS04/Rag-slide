@@ -91,7 +91,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.parsed.exists():
         raise SystemExit(f"khong thay file: {args.parsed}")
-    doc = enrich(ParsedDocument.load(args.parsed))   # chương không nằm trong document.json
+    doc = enrich(ParsedDocument.load(args.parsed))  
 
     cs = create_chunker(args.chunker, args.max_tokens).run(doc)
 
