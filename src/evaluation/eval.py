@@ -186,11 +186,6 @@ def main(argv: list[str] | None = None) -> int:
         out.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
         log.info("")
         log.info("ghi -> %s", out)
-
-    if n_ai == len(qs):
-        log.info("")
-        log.info("CANH BAO: 100% cau hoi do AI tu nghi ra roi tu cham. So nay THIEN VI,")
-        log.info("          chua dung de ket luan duoc. §6 doi 50 cau nguoi that viet.")
     return 0
 
 

@@ -71,7 +71,7 @@ if [ "$EVAL" -eq 1 ]; then
   # `|| true` nằm TRONG ngoặc: grep không khớp dòng nào thì không làm chết script (pipefail),
   # còn eval.py lỗi thì pipefail vẫn bắt và dừng.
   "$PY" src/evaluation/eval.py "$DOC_ID" -o "$EVAL_OUT/eval.json" 2>&1 \
-    | { grep -E "^(===|---|ghi|CANH BAO|          )" || true; }
+    | { grep -E "^(===|---|ghi)" || true; }
 fi
 
 echo
