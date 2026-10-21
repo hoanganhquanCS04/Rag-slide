@@ -35,7 +35,6 @@ DIVIDER_CX_RANGE = (0.35, 0.65)
 # CHỈ tiêu đề mở đầu bằng "Bài tập" — dò "yêu cầu" trong cả trang là bắt nhầm deck nhân sự
 # (Onboarding p26 "Chấm công: Quản lý yêu cầu của CBNV")
 EXERCISE_TITLE = re.compile(r"^\s*bài tập", re.I)
-LABEL_CHARS = 48         # ParsedPage.label: cắt dòng chữ đầu khi trang không có tiêu đề
 
 Point = tuple[float, float]
 
@@ -290,16 +289,6 @@ class ParsedPage(_Base):
         if self.title and EXERCISE_TITLE.match(self.title):
             return "exercise"
         return "content"
-
-    @property
-    def label(self) -> str:
-        """Tên ngắn của trang: tiêu đề; không có thì dòng chữ đầu tiên (cắt 48 ký tự)."""
-        if self.title:
-            return self.title
-        first = next((b.content for b in self.paragraphs if b.content), "") or \
-            next((b.content for b in self.blocks if b.content), "")
-        first = first.split("\n")[0].strip()
-        return first[:LABEL_CHARS] + ("…" if len(first) > LABEL_CHARS else "") or "(không có chữ)"
 
     def compute_hash(self) -> str:
         """Hash nội dung + vị trí mọi khối của trang.

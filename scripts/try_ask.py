@@ -31,7 +31,7 @@ REPO = Path(__file__).resolve().parent.parent       # chỉ để nạp src/ —
 sys.path.insert(0, str(REPO / "src"))
 os.chdir(REPO)                                       # --config mặc định config/runtime.json tính từ gốc repo
 
-from utils.config import PARSER_OUTPUT, ROOT
+from utils.config import ROOT
 from utils.tokens import count_tokens
 from utils.ensemble_search import RRF_K, W_DENSE, W_SPARSE
 from utils.llm import DEFAULT_MODEL
@@ -77,7 +77,7 @@ def show_debug(ans: Answer, cfg: RuntimeConfig, full_prompt: bool) -> None:
 async def run(doc_id: str, questions: list[str], model: str, cfg: RuntimeConfig,
               quiet: bool, full_prompt: bool) -> None:
     engine = ChatEngine(doc_id, cfg, model, ROOT / "logs" / "runtime" / doc_id / "llm")
-    print(f"{doc_id}: {engine.doc.n_pages} trang | LLM {model}" + ("" if questions else " | Ctrl+C de thoat"))
+    print(f"{doc_id}: LLM {model}" + ("" if questions else " | Ctrl+C de thoat"))
 
     def ask_forever():
         while True:                                  # Enter trống -> hỏi lại; Ctrl+C / hết file -> thoát
@@ -122,10 +122,6 @@ def main() -> int:
     qs = [" ".join(args.question)] if args.question else []
     # Tên file gốc -> doc_id bằng ĐÚNG hàm run_deck.sh dùng; doc_id đưa vào thì giữ nguyên
     doc_id = slugify_doc_id(Path(args.doc).stem)
-    missing = [f for f in (PARSER_OUTPUT / doc_id / "document.json",) if not f.exists()]
-    if missing:
-        raise SystemExit(f"chua dung '{doc_id}' (thieu {', '.join(str(f.relative_to(ROOT)) for f in missing)}) — chay truoc:\n"
-                         f'    bash scripts/run_deck.sh "data/raw/<file goc>.pdf"')
     try:
         asyncio.run(run(doc_id, qs, args.model, RuntimeConfig.load(args.config), args.quiet, args.prompt))
     except KeyboardInterrupt:                        # Ctrl+C lúc đang chờ tìm / LLM

@@ -42,7 +42,6 @@ class Reply(BaseModel):
     action: Literal["answer", "escalate"]       # answer = trả lời · escalate = từ chối, để người thật trả lời
     text: str = ""                              # câu robot nói ra
     sources: list[str] = Field(default_factory=list)     # trả lời: lấy từ đoạn nào (mã đoạn)
-    candidates: list[int] = Field(default_factory=list)  # từ chối: gợi ý các trang liên quan
     via: Literal["llm", "fallback"] = "llm"     # llm = LLM quyết · fallback = LLM lỗi, code tự trả lời
     note: str = ""                              # ghi chú nội bộ để xem lại, robot KHÔNG nói ra
 

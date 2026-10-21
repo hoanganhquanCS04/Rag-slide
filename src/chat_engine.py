@@ -28,9 +28,8 @@ from pathlib import Path
 from components.embedders.base import EmbedError, Embedder
 from components.embedders.factory import create_embedder
 from models.kb_chunk import SearchHit
-from models.parsed_document import ParsedDocument
 from models.runtime import Answer, Reply, RuntimeConfig
-from utils.config import MODEL_ID, PARSER_OUTPUT, PROMPTS_DIR
+from utils.config import MODEL_ID, PROMPTS_DIR
 from utils.ensemble_search import POOL, ensemble_search
 from utils.filters import Hit, Where
 from components.keyword_search import BM25Index
@@ -51,6 +50,9 @@ ESCALATE_TEXT = {
     "inappropriate": "Mình xin phép tiếp tục bài giảng nhé.",
 }
 
+# Câu robot nói khi gọi LLM bị lỗi
+FALLBACK_TEXT = "Mình chưa trả lời được ngay lúc này. Mình ghi lại để giảng viên giải đáp sau nhé."
+
 # Bắt kiểu trích dẫn "[trang 7]" / "(slide 7)" để xoá đi — máy đọc sẽ đọc thành "ngoặc vuông trang bảy"
 CITATION = re.compile(r"\s*[\[(](?:slide|trang)\s*\d+[\])]", re.I)
 
@@ -69,9 +71,6 @@ class ChatEngine:
         model    tên model LLM
         log_dir  thư mục ghi lại prompt và câu LLM trả về
         """
-        # Nội dung bộ slide — chỉ dùng để lấy tên trang khi gợi ý "xem trang 3 – ..."
-        self.doc = ParsedDocument.load(PARSER_OUTPUT / doc_id / "document.json")
-
         # Hai kho tìm kiếm. Kho vector (Chroma) đã nạp sẵn ở offline, chứa cả chữ lẫn metadata;
         # bảng BM25 dựng trong RAM từ chính các bản ghi đó, nên hai nhánh tìm trên CÙNG một bản chữ.
         self.doc_id = doc_id
@@ -123,13 +122,13 @@ class ChatEngine:
         tag = f"qa_{int(time.time() * 1000)}"
         out.log_path = self.llm.log_dir / f"{tag}.json"
 
-        # Bước 3: gọi LLM một lần. Lỗi thì vẫn chỉ cho người nghe trang liên quan
+        # Bước 3: gọi LLM một lần. Lỗi thì nói câu chờ soạn sẵn
         t1 = time.perf_counter()
         try:
             raw = await self.llm.chat([{"role": "user", "content": out.prompt}], tag=tag)
         except RuntimeError as e:
             out.ms["llm"] = _ms(t1)
-            out.reply = self._fallback(out.hits, f"llm_error: {str(e)[:160]}")
+            out.reply = self._fallback(f"llm_error: {str(e)[:160]}")
             return out
         out.ms["llm"] = _ms(t1)
         out.raw = raw
@@ -244,30 +243,14 @@ class ChatEngine:
         """
         return Reply(action="escalate", text=ESCALATE_TEXT[reason], note=note or reason)
 
-    def _fallback(self, hits: list[SearchHit], note: str) -> Reply:
+    def _fallback(self, note: str) -> Reply:
         """Câu robot nói khi GỌI LLM BỊ LỖI (mạng rớt, quá giờ...) — không có câu trả lời của LLM.
 
-        Không im lặng: báo chưa trả lời được, và chỉ người nghe sang 2 trang tìm kiếm xếp đầu
-        (việc tìm vẫn chạy được, chỉ LLM hỏng).
-        Vd: "Mình chưa trả lời được ngay lúc này. Nội dung liên quan nằm ở trang 12 – PHÚC LỢI KHÁC,
-             trang 7 – CÁCH TÍNH LÀM THÊM GIỜ."
+        Không im lặng: nói một câu chung soạn sẵn, để người thật giải đáp sau.
 
-        hits  các trang tìm được, trang tốt nhất đứng đầu
         note  lý do lỗi, để xem lại (robot KHÔNG nói ra)
         """
-        pages = [h.page_no for h in hits[:2]]
-        text = "Mình chưa trả lời được ngay lúc này."
-        if pages:
-            text += f" Nội dung liên quan nằm ở {self._list_pages(pages)}."
-        return Reply(action="escalate", text=text, candidates=pages, via="fallback", note=note)
-
-    def _list_pages(self, pages: list[int]) -> str:
-        """Đổi danh sách số trang thành câu đọc được, kèm tên từng trang.
-
-        Vd: [12, 7] -> "trang 12 – PHÚC LỢI KHÁC, trang 7 – CÁCH TÍNH LÀM THÊM GIỜ"
-        Tên trang = tiêu đề trang; trang không có tiêu đề thì lấy dòng chữ đầu tiên (ParsedPage.label).
-        """
-        return ", ".join(f"trang {p} – {self.doc.page(p).label}" for p in pages)
+        return Reply(action="escalate", text=FALLBACK_TEXT, via="fallback", note=note)
 
 
 def _ctx(hits: list[SearchHit]) -> str:

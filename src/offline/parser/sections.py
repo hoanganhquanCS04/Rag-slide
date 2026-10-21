@@ -55,9 +55,11 @@ def detect_sections(doc: ParsedDocument) -> tuple[list[SectionSpan], list[str]]:
     mục lục; không trang nào đạt -> 0 chương.
     """
     titled = [(p.page_no, _key(p.title)) for p in doc.pages if p.title]
+    breakpoint()
     for toc in doc.pages[:TOC_MAX_PAGE]:
         items = [it for b in toc.paragraphs if b.role in ("list", "body") for it in _toc_items(b.lines)]
         items = [ln for ln in items if len(_key(ln)) >= 3]
+        breakpoint()
         if len(items) < 3:
             continue
 
@@ -87,6 +89,7 @@ def detect_sections(doc: ParsedDocument) -> tuple[list[SectionSpan], list[str]]:
             )
             for i, (it, no) in enumerate(starts)
         ]
+
         return sections, notes
     return [], [f"muc luc: khong tim thay trong {TOC_MAX_PAGE} trang dau (hoac khop < 60%) -> 0 chuong"]
 
