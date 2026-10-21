@@ -20,7 +20,7 @@ if __package__ in (None, ""):  # chạy thẳng file: THAY src/offline/parser/ b
 
 from offline.parser.variants.docling import DoclingParser
 from utils.config import PARSER_OUTPUT, console_setup
-from offline.parser.enrich import enrich, page_pdf
+from offline.parser.base import page_pdf
 from models.parsed_document import ParsedDocument, slugify_doc_id
 
 log = logging.getLogger("parser")
@@ -30,8 +30,7 @@ def parse_file(src: Path, *, model: str, redo: bool = False,
                table_pages: set[int] | None = None) -> int:
     """Parse một file và ghi `document.json`.
 
-    Cách làm: tìm file PDF để vẽ trang -> DoclingParser chạy ① ②b ② -> ghi file -> tính chương
-    (enrich) để in báo cáo.
+    Cách làm: tìm file PDF để vẽ trang -> DoclingParser chạy ① ②b ② + dò chương -> ghi file -> in báo cáo.
     """
     if not src.exists():
         raise SystemExit(f"khong thay file: {src}")
@@ -41,7 +40,7 @@ def parse_file(src: Path, *, model: str, redo: bool = False,
     p = DoclingParser(model, PARSER_OUTPUT / slugify_doc_id(src.stem))
     doc = p.run(src, pdf, redo=redo, table_pages=table_pages)
     p.save(doc)
-    report(enrich(doc))      # chương không nằm trong document.json — tính lại để in
+    report(doc)
     return 0
 
 

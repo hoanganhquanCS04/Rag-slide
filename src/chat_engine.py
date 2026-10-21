@@ -30,7 +30,6 @@ from components.embedders.factory import create_embedder
 from models.kb_chunk import SearchHit
 from models.parsed_document import ParsedDocument
 from models.runtime import Answer, Reply, RuntimeConfig
-from offline.parser.enrich import enrich
 from utils.config import MODEL_ID, PARSER_OUTPUT, PROMPTS_DIR
 from utils.ensemble_search import POOL, ensemble_search
 from utils.filters import Hit, Where
@@ -71,7 +70,7 @@ class ChatEngine:
         log_dir  thư mục ghi lại prompt và câu LLM trả về
         """
         # Nội dung bộ slide — chỉ dùng để lấy tên trang khi gợi ý "xem trang 3 – ..."
-        self.doc = enrich(ParsedDocument.load(PARSER_OUTPUT / doc_id / "document.json"))
+        self.doc = ParsedDocument.load(PARSER_OUTPUT / doc_id / "document.json")
 
         # Hai kho tìm kiếm. Kho vector (Chroma) đã nạp sẵn ở offline, chứa cả chữ lẫn metadata;
         # bảng BM25 dựng trong RAM từ chính các bản ghi đó, nên hai nhánh tìm trên CÙNG một bản chữ.

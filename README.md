@@ -40,7 +40,7 @@ Số hiện tại (2026-10-02), hai deck đang làm:
 data/raw/<file>.pdf
    │ ① docling VlmPipeline: VLM đọc từng trang — bố cục + chữ        API + cache
    │   + bảng (HTML) + mô tả ảnh          (raw -> logs/vlm_pipeline/)
-   │ ③ link + chương + cờ (enrich, mỗi lần nạp)                        CPU
+   │ ③ bỏ khối rỗng + chương từ mục lục (ghi luôn vào file)          CPU
    ▼
 src/output/parser/<ten>/document.json      ParsedDocument — nguồn của mọi bước sau
    │ ④a chunk                                                        miễn phí
@@ -152,7 +152,7 @@ src/
 │   ├── vectordb/      kho vector: chroma (VECTOR_DB)
 │   └── keyword_search.py   BM25 trong RAM, dựng từ bản ghi của kho vector
 ├── offline/         CHUẨN BỊ DỮ LIỆU, chạy một lần, mỗi bước một cli.py
-│   ├── parser/        S0 — file gốc -> ParsedDocument   cli.py (parse) · enrich (chương)
+│   ├── parser/        S0 — file gốc -> ParsedDocument   cli.py (parse) · sections (chương)
 │   ├── chunker/       S5 — ParsedDocument -> chunk -> nhúng -> ghi thẳng Chroma
 │   ├── embedder/      S5 — cli.py nhúng chunks + nạp kho
 │   └── scenario/      S4 kịch bản

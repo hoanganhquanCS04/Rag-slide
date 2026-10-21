@@ -3,7 +3,7 @@
 Để làm gì: phần dùng chung cho mọi chunker — gắn tiền tố, dựng KBChunk, gom cả deck.
 Không ghi file: `cli.py` nhúng rồi ghi thẳng ChunkSet vào kho vector.
 Chunker cụ thể chỉ phải viết `chunk_page`.
-Cách làm: đầu vào là document.json đã `enrich()`; trang chuyển chương được đánh dấu
+Cách làm: đầu vào là document.json (đã có chương); trang chuyển chương được đánh dấu
 `section_divider` để lọc lúc tìm (không xoá).
 """
 

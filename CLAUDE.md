@@ -324,7 +324,7 @@ Spec đầy đủ: [docs/spec/scenario.md](docs/spec/scenario.md).
   theo trang. Đo bằng bộ câu hỏi có nhãn `data/eval/<doc_id>.queries.json` (`src/evaluation/eval.py`)
   và quét tham số RRF (`scripts/tune.sh`).
 - **`deck_map.txt` BỎ (2026-10-13)** — nó chỉ viết lại `doc.sections` (dò ở S0, `parser/sections.py`)
-  thành chữ cho prompt runtime. Chương / khoảng trang vẫn có trong bộ nhớ sau `enrich()`. Prompt runtime
+  thành chữ cho prompt runtime. Chương / khoảng trang vẫn có trong `document.json` (`sections`). Prompt runtime
   không còn danh sách chương: câu hỏi cấu trúc ("bài gồm những phần nào") phải tìm ra trang mục lục —
   đo được: hỏi "nội dung chính gồm những phần nào" ra p2 hạng 1 và trả lời đủ; hỏi chung chung "bài này
   gồm những phần nào" KHÔNG ra p2 → từ chối. Hỏi khoảng trang của chương / tổng số trang → từ chối.
@@ -470,7 +470,7 @@ src/components/      LINH KIỆN: làm một việc chung, không biết gì v�
   keyword_search.py    BM25Index — bảng BM25 trong RAM, 1 cách làm nên 1 file (không base/factory)
 src/offline/         CHUẨN BỊ DỮ LIỆU trước, chạy 1 lần, lưu ra file — mỗi bước có cli.py
   parser/              S0 — cli.py · base.py · variants/docling.py (biến thể DUY NHẤT, cli gọi thẳng) · vlm.py ·
-                       enrich.py (chương, bỏ khối rỗng) · sections · pictures (②) · tables (②b)
+                       sections (chương) · pictures (②) · tables (②b) — `enrich.py` BỎ 2026-10-21
   chunker/             S5 — cli.py (chunk -> nhúng -> ghi Chroma; `--dry-run` chỉ xem) · factory.py · base.py ·
                        variants/page.py
   scenario/            S4 — cli.py · generate.py · validate.py
@@ -514,8 +514,8 @@ src/output/
 ├── parser/<doc_id>/              S0 — python src/offline/parser/cli.py <file>  (① + ②b + ②)
 │   ├── docling_vlmpipeline.json  ① DoclingDocument VlmPipeline (cache — có rồi thì không gọi VLM)
 │   ├── tables.json · pictures.json   ②b chép bảng · ② xét ảnh (cache theo bảng / trang)
-│   ├── document.json             ParsedDocument — chương KHÔNG có trong file:
-│   │                             KB, S4, runtime gọi `offline.parser.enrich.enrich()` lúc nạp
+│   ├── document.json             ParsedDocument BẢN CUỐI — có cả `sections` + `section_id` (dò lúc parse),
+│   │                             khối rỗng đã bỏ. KB, S4, runtime chỉ `ParsedDocument.load`, không tính lại
 │   └── boxes/                    ảnh khung từng trang (scripts/try_docling_gemma.py), chỉ để soi
 ├── embedders/cache/<model>/<sha1>.npy   DÙNG CHUNG mọi deck — cache nhúng theo hash chữ (không gọi lại API)
 ├── vectordb/chroma/              DÙNG CHUNG — kho Chroma: MỘT collection kb__<model_id> cho mọi bài,

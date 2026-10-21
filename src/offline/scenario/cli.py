@@ -25,7 +25,6 @@ if __package__ in (None, ""):
 
 from utils.config import ROOT, SCENARIO_OUTPUT, console_setup
 from utils.llm import DEFAULT_MODEL
-from offline.parser.enrich import enrich
 from models.parsed_document import ParsedDocument
 from offline.scenario.generate import load_prompt, render_prompt, run_deck
 from models.scenario import Scenario, SlideScript
@@ -87,7 +86,7 @@ def report(sc: Scenario) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Đọc tham số, nạp + enrich document.json và kịch bản cũ (nếu có), rồi làm theo chế độ.
+    """Đọc tham số, nạp document.json và kịch bản cũ (nếu có), rồi làm theo chế độ.
 
     Cách làm: `--md` chỉ ghi lại .md; `--show` chỉ in; `--dry-run` chỉ in prompt; còn lại thì viết
     kịch bản (lưu dần sau mỗi trang), in kết quả, trả mã 3 nếu có trang cờ đỏ.
@@ -110,7 +109,7 @@ def main(argv: list[str] | None = None) -> int:
     console_setup()
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
-    doc = enrich(ParsedDocument.load(args.parsed))
+    doc = ParsedDocument.load(args.parsed)
     out = Path(args.out) if args.out else SCENARIO_OUTPUT / doc.doc_id / "scenario.json"
     pron = Pronunciation.load(args.pron)
     pages = set(args.page) if args.page else None

@@ -160,7 +160,7 @@ API nhúng lỗi lúc chạy → tự lùi về chỉ BM25.
 ### ~~⑤ `deck_map.txt`~~ — BỎ 2026-10-13
 
 Chỉ viết lại `doc.sections` thành chữ cho prompt runtime. Chương vẫn dò ở S0 (`parser/sections.py`)
-và có trong bộ nhớ sau `enrich()`; prompt runtime không còn danh sách chương — câu hỏi cấu trúc phải
+và ghi trong `document.json` (`sections`); prompt runtime không còn danh sách chương — câu hỏi cấu trúc phải
 tìm ra trang mục lục (xem CLAUDE.md §5 S6a).
 
 ### S4 `Scenario` — robot NÓI gì

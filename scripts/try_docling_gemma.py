@@ -30,7 +30,7 @@ from PIL import Image, ImageDraw, ImageFont  # noqa: E402
 
 from offline.parser.cli import parse_file  # noqa: E402
 from utils.config import PARSER_OUTPUT  # noqa: E402
-from offline.parser.enrich import enrich, page_pdf  # noqa: E402
+from offline.parser.base import page_pdf  # noqa: E402
 from models.parsed_document import ParsedDocument, ParsedPage, ParsedParagraph, slugify_doc_id  # noqa: E402
 
 load_dotenv(ROOT / ".env")     # VLM_MODEL làm mặc định cho --model bên dưới
@@ -98,7 +98,7 @@ def main() -> int:
     code = 0
     if not args.draw_only:                                   # = parser/cli.py <file> --redo
         code = parse_file(src, redo=True, model=args.model)
-    doc = enrich(ParsedDocument.load(d / "document.json"))
+    doc = ParsedDocument.load(d / "document.json")
 
     out = Path(args.out) / doc_id / "boxes"
     (out / "pages").mkdir(parents=True, exist_ok=True)

@@ -201,7 +201,7 @@ VÀO  data/raw/<ten>.pdf
   ├─> [② post_processing]  parser/base.py
   │              ②b tables.py chép lại bảng · ② pictures.py xét ảnh (TRANG_TRI / SO_DO / ANH_CO_CHU)
   │
-  ├─> parser.save -> document.json.  Phần dưới: enrich() lúc KB / S4 / runtime nạp
+  ├─> bỏ khối rỗng + dò chương (sections.py), rồi parser.save -> document.json (bản cuối)
   │
   ├─> [link]         >= nửa số dòng là URL in ra chữ -> role "links", robot không đọc địa chỉ
   │                  KHÔNG đọc text layer / annotation PDF — mọi chữ là vlm

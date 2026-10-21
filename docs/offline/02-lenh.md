@@ -75,7 +75,7 @@ Bên trong `parser\cli.py`:
 | Bước | Ra | Tốn | Bỏ qua khi |
 |---|---|---|---|
 | ① docling VlmPipeline: VLM đọc cả trang — bố cục + chữ + bảng (HTML) + mô tả ảnh | `docling_vlmpipeline.json` (raw: `logs\vlm_pipeline\<ten>\`) | 1 lần gọi/trang | đã có file (trừ `--redo`) |
-| ③ link + chương + cờ (enrich) | trong bộ nhớ | không | không bao giờ — tính lại mỗi lần nạp |
+| ③ bỏ khối rỗng + chương (sections.py) | ghi vào `document.json` | không | không bao giờ — chạy mỗi lần parse |
 
 Ghi chú:
 

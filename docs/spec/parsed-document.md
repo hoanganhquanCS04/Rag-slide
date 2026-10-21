@@ -31,8 +31,7 @@ ParsedDocument
 ├── doc_id
 ├── source      {path, sha256}
 ├── parser      {docling_version, vlm_model, picture_area_threshold}
-├── sections[]  {id, title, pages: [đầu, cuối], source}   ← enrich(), không ghi file
-├── flags[]     {kind, severity, page_no, block_id, detail}           ← enrich(), không ghi file
+├── sections[]  {id, title, pages: [đầu, cuối], source}   ← dò lúc parse (sections.py), GHI vào file
 └── pages[]
      ├── page_no · title · section_id · page_hash
      └── blocks[]        NỘI DUNG, theo thứ tự đọc
@@ -75,7 +74,7 @@ document.json cũ còn khoá này thì nạp vẫn được, khoá bị bỏ qua
 
 **`id`**: `p<trang>.b<số>` (vd `p007.b04` = trang 7, khối thứ 4 theo thứ tự đọc của bước ①),
 ổn định — chunk và câu kịch bản trỏ vào đây. Id KHÔNG đánh lại khi bỏ khối (ảnh trang trí ở ②, khối
-rỗng ở enrich) → số có thể nhảy (`b01`, `b03`, `b04`…).
+rỗng ở cuối bước parse) → số có thể nhảy (`b01`, `b03`, `b04`…).
 
 **Trường riêng theo `kind`:**
 
@@ -244,13 +243,11 @@ lúc parse; phản hồi thô ở `logs/vlm_pipeline/<doc_id>/pNNN.txt`.
 parser.run(src, pdf)                       parser/base.py
   ① parse_layout     VLM -> DoclingDocument -> ParsedDocument (thứ tự đọc docling, toạ độ [0,1], bỏ header/footer)
   ② post_processing  ②b tables.py chép lại bảng · ② pictures.py xét ảnh -> áp vào doc
-parser.save(doc)  -> document.json
-
-enrich(ParsedDocument.load(...))           parser/enrich.py — KB / S4 / runtime tự gọi khi nạp
-  sections.py → bỏ block rỗng
+                     -> bỏ block rỗng -> sections.py dò chương
+parser.save(doc)  -> document.json   (BẢN CUỐI: các bước sau chỉ `ParsedDocument.load`)
 ```
 
-- `enrich` không ghi lại file: kết quả chỉ nằm trong bộ nhớ, tính lại mỗi lần nạp.
+- Sửa luật dò chương: chạy lại `parser/cli.py` (trúng cache VLM, không tốn API) rồi chạy lại chunker.
 
 ---
 

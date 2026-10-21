@@ -368,7 +368,7 @@ class ParserInfo(_Base):
 class ParsedDocument(_Base):
     """Cả deck: doc_id, file gốc, thông tin parser, chương và các trang.
 
-    Cách làm: `document.json` chỉ chứa các trang; chương do `parser.enrich` tính lúc nạp.
+    Cách làm: `document.json` là bản cuối cùng — có cả chương (dò ở bước parse) lẫn các trang.
     """
     _ORDER: ClassVar[tuple[str, ...]] = ("doc_id", "source", "parser", "sections", "pages")
 

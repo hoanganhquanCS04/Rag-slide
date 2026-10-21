@@ -29,7 +29,6 @@ from components.vectordb.factory import create_store
 from offline.chunker.base import MAX_TOKENS
 from offline.chunker.factory import CHUNKERS, create_chunker
 from models.kb_chunk import ChunkSet
-from offline.parser.enrich import enrich
 from utils.config import MODEL_ID
 from models.parsed_document import ParsedDocument
 
@@ -74,7 +73,7 @@ def stats(cs: ChunkSet) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Đọc tham số, nạp + enrich document.json, cắt chunk, in kết quả, rồi nhúng và ghi vào kho vector."""
+    """Đọc tham số, nạp document.json, cắt chunk, in kết quả, rồi nhúng và ghi vào kho vector."""
     ap = argparse.ArgumentParser(prog="chunker", description=__doc__.splitlines()[0])
     ap.add_argument("parsed", type=Path, help="src/output/parser/<ten>/document.json")
     ap.add_argument("--chunker", default="page", choices=CHUNKERS)
@@ -91,7 +90,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.parsed.exists():
         raise SystemExit(f"khong thay file: {args.parsed}")
-    doc = enrich(ParsedDocument.load(args.parsed))  
+    doc = ParsedDocument.load(args.parsed)
 
     cs = create_chunker(args.chunker, args.max_tokens).run(doc)
 
